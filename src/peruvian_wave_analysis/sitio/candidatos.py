@@ -3,11 +3,13 @@
 Distancias en una proyección local equirrectangular centrada en la coordenada de
 referencia: con recuadros de pocos grados el error es menor al 1 %.
 
-Criterios aplicados (analysis/04 §5.2, fijados antes de mirar el mapa):
-1. nodo válido de WAVERYS con celda sin tierra;
+Criterios (analysis/04 §5.2 y ADR-0010), en orden:
+1. nodo válido de WAVERYS con celda sin ningún píxel de tierra;
+2. celda fuera de toda zona de exclusión ampliada en ``resguardo_km``;
 3. ocho vecinas válidas;
-5. entre los que cumplen, el más cercano a la isóbata principal.
-Los criterios 2 y 4 (zonas de exclusión y colisión de usos) no se evalúan aquí.
+4. colisiones de uso: se declaran, no descartan;
+5. orden por distancia a la isóbata principal; desempate por distancia a la referencia.
+Se numeran como candidatos hasta ``n_candidatos`` nodos.
 """
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ from scipy.spatial import cKDTree
 
 from .config import ConfigMapa
 from .waverys import Malla
+from .zonas import Evaluador, Zonas
 
 RADIO_TIERRA_KM = 6371.0088
 
@@ -92,8 +95,13 @@ def _vecinas_validas(valido: np.ndarray, i: int, j: int) -> tuple[int, int]:
     return n_validas, n_presentes
 
 
-def tabla(cfg: ConfigMapa, elev: xr.DataArray, malla: Malla) -> tuple[pd.DataFrame, dict[float, list[np.ndarray]]]:
-    """Tabla de nodos dentro del recuadro y diccionario de isolíneas por profundidad (incluye la costa, 0 m)."""
+def tabla(
+    cfg: ConfigMapa, elev: xr.DataArray, malla: Malla, zonas: Zonas | None = None
+) -> tuple[pd.DataFrame, dict[float, list[np.ndarray]]]:
+    """Tabla de nodos dentro del recuadro y diccionario de isolíneas por profundidad (incluye la costa, 0 m).
+
+    Sin ``zonas`` las columnas de zonas quedan vacías y el criterio 2 no se aplica (``zonas_evaluadas`` = False).
+    """
     lon0, lat0 = cfg.longitud, cfg.latitud
     lineas = {0.0: isolineas(elev, 0.0)}
     for d in cfg.isobatas:
@@ -101,6 +109,7 @@ def tabla(cfg: ConfigMapa, elev: xr.DataArray, malla: Malla) -> tuple[pd.DataFra
         if not lineas[d]:
             warnings.warn(f"La isóbata de {d:g} m no aparece en el recuadro con esta batimetría.", stacklevel=2)
 
+    evaluador = Evaluador(zonas, lon0, lat0, cfg.resguardo_km) if zonas is not None else None
     o, e, s, n = cfg.recuadro
     tol = 1e-6
     filas = []
@@ -112,6 +121,12 @@ def tabla(cfg: ConfigMapa, elev: xr.DataArray, malla: Malla) -> tuple[pd.DataFra
                 continue
             pmin, pmed, ftierra = _estadisticas_celda(elev, la, lo, malla.paso)
             nv, npres = _vecinas_validas(malla.valido, i, j)
+            if evaluador is not None:
+                ev = evaluador.evaluar(la, lo, malla.paso)
+                z = {"excluido_por_zona": ev.excluido, "zonas_exclusion": "; ".join(ev.zonas_exclusion),
+                     "zonas_colision": "; ".join(ev.zonas_colision), "dist_exclusion_km": ev.dist_exclusion_km}
+            else:
+                z = {"excluido_por_zona": False, "zonas_exclusion": "", "zonas_colision": "", "dist_exclusion_km": np.nan}
             filas.append({
                 "lat": round(float(la), 4),
                 "lon": round(float(lo), 4),
@@ -122,6 +137,7 @@ def tabla(cfg: ConfigMapa, elev: xr.DataArray, malla: Malla) -> tuple[pd.DataFra
                 "frac_tierra_celda": ftierra,
                 "vecinas_validas": nv,
                 "vecinas_presentes": npres,
+                **z,
             })
     df = pd.DataFrame(filas)
     if df.empty:
@@ -134,12 +150,26 @@ def tabla(cfg: ConfigMapa, elev: xr.DataArray, malla: Malla) -> tuple[pd.DataFra
     df["dist_referencia_km"] = np.hypot(xy[:, 0], xy[:, 1])
 
     principal = f"dist_iso_{cfg.isobata_principal:g}m_km"
-    df["cumple_criterios_basicos"] = (
-        df["valido"] & (df["frac_tierra_celda"] == 0) & (df["vecinas_validas"] == 8) & (df["vecinas_presentes"] == 8)
-    )
+    df["zonas_evaluadas"] = zonas is not None
+    df["motivo_descarte"] = [_motivo(f) for f in df.itertuples()]
+    df["cumple_criterios"] = df["motivo_descarte"] == ""
     df = df.sort_values(
-        ["cumple_criterios_basicos", principal, "dist_referencia_km"], ascending=[False, True, True], na_position="last"
+        ["cumple_criterios", principal, "dist_referencia_km"], ascending=[False, True, True], na_position="last"
     ).reset_index(drop=True)
-    orden = np.where(df["cumple_criterios_basicos"], np.cumsum(df["cumple_criterios_basicos"]), 0)
-    df.insert(0, "candidato", pd.array(np.where(orden > 0, orden, pd.NA), dtype="Int64"))
+    orden = np.cumsum(df["cumple_criterios"].to_numpy())
+    numerado = df["cumple_criterios"].to_numpy() & (orden <= cfg.n_candidatos)
+    df.insert(0, "candidato", pd.array(np.where(numerado, orden, pd.NA), dtype="Int64"))
     return df, lineas
+
+
+def _motivo(f) -> str:
+    """Primer criterio que el nodo no cumple, en el orden de ADR-0010; vacío si cumple todos."""
+    if not f.valido:
+        return "1: nodo sin dato (tierra en WAVERYS)"
+    if not f.frac_tierra_celda == 0:
+        return "1: celda con tierra"
+    if f.excluido_por_zona:
+        return "2: zona de exclusión (con resguardo)"
+    if f.vecinas_validas < 8 or f.vecinas_presentes < 8:
+        return "3: vecinas sin dato"
+    return ""

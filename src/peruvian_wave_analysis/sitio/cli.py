@@ -1,9 +1,15 @@
-"""Línea de comandos del mapa de selección de sitio.
+"""Línea de comandos del mapa de sitio (ADR-0011).
+
+- ``mapa-sitio``: mapa exploratorio (descarga GMRT, malla de WAVERYS y zonas).
+- ``registrar-gebco``: registra el recorte de GEBCO descargado a mano.
+- ``mapa-sitio-final``: mapa definitivo con GEBCO e insumos ya guardados, sin descargas.
 
 Ejemplos::
 
-    mapa-sitio --config config/mapa_sitio.ejemplo.yaml
     mapa-sitio --nombre marcona --lat -15.4 --lon -75.3 --isobatas 200 100 50
+    registrar-gebco --archivo C:/Descargas/gebco_2025_recorte.nc --version GEBCO_2025
+    mapa-sitio-final --exploratorio <WAVE-DATA>/interim/.../metadatos.json \\
+        --gebco <WAVE-DATA>/raw/batimetria/gebco/gebco_2025_recorte.nc --nodo-lat -15.6 --nodo-lon -75.2
 """
 from __future__ import annotations
 
@@ -14,9 +20,27 @@ import matplotlib
 
 from .config import ConfigMapa
 
+_COLUMNAS = ["candidato", "lat", "lon", "prof_nodo_m", "prof_media_celda_m", "dist_costa_km", "zonas_colision"]
 
-def _argumentos(argv=None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(prog="mapa-sitio", description="Mapa de isóbatas y malla de WAVERYS alrededor de una coordenada.")
+
+def _imprimir(res, cfg: ConfigMapa) -> None:
+    import pandas as pd
+
+    cols = _COLUMNAS[:5] + [f"dist_iso_{cfg.isobata_principal:g}m_km"] + _COLUMNAS[5:]
+    top = res.tabla[res.tabla["candidato"].notna()]
+    with pd.option_context("display.max_colwidth", 60, "display.width", 200):
+        print(top[cols].to_string(index=False) if len(top) else "Ningún nodo cumple los criterios.")
+    print("\nMotivos de descarte:")
+    print(res.tabla["motivo_descarte"].replace("", "cumple").value_counts().to_string())
+    if res.zonas is not None and res.zonas.no_evaluadas:
+        print(f"\nCapas NO evaluadas: {', '.join(res.zonas.no_evaluadas)}")
+    print()
+    for nombre, ruta in res.salidas.items():
+        print(f"{nombre}: {ruta}")
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(prog="mapa-sitio", description="Mapa exploratorio: isóbatas, malla de WAVERYS y zonas alrededor de una coordenada.")
     p.add_argument("--config", help="Archivo YAML de configuración. Los demás argumentos lo sobrescriben.")
     p.add_argument("--nombre", help="Nombre corto del sitio (minúsculas; se usa en las rutas de salida).")
     p.add_argument("--lat", type=float, help="Latitud de referencia (°, negativa al sur).")
@@ -24,26 +48,25 @@ def _argumentos(argv=None) -> argparse.Namespace:
     p.add_argument("--isobatas", type=float, nargs="+", help="Profundidades de las isóbatas (m). Por defecto 200 100 50.")
     p.add_argument("--isobata-principal", type=float, help="Isóbata con la que se ordenan los candidatos.")
     p.add_argument("--semiancho", type=float, help="Semiancho del recuadro (°). Por defecto 1.")
-    p.add_argument("--n-candidatos", type=int, help="Candidatos numerados en el mapa. Por defecto 10.")
+    p.add_argument("--n-candidatos", type=int, help="Candidatos numerados (ADR-0010: 3).")
+    p.add_argument("--resguardo-km", type=float, help="Resguardo alrededor de las zonas de exclusión (ADR-0010: 1 km).")
+    p.add_argument("--sin-zonas", action="store_true", help="No descarga zonas (el mapa lo declara).")
     p.add_argument("--datos", help="Raíz de WAVE-DATA (si no, variable de entorno WAVE_DATA_DIR).")
     p.add_argument("--mostrar", action="store_true", help="Abre la figura en una ventana además de guardarla.")
-    return p.parse_args(argv)
+    a = p.parse_args(argv)
 
-
-def main(argv=None) -> int:
-    a = _argumentos(argv)
-    base = {}
-    if a.config:
-        base = ConfigMapa.desde_yaml(a.config).como_dict()
+    base = ConfigMapa.desde_yaml(a.config).como_dict() if a.config else {}
     for clave, valor in {
         "nombre": a.nombre, "latitud": a.lat, "longitud": a.lon, "isobatas": a.isobatas,
         "isobata_principal": a.isobata_principal, "semiancho_grados": a.semiancho,
-        "n_candidatos": a.n_candidatos, "directorio_datos": a.datos,
+        "n_candidatos": a.n_candidatos, "resguardo_km": a.resguardo_km, "directorio_datos": a.datos,
     }.items():
         if valor is not None:
             base[clave] = valor
     if a.isobatas is not None and a.isobata_principal is None:
         base["isobata_principal"] = None
+    if a.sin_zonas:
+        base["zonas"] = False
     faltan = [k for k in ("nombre", "latitud", "longitud") if k not in base]
     if faltan:
         print(f"Faltan argumentos: {', '.join(faltan)} (o usa --config).", file=sys.stderr)
@@ -54,14 +77,51 @@ def main(argv=None) -> int:
 
     cfg = ConfigMapa(**base)
     res = generar_mapa(cfg)
-    cols = ["candidato", "lat", "lon", "prof_nodo_m", "prof_media_celda_m",
-            f"dist_iso_{cfg.isobata_principal:g}m_km", "dist_costa_km"]
-    print(res.tabla[res.tabla["candidato"].notna()].head(10)[cols].to_string(index=False))
-    for nombre, ruta in res.salidas.items():
-        print(f"{nombre}: {ruta}")
+    _imprimir(res, cfg)
+    o, e, s, n = res.recuadro_gebco
+    print(f"\nMAPA EXPLORATORIO. Para el mapa definitivo, descargar GEBCO en https://download.gebco.net/ "
+          f"(NetCDF) con N {n:.1f}, S {s:.1f}, O {o:.1f}, E {e:.1f}; ver {res.salidas['siguiente_paso']}")
     if a.mostrar:
         import matplotlib.pyplot as plt
         plt.show()
+    return 0
+
+
+def main_registrar_gebco(argv=None) -> int:
+    p = argparse.ArgumentParser(prog="registrar-gebco", description="Copia a WAVE-DATA/raw y registra un recorte de GEBCO descargado a mano.")
+    p.add_argument("--archivo", required=True, help="NetCDF descargado de https://download.gebco.net/.")
+    p.add_argument("--version", required=True, help="Versión de la malla, p. ej. GEBCO_2025.")
+    p.add_argument("--datos", help="Raíz de WAVE-DATA (si no, WAVE_DATA_DIR).")
+    a = p.parse_args(argv)
+    from .. import rutas
+    from .gebco import registrar
+
+    ruta, entrada = registrar(a.archivo, rutas.directorio_datos(a.datos), a.version)
+    print(f"Registrado: {ruta}\nsha256: {entrada['sha256']}")
+    print("Recordatorio: añadir la versión de GEBCO a WAVE-REPO-VAULT/fuentes-de-datos.md.")
+    return 0
+
+
+def main_final(argv=None) -> int:
+    p = argparse.ArgumentParser(prog="mapa-sitio-final", description="Mapa definitivo con GEBCO e insumos ya guardados (sin descargas).")
+    p.add_argument("--exploratorio", required=True, help="metadatos.json de la corrida exploratoria.")
+    p.add_argument("--gebco", required=True, help="Recorte de GEBCO dentro de WAVE-DATA/raw (registrar-gebco).")
+    p.add_argument("--nodo-lat", type=float, required=True, help="Latitud del nodo elegido.")
+    p.add_argument("--nodo-lon", type=float, required=True, help="Longitud del nodo elegido.")
+    p.add_argument("--nombre", help="Nombre de salida (por defecto el de la corrida exploratoria).")
+    p.add_argument("--datos", help="Raíz de WAVE-DATA (si no, la de la corrida exploratoria o WAVE_DATA_DIR).")
+    a = p.parse_args(argv)
+    matplotlib.use("Agg")
+    from .final import ConfigFinal, ErrorGate, generar_mapa_final
+
+    try:
+        res = generar_mapa_final(ConfigFinal(exploratorio=a.exploratorio, gebco=a.gebco, nodo_lat=a.nodo_lat,
+                                             nodo_lon=a.nodo_lon, nombre=a.nombre, directorio_datos=a.datos))
+    except ErrorGate as exc:
+        print(f"GATE FALLIDO: {exc}", file=sys.stderr)
+        return 1
+    for nombre, ruta in res.salidas.items():
+        print(f"{nombre}: {ruta}")
     return 0
 
 

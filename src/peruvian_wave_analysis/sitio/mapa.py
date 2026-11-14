@@ -1,4 +1,4 @@
-"""Mapa de selección de sitio: batimetría, isóbatas configurables y malla de WAVERYS.
+"""Mapa exploratorio de selección de sitio (ADR-0011): batimetría GMRT, isóbatas, malla de WAVERYS y zonas.
 
 Uso mínimo::
 
@@ -6,12 +6,14 @@ Uso mínimo::
     r = generar_mapa(ConfigMapa(nombre="marcona", latitud=-15.4, longitud=-75.3))
     r.tabla.head()
 
-Salidas en ``WAVE-DATA/interim/F01-sitio-y-fuentes/mapa-sitio/<nombre>/``:
-``mapa.png``, ``candidatos.csv`` y ``metadatos.json`` (configuración, origen y hash de los insumos).
+Salidas en ``WAVE-DATA/interim/F01-sitio-y-fuentes/mapa-sitio/<nombre>/``: ``mapa.png``,
+``candidatos.csv``, ``metadatos.json`` y ``siguiente_paso.md`` (qué recorte de GEBCO descargar
+para el mapa definitivo).
 """
 from __future__ import annotations
 
 import json
+import math
 import platform
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -24,14 +26,19 @@ import pandas as pd
 from matplotlib import patheffects
 from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch, PathPatch
+from matplotlib.path import Path as MplPath
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 from .. import __version__, estilo, rutas
-from . import batimetria, candidatos, waverys
+from . import batimetria, candidatos, waverys, zonas as zonas_mod
 from .config import ConfigMapa
 
 FASE = "F01-sitio-y-fuentes"
+URL_GEBCO = "https://download.gebco.net/"
 NIVELES_PROFUNDIDAD = [0, 25, 50, 100, 200, 500, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 11000]
+COLOR_EXCLUSION = "#d03b3b"  # estado crítico: la zona descarta
+COLOR_COLISION = "#52514e"  # tinta secundaria: trama neutra, no compite con las isóbatas
 _HALO = [patheffects.withStroke(linewidth=2.5, foreground="white")]
 
 
@@ -41,7 +48,9 @@ class ResultadoMapa:
     tabla: pd.DataFrame
     batimetria: batimetria.Batimetria
     malla: waverys.Malla
+    zonas: zonas_mod.Zonas | None
     salidas: dict[str, Path] = field(default_factory=dict)
+    recuadro_gebco: tuple[float, float, float, float] | None = None
 
 
 def _fmt_lon(v, _pos=None) -> str:
@@ -52,14 +61,19 @@ def _fmt_lat(v, _pos=None) -> str:
     return f"{abs(v):.1f}° {'S' if v < 0 else 'N'}"
 
 
+def recuadro_gebco(cfg: ConfigMapa) -> tuple[float, float, float, float]:
+    """Recuadro (oeste, este, sur, norte) a descargar de GEBCO: el de la batimetría, redondeado hacia afuera a 0.1°."""
+    o, e, s, n = batimetria.recuadro_con_margen(cfg)
+    return (math.floor(o * 10) / 10, math.ceil(e * 10) / 10, math.floor(s * 10) / 10, math.ceil(n * 10) / 10)
+
+
 def _barra_de_escala(ax, cfg: ConfigMapa) -> None:
     o, e, s, n = cfg.recuadro
-    ancho_km = (e - o) * 111.32 * np.cos(np.radians(cfg.latitud))
-    largo = min((5, 10, 20, 25, 50, 100, 200), key=lambda L: abs(L - ancho_km / 5))
-    largo_grados = largo / (111.32 * np.cos(np.radians(cfg.latitud)))
+    km_por_grado = 111.32 * np.cos(np.radians(cfg.latitud))
+    largo = min((5, 10, 20, 25, 50, 100, 200), key=lambda L: abs(L - (e - o) * km_por_grado / 5))
     x0, y0 = o + 0.05 * (e - o), s + 0.05 * (n - s)
-    ax.plot([x0, x0 + largo_grados], [y0, y0], color=estilo.TINTA, lw=3, solid_capstyle="butt", zorder=8)
-    ax.text(x0 + largo_grados / 2, y0 + 0.015 * (n - s), f"{largo} km", ha="center", va="bottom",
+    ax.plot([x0, x0 + largo / km_por_grado], [y0, y0], color=estilo.TINTA, lw=3, solid_capstyle="butt", zorder=8)
+    ax.text(x0 + largo / km_por_grado / 2, y0 + 0.015 * (n - s), f"{largo} km", ha="center", va="bottom",
             fontsize=8, color=estilo.TINTA, path_effects=_HALO, zorder=8)
 
 
@@ -69,7 +83,55 @@ def _flecha_norte(ax) -> None:
                 arrowprops=dict(arrowstyle="-|>", color=estilo.TINTA, lw=1.5), path_effects=_HALO, zorder=8)
 
 
-def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, tabla: pd.DataFrame):
+def _trayecto(geom) -> MplPath | None:
+    """Polígonos de shapely (con huecos) → un solo Path de matplotlib."""
+    caminos = []
+    for g in getattr(geom, "geoms", [geom]):
+        if g.geom_type == "Polygon":
+            for anillo in [g.exterior, *g.interiors]:
+                caminos.append(MplPath(np.asarray(anillo.coords)[:, :2], closed=True))
+        elif g.geom_type in ("MultiPolygon", "GeometryCollection"):
+            sub = _trayecto(g)
+            if sub is not None:
+                caminos.append(sub)
+    return MplPath.make_compound_path(*caminos) if caminos else None
+
+
+def _dibujar_zonas(ax, zonas: zonas_mod.Zonas, cfg: ConfigMapa) -> list:
+    col = zonas.de_clase(zonas_mod.COLISION)
+    for z in col:
+        t = _trayecto(z.geometria)
+        if t is not None:
+            ax.add_patch(PathPatch(t, facecolor="none", edgecolor=COLOR_COLISION, hatch="////", lw=0.6, alpha=0.45, zorder=2))
+    exc = zonas.de_clase(zonas_mod.EXCLUSION)
+    for z in exc:
+        if z.geometria.geom_type in ("Point", "MultiPoint"):  # instalaciones puntuales (pozos)
+            for g in getattr(z.geometria, "geoms", [z.geometria]):
+                ax.plot(g.x, g.y, marker="^", ms=5, color=COLOR_EXCLUSION, mec="white", mew=0.6, ls="", zorder=6)
+            continue
+        t = _trayecto(z.geometria)
+        if t is not None:
+            ax.add_patch(PathPatch(t, facecolor=COLOR_EXCLUSION, edgecolor=COLOR_EXCLUSION, alpha=0.45, lw=0.8, zorder=2))
+    if exc and cfg.resguardo_km > 0:
+        t = _trayecto(zonas_mod.exclusion_ampliada(zonas, cfg.longitud, cfg.latitud, cfg.resguardo_km))
+        if t is not None:
+            ax.add_patch(PathPatch(t, facecolor="none", edgecolor=COLOR_EXCLUSION, ls=":", lw=1.0, zorder=2))
+    puntos = sum(z.geometria.geom_type in ("Point", "MultiPoint") for z in exc)
+    manejadores = [Patch(facecolor=COLOR_EXCLUSION, edgecolor=COLOR_EXCLUSION, alpha=0.45,
+                         label=f"Zona de exclusión ({len(exc) - puntos})")]
+    if puntos:
+        manejadores.append(Line2D([], [], marker="^", ms=6, color=COLOR_EXCLUSION, mec="white", ls="",
+                                  label=f"Instalación existente: pozo ({puntos})"))
+    if cfg.resguardo_km > 0:
+        manejadores.append(Line2D([], [], color=COLOR_EXCLUSION, ls=":", lw=1.0, label=f"Resguardo de {cfg.resguardo_km:g} km"))
+    manejadores.append(Patch(facecolor="none", edgecolor=COLOR_COLISION, hatch="////",
+                             label=f"Zona con colisión de usos ({len(col)})"))
+    return manejadores
+
+
+def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, tabla: pd.DataFrame,
+            zonas: zonas_mod.Zonas | None, modo: str = "exploratorio",
+            nodo_elegido: tuple[float, float] | None = None, aviso: str | None = None):
     estilo.aplicar()
     o, e, s, n = cfg.recuadro
     elev = bat.elevacion
@@ -85,15 +147,15 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
     pmax = np.nanmax(prof) if np.isfinite(prof).any() else 1.0
     niveles = [v for v in NIVELES_PROFUNDIDAD if v < pmax] + [next(v for v in NIVELES_PROFUNDIDAD if v >= pmax)]
     cmap = LinearSegmentedColormap.from_list("profundidad", estilo.RAMPA_PROFUNDIDAD)
-    norma = BoundaryNorm(niveles, cmap.N)
-    im = ax.imshow(prof, origin="lower", extent=extension, cmap=cmap, norm=norma, interpolation="nearest",
-                   aspect="auto", zorder=1)
+    im = ax.imshow(prof, origin="lower", extent=extension, cmap=cmap, norm=BoundaryNorm(niveles, cmap.N),
+                   interpolation="nearest", aspect="auto", zorder=1)
     ax.imshow(np.where(z >= 0, 1.0, np.nan), origin="lower", extent=extension, cmap=ListedColormap([estilo.TIERRA]),
               interpolation="nearest", aspect="auto", zorder=1)
-    cb = fig.colorbar(im, ax=ax, orientation="horizontal", shrink=0.6, pad=0.01, aspect=40,
-                      spacing="uniform", ticks=niveles)
+    cb = fig.colorbar(im, ax=ax, orientation="horizontal", shrink=0.6, pad=0.01, aspect=40, spacing="uniform", ticks=niveles)
     cb.set_label("Profundidad (m)")
     cb.ax.tick_params(labelsize=7)
+
+    manejadores_zonas = _dibujar_zonas(ax, zonas, cfg) if zonas is not None else []
 
     # Costa e isóbatas (etiquetadas sobre la línea: la identidad no depende solo del color).
     ax.contour(lon, lat, z, levels=[0], colors=estilo.TINTA, linewidths=0.8, zorder=3)
@@ -104,11 +166,11 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
         lw = 2.0 if d == cfg.isobata_principal else 1.4
         cs = ax.contour(lon, lat, z, levels=[-d], colors=[color], linewidths=lw, linestyles=[ls], zorder=4)
         if cs.allsegs[0]:
-            etiquetas = ax.clabel(cs, fmt={-d: f"{d:g} m"}, fontsize=7, inline=True, inline_spacing=2)
-            for t in etiquetas:
+            for t in ax.clabel(cs, fmt={-d: f"{d:g} m"}, fontsize=7, inline=True, inline_spacing=2):
                 t.set_color(estilo.TINTA)
         principal = " (principal)" if d == cfg.isobata_principal else ""
         manejadores.append(Line2D([], [], color=color, lw=lw, ls=ls, label=f"Isóbata {d:g} m{principal}"))
+    manejadores += manejadores_zonas
 
     # Malla de WAVERYS: recuadro de cada celda, nodos válidos y enmascarados.
     h = malla.paso / 2
@@ -126,18 +188,20 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
     ]
 
     # Candidatos numerados (mismo número que en candidatos.csv).
-    top = tabla[tabla["candidato"].notna() & (tabla["candidato"] <= cfg.n_candidatos)]
+    top = tabla[tabla["candidato"].notna()]
     ax.scatter(top["lon"], top["lat"], s=90, facecolors="none", edgecolors=estilo.TINTA, linewidths=1.6, zorder=7)
     for _, f in top.iterrows():
         ax.annotate(str(int(f["candidato"])), (f["lon"], f["lat"]), xytext=(5, 5), textcoords="offset points",
-                    fontsize=8, fontweight="bold", color=estilo.TINTA, path_effects=_HALO, zorder=8)
-    if len(top):
-        manejadores.append(Line2D([], [], color=estilo.TINTA, marker="o", mfc="none", ls="", ms=9, mew=1.6,
-                                  label=f"Candidato (n.º = fila de la tabla), hasta {cfg.n_candidatos}"))
+                    fontsize=9, fontweight="bold", color=estilo.TINTA, path_effects=_HALO, zorder=8)
+    manejadores.append(Line2D([], [], color=estilo.TINTA, marker="o", mfc="none", ls="", ms=9, mew=1.6,
+                              label=f"Candidato n.º (fila de la tabla): {len(top)} de hasta {cfg.n_candidatos}"))
+    if nodo_elegido is not None:
+        ax.scatter([nodo_elegido[1]], [nodo_elegido[0]], s=420, facecolors="none", edgecolors=estilo.TINTA,
+                   linewidths=2.6, zorder=8)
+        manejadores.append(Line2D([], [], color=estilo.TINTA, marker="o", mfc="none", ls="", ms=15, mew=2.6,
+                                  label=f"Nodo elegido ({_fmt_lat(nodo_elegido[0])}, {_fmt_lon(nodo_elegido[1])})"))
 
-    # Coordenada de referencia.
-    ax.scatter([cfg.longitud], [cfg.latitud], s=220, marker="*", c=estilo.TINTA, edgecolors="white",
-               linewidths=1.2, zorder=9)
+    ax.scatter([cfg.longitud], [cfg.latitud], s=220, marker="*", c=estilo.TINTA, edgecolors="white", linewidths=1.2, zorder=9)
     manejadores.append(Line2D([], [], color=estilo.TINTA, marker="*", ls="", ms=12, mec="white",
                               label=f"Referencia ({_fmt_lat(cfg.latitud)}, {_fmt_lon(cfg.longitud)})"))
 
@@ -152,54 +216,105 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
     ax.yaxis.set_major_formatter(FuncFormatter(_fmt_lat))
     ax.set_xlabel("Longitud (°)")
     ax.set_ylabel("Latitud (°)")
-    ax.set_title(f"Mapa de selección de sitio: {cfg.nombre}", loc="left", fontweight="bold")
+    titulo = "Mapa exploratorio de selección de sitio" if modo == "exploratorio" else "Mapa definitivo del sitio"
+    ax.set_title(f"{titulo}: {cfg.nombre}", loc="left", fontweight="bold")
 
     leyenda = ax.legend(handles=manejadores, loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0)
     leyenda.get_frame().set_edgecolor(estilo.TINTA_TENUE)
-    fuentes = "\n".join([
-        "Fuentes",
-        bat.etiqueta,
-        malla.etiqueta,
-        "Zonas de exclusión y colisión",
-        "de usos: no evaluadas.",
-        "Candidatos: nodo válido, celda sin tierra,",
-        "8 vecinas válidas; orden por distancia",
-        f"a la isóbata de {cfg.isobata_principal:g} m.",
-    ])
-    ax.text(1.02, 0.0, fuentes, transform=ax.transAxes, ha="left", va="bottom", fontsize=7,
-            color=estilo.TINTA_SECUNDARIA, linespacing=1.4)
+
+    lineas = ["Fuentes", bat.etiqueta, malla.etiqueta]
+    if zonas is not None:
+        fechas = sorted({c["fecha_acceso_utc"][:10] for c in zonas.capas.values() if c["estado"] == "ok"})
+        lineas.append(f"Zonas: SERNANP, GEOCATMIN,\n  acceso {', '.join(fechas) or '—'}")
+        no_eval = zonas.no_evaluadas + list(zonas_mod.NO_CUBIERTAS)
+    else:
+        no_eval = ["todas las zonas"]
+    lineas += ["", "No evaluado:"] + [f"  {x}" for x in no_eval]
+    lineas += ["", "Criterios (ADR-0010): nodo con dato,", "celda sin tierra, fuera de exclusión",
+               f"+{cfg.resguardo_km:g} km, 8 vecinas con dato;",
+               f"orden por distancia a la isóbata de {cfg.isobata_principal:g} m."]
+    if aviso:
+        lineas += ["", aviso]
+    ax.text(1.02, 0.0, "\n".join(lineas), transform=ax.transAxes, ha="left", va="bottom", fontsize=7,
+            color=estilo.TINTA_SECUNDARIA, linespacing=1.35)
     return fig
+
+
+def _texto_siguiente_paso(cfg: ConfigMapa, caja: tuple[float, float, float, float], tabla: pd.DataFrame) -> str:
+    o, e, s, n = caja
+    top = tabla[tabla["candidato"].notna()]
+    filas = "\n".join(f"| {int(f.candidato)} | {f.lat:.4f} | {f.lon:.4f} | {f.zonas_colision or '—'} |" for f in top.itertuples())
+    return f"""# Siguiente paso: mapa definitivo de «{cfg.nombre}»
+
+Este mapa es **exploratorio** (batimetría GMRT, ADR-0011). Para el mapa definitivo:
+
+1. Elegir el nodo entre los candidatos:
+
+| Candidato | Latitud | Longitud | Colisiones de uso declaradas |
+|---|---|---|---|
+{filas or '| — | — | — | ningún nodo cumple los criterios |'}
+
+2. Descargar el recorte de GEBCO en {URL_GEBCO} con este recuadro, en formato **NetCDF** (malla de elevación):
+
+| Norte | Sur | Oeste | Este |
+|---|---|---|---|
+| {n:.1f} | {s:.1f} | {o:.1f} | {e:.1f} |
+
+3. Registrarlo (lo copia a `WAVE-DATA/raw/batimetria/gebco/` y anota su hash):
+
+```
+uv run registrar-gebco --archivo <ruta al .nc descargado> --version GEBCO_AAAA
+```
+
+4. Generar el mapa definitivo (no descarga nada; usa los insumos de esta corrida):
+
+```
+uv run mapa-sitio-final --exploratorio <ruta a este metadatos.json> --gebco <ruta en raw/batimetria/gebco> --nodo-lat <lat> --nodo-lon <lon>
+```
+"""
 
 
 def _guardar(cfg: ConfigMapa, raiz: Path, res: ResultadoMapa) -> dict[str, Path]:
     destino = rutas.interim(raiz, FASE, "mapa-sitio", cfg.nombre)
-    salidas = {"mapa": destino / "mapa.png", "tabla": destino / "candidatos.csv", "metadatos": destino / "metadatos.json"}
+    salidas = {"mapa": destino / "mapa.png", "tabla": destino / "candidatos.csv",
+               "metadatos": destino / "metadatos.json", "siguiente_paso": destino / "siguiente_paso.md"}
     res.figura.savefig(salidas["mapa"], facecolor=res.figura.get_facecolor(), bbox_inches="tight",
-                      pad_inches=0.15, metadata={"Software": None})
+                       pad_inches=0.15, metadata={"Software": None})
     res.tabla.to_csv(salidas["tabla"], index=False, float_format="%.4f", encoding="utf-8")
     meta = {
+        "tipo": "mapa exploratorio",
         "generado_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "version_codigo": __version__,
         "python": platform.python_version(),
         "configuracion": cfg.como_dict(),
         "insumos": {"batimetria": res.batimetria.origen, "waverys": res.malla.origen},
+        "zonas": res.zonas.capas if res.zonas is not None else None,
         "n_nodos": int(len(res.tabla)),
         "n_nodos_validos": int(res.tabla["valido"].sum()),
-        "n_cumplen_criterios_basicos": int(res.tabla["cumple_criterios_basicos"].sum()),
-        "no_evaluado": ["zonas de exclusión", "zonas con colisión de usos", "observaciones cercanas"],
+        "n_cumplen_criterios": int(res.tabla["cumple_criterios"].sum()),
+        "candidatos": res.tabla.loc[res.tabla["candidato"].notna(), ["candidato", "lat", "lon"]].astype(float).to_dict("records"),
+        "recuadro_gebco_oeste_este_sur_norte": list(res.recuadro_gebco),
+        "no_evaluado": (res.zonas.no_evaluadas if res.zonas is not None else ["todas las zonas"]) + list(zonas_mod.NO_CUBIERTAS),
     }
     salidas["metadatos"].write_text(json.dumps(meta, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    salidas["siguiente_paso"].write_text(_texto_siguiente_paso(cfg, res.recuadro_gebco, res.tabla), encoding="utf-8")
     return salidas
 
 
 def generar_mapa(cfg: ConfigMapa, guardar: bool = True) -> ResultadoMapa:
-    """Descarga (o reutiliza) los insumos, arma la tabla de candidatos, dibuja el mapa y guarda las salidas."""
+    """Descarga (o reutiliza) los insumos, arma la tabla de candidatos, dibuja el mapa exploratorio y guarda las salidas."""
     raiz = rutas.directorio_datos(cfg.directorio_datos)
     bat = batimetria.obtener(cfg, raiz)
     malla = waverys.obtener(cfg, raiz)
-    tabla, _ = candidatos.tabla(cfg, bat.elevacion, malla)
-    fig = dibujar(cfg, bat, malla, tabla)
-    res = ResultadoMapa(figura=fig, tabla=tabla, batimetria=bat, malla=malla)
+    zonas = zonas_mod.obtener(batimetria.recuadro_con_margen(cfg), raiz) if cfg.zonas else None
+    tabla, _ = candidatos.tabla(cfg, bat.elevacion, malla, zonas)
+    caja = recuadro_gebco(cfg)
+    o, e, s, n = caja
+    aviso = ("MAPA EXPLORATORIO (GMRT). Para el definitivo,\n"
+             f"descargar GEBCO: N {n:.1f}, S {s:.1f}, O {o:.1f}, E {e:.1f}\n"
+             "(ver siguiente_paso.md).")
+    fig = dibujar(cfg, bat, malla, tabla, zonas, modo="exploratorio", aviso=aviso)
+    res = ResultadoMapa(figura=fig, tabla=tabla, batimetria=bat, malla=malla, zonas=zonas, recuadro_gebco=caja)
     if guardar:
         res.salidas = _guardar(cfg, raiz, res)
     return res

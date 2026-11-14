@@ -37,7 +37,9 @@ class ConfigMapa:
     isobatas: list[float] = field(default_factory=lambda: [200.0, 100.0, 50.0])
     isobata_principal: float | None = None  # None: la primera de la lista
     semiancho_grados: float = 1.0
-    n_candidatos: int = 10
+    n_candidatos: int = 3  # ADR-0010: hasta 3
+    resguardo_km: float = 1.0  # ADR-0010: resguardo alrededor de las zonas de exclusión
+    zonas: bool = True  # False solo para pruebas o exploración rápida: el mapa lo declara
     directorio_datos: str | None = None  # None: variable de entorno WAVE_DATA_DIR
     batimetria: ConfigBatimetria = field(default_factory=ConfigBatimetria)
     waverys: ConfigWaverys = field(default_factory=ConfigWaverys)
@@ -63,6 +65,10 @@ class ConfigMapa:
             raise ValueError("isobata_principal debe estar en la lista de isobatas.")
         if not 0 < self.semiancho_grados <= 5:
             raise ValueError("semiancho_grados debe estar en (0, 5].")
+        if self.resguardo_km < 0:
+            raise ValueError("resguardo_km no puede ser negativo.")
+        if self.n_candidatos < 1:
+            raise ValueError("n_candidatos debe ser ≥ 1.")
         if self.batimetria.fuente not in {"gmrt", "archivo"}:
             raise ValueError("batimetria.fuente: 'gmrt' o 'archivo'.")
         if self.batimetria.fuente == "archivo" and not self.batimetria.archivo:
