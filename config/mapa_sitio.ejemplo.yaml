@@ -7,7 +7,8 @@ longitud: -75.30                 # grados, negativa al oeste
 isobatas: [200, 100, 50]         # m; la primera es la principal salvo que se indique otra
 isobata_principal: 200
 semiancho_grados: 1.0            # recuadro de ±1° alrededor de la referencia
-n_candidatos: 10
+n_candidatos: 3                  # ADR-0010: hasta 3
+resguardo_km: 1.0                # ADR-0010
 # directorio_datos: C:/WORKSPACES/TESIS-M5-WAVE/WAVE-DATA   # o variable de entorno WAVE_DATA_DIR
 
 batimetria:
