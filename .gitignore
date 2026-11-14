@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Datos: nunca en el repositorio (viven en WAVE-DATA)
+*.nc
+*.grd
+*.tif
+*.parquet
+data/
+salidas/
+
+# Credenciales
+.copernicusmarine*
+.env
+
+# Entorno
+.vscode/
+.idea/

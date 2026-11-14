@@ -1,0 +1,24 @@
+# Configuración de ejemplo del mapa de selección de sitio.
+# Copiar, cambiar la coordenada y correr:  uv run mapa-sitio --config config/mi_sitio.yaml
+
+nombre: ejemplo-marcona          # minúsculas; se usa en la carpeta de salida
+latitud: -15.40                  # grados, negativa al sur
+longitud: -75.30                 # grados, negativa al oeste
+isobatas: [200, 100, 50]         # m; la primera es la principal salvo que se indique otra
+isobata_principal: 200
+semiancho_grados: 1.0            # recuadro de ±1° alrededor de la referencia
+n_candidatos: 10
+# directorio_datos: C:/WORKSPACES/TESIS-M5-WAVE/WAVE-DATA   # o variable de entorno WAVE_DATA_DIR
+
+batimetria:
+  fuente: gmrt                   # gmrt (descarga) | archivo (NetCDF local, p. ej. recorte de GEBCO)
+  resolucion_gmrt: med           # low | med | high | max
+  # archivo: C:/ruta/gebco_2025_recorte.nc
+  # variable: elevation
+
+waverys:
+  fuente: copernicus             # copernicus (descarga; requiere `copernicusmarine login`) | archivo
+  dataset_id: cmems_mod_glo_wav_my_0.2deg_PT3H-i
+  fecha: "2020-07-15T12:00:00"   # un paso de tiempo basta para leer la malla y la máscara
+  variable: VHM0
+  # archivo: C:/ruta/waverys_recorte.nc
