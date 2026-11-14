@@ -167,8 +167,10 @@ def test_mapa_exploratorio_declara_capas_no_evaluadas(cfg_sintetica):
     textos = " ".join(t.get_text() for t in r.figura.axes[0].texts)
     assert "Propuestas de ANP" in textos and "MAPA EXPLORATORIO" in textos and "GEBCO" in textos
     leyenda = [t.get_text() for t in r.figura.axes[0].get_legend().get_texts()]
-    assert "Zona de exclusión (2)" in leyenda and "Resguardo de 1 km" in leyenda
-    assert "Instalación existente: pozo (1)" in leyenda
+    assert "EXCLUSIÓN · Áreas protegidas (SERNANP) (2)" in leyenda
+    assert any(t.startswith("Resguardo de 1 km") for t in leyenda)
+    assert any(t.startswith("Áreas protegidas (SERNANP)") for t in leyenda)
+    assert "EXCLUSIÓN · pozo petrolero (1)" in leyenda
 
 
 # --- GEBCO y mapa definitivo --------------------------------------------------------------------

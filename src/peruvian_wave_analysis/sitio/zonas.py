@@ -78,6 +78,21 @@ CAPAS: tuple[Capa, ...] = (
          f"{GEOCATMIN}/SERV_OTRAS_FUENTES/MapServer/36", ("nombre", "pozo", "nom_pozo", "lote"), _fija(EXCLUSION)),
 )
 
+# Familia de cada capa: decide el color en el mapa (no la clase, que decide ADR-0012).
+FAMILIAS = {
+    "areas_protegidas": "Áreas protegidas (SERNANP)",
+    "amortiguamiento": "Zona de amortiguamiento (SERNANP)",
+    "aavc": "Alto valor para la conservación marina (SERNANP)",
+    "propuesta": "Propuesta de ANP (SERNANP)",
+    "petroleo": "Hidrocarburos (PERUPETRO)",
+}
+FAMILIA_DE_CAPA = {
+    "anp_definitiva": "areas_protegidas", "zonificacion_anp": "areas_protegidas", "zonificacion_acr": "areas_protegidas",
+    "anp_transitoria": "areas_protegidas", "acr": "areas_protegidas", "acp": "areas_protegidas",
+    "amortiguamiento": "amortiguamiento", "aavc_marina": "aavc", "propuesta_anp": "propuesta",
+    "lotes_contrato": "petroleo", "pozos_petroleros": "petroleo",
+}
+
 NO_CUBIERTAS = (
     "zonas militares", "dispositivos de tráfico y fondeaderos", "cables y ductos",
     "franja de 5 millas", "caladeros", "acuicultura",
@@ -90,6 +105,7 @@ class Zona:
     nombre: str
     clase: str
     geometria: object  # shapely, lon/lat
+    familia: str = "areas_protegidas"  # para la simbología del mapa (FAMILIAS)
 
 
 @dataclass
@@ -208,7 +224,8 @@ def leer_capa(capa: Capa, ruta: Path) -> list[Zona]:
         if geom.is_empty:
             continue
         nombre = f"{capa.titulo}: {_nombre(props, capa.campos_nombre)}"
-        zonas.append(Zona(capa=capa.titulo, nombre=nombre, clase=clase, geometria=geom))
+        zonas.append(Zona(capa=capa.titulo, nombre=nombre, clase=clase, geometria=geom,
+                          familia=FAMILIA_DE_CAPA[capa.clave]))
     return zonas
 
 

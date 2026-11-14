@@ -37,8 +37,6 @@ from .config import ConfigMapa
 FASE = "F01-sitio-y-fuentes"
 URL_GEBCO = "https://download.gebco.net/"
 NIVELES_PROFUNDIDAD = [0, 25, 50, 100, 200, 500, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 11000]
-COLOR_EXCLUSION = "#d03b3b"  # estado crítico: la zona descarta
-COLOR_COLISION = "#52514e"  # tinta secundaria: trama neutra, no compite con las isóbatas
 _HALO = [patheffects.withStroke(linewidth=2.5, foreground="white")]
 
 
@@ -97,35 +95,84 @@ def _trayecto(geom) -> MplPath | None:
     return MplPath.make_compound_path(*caminos) if caminos else None
 
 
+def _es_punto(z) -> bool:
+    return z.geometria.geom_type in ("Point", "MultiPoint")
+
+
+def _etiquetar(ax, geom, texto: str, color: str, vista) -> None:
+    """Nombre de la zona en un punto interior de su parte visible."""
+    visible = geom.intersection(vista)
+    if visible.is_empty or visible.area < 0.002:  # unos 25 km²: zonas menores no se etiquetan
+        return
+    p = visible.representative_point()
+    ax.text(p.x, p.y, texto, fontsize=6.5, color=color, ha="center", va="center", zorder=7, clip_on=True,
+            bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.75))
+
+
+def _nombre_corto(z) -> str:
+    n = z.nombre.split(": ", 1)[-1]
+    n = n.replace("Reserva Nacional ", "RN ").replace("Sistema de Islas, Islotes y Puntas Guaneras - ", "RNSIIPG ")
+    n = n.split(" · ")[0]
+    return n if len(n) <= 32 else n[:31] + "…"
+
+
 def _dibujar_zonas(ax, zonas: zonas_mod.Zonas, cfg: ConfigMapa) -> list:
-    col = zonas.de_clase(zonas_mod.COLISION)
-    for z in col:
-        t = _trayecto(z.geometria)
-        if t is not None:
-            ax.add_patch(PathPatch(t, facecolor="none", edgecolor=COLOR_COLISION, hatch="////", lw=0.6, alpha=0.45, zorder=2))
-    exc = zonas.de_clase(zonas_mod.EXCLUSION)
-    for z in exc:
-        if z.geometria.geom_type in ("Point", "MultiPoint"):  # instalaciones puntuales (pozos)
+    """Color por familia (verde SERNANP, pardo hidrocarburos); exclusión opaca con borde rojo; nombres sobre las zonas."""
+    from shapely.geometry import box as caja
+
+    o, e, s, n = cfg.recuadro
+    m = 0.12 * (e - o)  # las etiquetas se colocan lejos del borde para que no se salgan del marco
+    vista = caja(o + m, s + 0.04 * (n - s), e - m, n - 0.04 * (n - s))
+    manejadores, etiquetados = [], set()
+    for familia, titulo in zonas_mod.FAMILIAS.items():
+        st = estilo.ESTILO_FAMILIA[familia]
+        col = [z for z in zonas.de_clase(zonas_mod.COLISION) if z.familia == familia and not _es_punto(z)]
+        for z in col:
+            t = _trayecto(z.geometria)
+            if t is None:
+                continue
+            if st["relleno"] != "none":
+                ax.add_patch(PathPatch(t, facecolor=st["relleno"], edgecolor="none", alpha=st["alfa"], zorder=2))
+            ax.add_patch(PathPatch(t, facecolor="none", edgecolor=st["borde"], hatch=st["trama"], ls=st["linea"],
+                                   lw=1.1, zorder=2))
+            nombre = _nombre_corto(z)
+            if st["etiqueta"] and nombre not in etiquetados:
+                etiquetados.add(nombre)
+                _etiquetar(ax, z.geometria, nombre, st["borde"], vista)
+        if col:
+            relleno = matplotlib.colors.to_rgba(st["relleno"], st["alfa"]) if st["relleno"] != "none" else "none"
+            manejadores.append(Patch(facecolor=relleno, edgecolor=st["borde"], hatch=st["trama"], ls=st["linea"], lw=1.1,
+                                     label=f"{titulo} ({len(col)})"))
+    for familia, titulo in zonas_mod.FAMILIAS.items():
+        st = estilo.ESTILO_FAMILIA[familia]
+        exc = [z for z in zonas.de_clase(zonas_mod.EXCLUSION) if z.familia == familia]
+        poligonos = [z for z in exc if not _es_punto(z)]
+        puntos = [z for z in exc if _es_punto(z)]
+        for z in poligonos:
+            t = _trayecto(z.geometria)
+            if t is not None:
+                ax.add_patch(PathPatch(t, facecolor=st["borde"], edgecolor=estilo.COLOR_BORDE_EXCLUSION, alpha=0.85,
+                                       lw=1.3, zorder=3))
+        for z in puntos:
             for g in getattr(z.geometria, "geoms", [z.geometria]):
-                ax.plot(g.x, g.y, marker="^", ms=5, color=COLOR_EXCLUSION, mec="white", mew=0.6, ls="", zorder=6)
-            continue
-        t = _trayecto(z.geometria)
-        if t is not None:
-            ax.add_patch(PathPatch(t, facecolor=COLOR_EXCLUSION, edgecolor=COLOR_EXCLUSION, alpha=0.45, lw=0.8, zorder=2))
-    if exc and cfg.resguardo_km > 0:
+                ax.plot(g.x, g.y, marker="^", ms=7, color=st["borde"], mec=estilo.COLOR_BORDE_EXCLUSION, mew=1.2,
+                        ls="", zorder=6)
+        if poligonos:
+            manejadores.append(Patch(facecolor=st["borde"], edgecolor=estilo.COLOR_BORDE_EXCLUSION, lw=1.3, alpha=0.85,
+                                     label=f"EXCLUSIÓN · {titulo} ({len(poligonos)})"))
+        if puntos:
+            manejadores.append(Line2D([], [], marker="^", ms=7, color=st["borde"], mec=estilo.COLOR_BORDE_EXCLUSION,
+                                      mew=1.2, ls="", label=f"EXCLUSIÓN · pozo petrolero ({len(puntos)})"))
+    if zonas.de_clase(zonas_mod.EXCLUSION) and cfg.resguardo_km > 0:
         t = _trayecto(zonas_mod.exclusion_ampliada(zonas, cfg.longitud, cfg.latitud, cfg.resguardo_km))
         if t is not None:
-            ax.add_patch(PathPatch(t, facecolor="none", edgecolor=COLOR_EXCLUSION, ls=":", lw=1.0, zorder=2))
-    puntos = sum(z.geometria.geom_type in ("Point", "MultiPoint") for z in exc)
-    manejadores = [Patch(facecolor=COLOR_EXCLUSION, edgecolor=COLOR_EXCLUSION, alpha=0.45,
-                         label=f"Zona de exclusión ({len(exc) - puntos})")]
-    if puntos:
-        manejadores.append(Line2D([], [], marker="^", ms=6, color=COLOR_EXCLUSION, mec="white", ls="",
-                                  label=f"Instalación existente: pozo ({puntos})"))
-    if cfg.resguardo_km > 0:
-        manejadores.append(Line2D([], [], color=COLOR_EXCLUSION, ls=":", lw=1.0, label=f"Resguardo de {cfg.resguardo_km:g} km"))
-    manejadores.append(Patch(facecolor="none", edgecolor=COLOR_COLISION, hatch="////",
-                             label=f"Zona con colisión de usos ({len(col)})"))
+            ax.add_patch(PathPatch(t, facecolor="none", edgecolor=estilo.COLOR_BORDE_EXCLUSION, ls=":", lw=1.2, zorder=3))
+        manejadores.append(Line2D([], [], color=estilo.COLOR_BORDE_EXCLUSION, ls=":", lw=1.2,
+                                  label=f"Resguardo de {cfg.resguardo_km:g} km alrededor de la exclusión"))
+    if not manejadores:
+        manejadores.append(Patch(facecolor="none", edgecolor="none", label="Sin zonas en el recuadro"))
+    else:
+        manejadores.insert(0, Patch(facecolor="none", edgecolor="none", label="Zonas (colisión de usos salvo EXCLUSIÓN):"))
     return manejadores
 
 
