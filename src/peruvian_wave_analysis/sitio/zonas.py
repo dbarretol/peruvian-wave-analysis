@@ -25,12 +25,26 @@ from .batimetria import _fmt
 
 SERNANP = "https://geoservicios.sernanp.gob.pe/arcgis/rest/services"
 GEOCATMIN = "https://geocatmin.ingemmet.gob.pe/arcgis/rest/services"
-EXCLUSION, COLISION, IGNORADA = "exclusion", "colision", "ignorada"
+EXCLUSION, COLISION, IGNORADA, DESCARTADA = "exclusion", "colision", "ignorada", "descartada"
+# IGNORADA: no aporta (p. ej. zonificación que no es de protección estricta; la reserva ya cuenta).
+# DESCARTADA: polígono sin respaldo verificable; se quita del mapa y se anota en los metadatos.
 ANP_USO_INDIRECTO = {"parque nacional", "santuario nacional", "santuario historico", "santuario histórico"}
 
 
 def _anp_definitiva(p: dict) -> str:
     return EXCLUSION if str(p.get("anp_cate", "")).strip().lower() in ANP_USO_INDIRECTO else COLISION
+
+
+def _lote(p: dict) -> str:
+    """Lotes con contrato = colisión. Sin decreto supremo ni tipo de contrato = descartado.
+
+    Esos polígonos (LIV, LV, LVI, LVII de Repsol y XLV de Global Petroleum, firmados en 2017 frente a
+    Ica) no tienen ninguna referencia pública; por su numeración romana parecen áreas de convenios de
+    evaluación técnica, que no otorgan derechos y suelen durar 24 meses. Decisión del usuario, 2026-11-14.
+    """
+    q = {str(k).lower(): v for k, v in p.items()}
+    con_contrato = any(str(q.get(c) or "").strip() for c in ("dec_suprem", "tipo_contr"))
+    return COLISION if con_contrato else DESCARTADA
 
 
 def _zonificacion(p: dict) -> str:
@@ -72,7 +86,7 @@ CAPAS: tuple[Capa, ...] = (
     Capa("propuesta_anp", "Propuestas de ANP", "SERNANP",
          f"{SERNANP}/servicios_ogc/peru_sernanp_0103/MapServer/0", ("p_nomb",), _fija(COLISION)),
     Capa("lotes_contrato", "Lotes de hidrocarburos con contrato", "PERUPETRO vía GEOCATMIN-INGEMMET",
-         f"{GEOCATMIN}/SERV_OTRAS_FUENTES/MapServer/37", ("nomb_lote", "nom_lote", "cia"), _fija(COLISION)),
+         f"{GEOCATMIN}/SERV_OTRAS_FUENTES/MapServer/37", ("nomb_lote", "nom_lote", "cia"), _lote),
     # La capa 35 («Hidrocarburos PERUPETRO») es un grupo de 36 y 37: no se consulta directamente.
     Capa("pozos_petroleros", "Pozos petroleros", "PERUPETRO vía GEOCATMIN-INGEMMET",
          f"{GEOCATMIN}/SERV_OTRAS_FUENTES/MapServer/36", ("nombre", "pozo", "nom_pozo", "lote"), _fija(EXCLUSION)),
@@ -210,9 +224,10 @@ def _nombre(props: dict, campos: tuple[str, ...]) -> str:
     return " · ".join(dict.fromkeys(partes)) or "sin nombre"
 
 
-def leer_capa(capa: Capa, ruta: Path) -> list[Zona]:
+def leer_capa(capa: Capa, ruta: Path) -> tuple[list[Zona], list[str]]:
+    """Zonas de la capa y nombres de los polígonos descartados (DESCARTADA)."""
     gj = json.loads(Path(ruta).read_text(encoding="utf-8"))
-    zonas = []
+    zonas, descartadas = [], []
     for f in gj.get("features", []):
         if not f.get("geometry"):
             continue
@@ -220,13 +235,16 @@ def leer_capa(capa: Capa, ruta: Path) -> list[Zona]:
         clase = capa.clasificar(props)
         if clase == IGNORADA:
             continue
+        if clase == DESCARTADA:
+            descartadas.append(_nombre(props, capa.campos_nombre))
+            continue
         geom = make_valid(shape(f["geometry"]))
         if geom.is_empty:
             continue
         nombre = f"{capa.titulo}: {_nombre(props, capa.campos_nombre)}"
         zonas.append(Zona(capa=capa.titulo, nombre=nombre, clase=clase, geometria=geom,
                           familia=FAMILIA_DE_CAPA[capa.clave]))
-    return zonas
+    return zonas, descartadas
 
 
 def obtener(recuadro: tuple[float, float, float, float], raiz_datos: Path, capas: tuple[Capa, ...] = CAPAS) -> Zonas:
@@ -237,9 +255,10 @@ def obtener(recuadro: tuple[float, float, float, float], raiz_datos: Path, capas
     for capa in capas:
         try:
             ruta, origen = _descargar_capa(capa, recuadro, raiz_raw, fecha)
-            res.zonas += leer_capa(capa, ruta)
+            zs, descartadas = leer_capa(capa, ruta)
+            res.zonas += zs
             res.capas[capa.clave] = {"titulo": capa.titulo, "estado": "ok", "n_poligonos": origen.get("n_poligonos"),
-                                     "ruta": str(ruta), "sha256": origen["sha256"],
+                                     "descartadas": descartadas, "ruta": str(ruta), "sha256": origen["sha256"],
                                      "fecha_acceso_utc": origen["fecha_acceso_utc"]}
         except Exception as exc:  # noqa: BLE001 — una capa que falla se declara, no se oculta
             res.capas[capa.clave] = {"titulo": capa.titulo, "estado": "no evaluada", "error": str(exc)[:300]}
@@ -257,7 +276,9 @@ def desde_registro(capas_registradas: dict[str, dict], raiz_datos: Path) -> Zona
             continue
         ruta = Path(info["ruta"])
         manifiesto.verificar(raiz_raw, ruta)
-        res.zonas += leer_capa(por_clave[clave], ruta)
+        zs, descartadas = leer_capa(por_clave[clave], ruta)
+        res.zonas += zs
+        info = dict(info, descartadas=descartadas)
         res.capas[clave] = dict(info)
     return res
 

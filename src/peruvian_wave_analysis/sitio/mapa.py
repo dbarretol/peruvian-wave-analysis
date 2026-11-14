@@ -213,8 +213,10 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
         lw = 2.0 if d == cfg.isobata_principal else 1.4
         cs = ax.contour(lon, lat, z, levels=[-d], colors=[color], linewidths=lw, linestyles=[ls], zorder=4)
         if cs.allsegs[0]:
-            for t in ax.clabel(cs, fmt={-d: f"{d:g} m"}, fontsize=7, inline=True, inline_spacing=2):
+            # inline=False: la etiqueta va encima, sin cortar la línea (un corte parece una discontinuidad).
+            for t in ax.clabel(cs, fmt={-d: f"{d:g} m"}, fontsize=7, inline=False):
                 t.set_color(estilo.TINTA)
+                t.set_path_effects(_HALO)
         principal = " (principal)" if d == cfg.isobata_principal else ""
         manejadores.append(Line2D([], [], color=color, lw=lw, ls=ls, label=f"Isóbata {d:g} m{principal}"))
     manejadores += manejadores_zonas
@@ -233,6 +235,14 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
         Line2D([], [], color=estilo.TINTA, marker="o", ls="", ms=4, label="Nodo WAVERYS con dato"),
         Line2D([], [], color=estilo.TINTA_SECUNDARIA, marker="x", ls="", ms=5, label="Nodo WAVERYS sin dato (tierra)"),
     ]
+
+    # Nodos que cumplen todo salvo las vecinas: se marcan para que se vea por qué no son candidatos.
+    solo_vecinas = tabla[tabla["motivo_descarte"].str.startswith("3:")]
+    if len(solo_vecinas):
+        ax.scatter(solo_vecinas["lon"], solo_vecinas["lat"], s=70, marker="s", facecolors="none",
+                   edgecolors=estilo.TINTA_SECUNDARIA, linewidths=1.2, zorder=7)
+        manejadores.append(Line2D([], [], marker="s", mfc="none", mec=estilo.TINTA_SECUNDARIA, mew=1.2, ls="", ms=8,
+                                  label=f"Descartado solo por vecinas sin dato ({len(solo_vecinas)})"))
 
     # Candidatos numerados (mismo número que en candidatos.csv).
     top = tabla[tabla["candidato"].notna()]
@@ -274,6 +284,10 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
         fechas = sorted({c["fecha_acceso_utc"][:10] for c in zonas.capas.values() if c["estado"] == "ok"})
         lineas.append(f"Zonas: SERNANP, GEOCATMIN,\n  acceso {', '.join(fechas) or '—'}")
         no_eval = zonas.no_evaluadas + list(zonas_mod.NO_CUBIERTAS)
+        descartadas = sorted({d.split(" · ")[0] for c in zonas.capas.values() for d in c.get("descartadas", [])})
+        if descartadas:
+            filas = [", ".join(descartadas[k:k + 3]) for k in range(0, len(descartadas), 3)]
+            lineas.append("Quitadas (lotes sin contrato\n  ni referencia pública):\n  " + "\n  ".join(filas))
     else:
         no_eval = ["todas las zonas"]
     lineas += ["", "No evaluado:"] + [f"  {x}" for x in no_eval]

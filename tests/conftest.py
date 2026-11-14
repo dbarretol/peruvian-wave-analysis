@@ -80,6 +80,10 @@ ZONAS_SINTETICAS = {
         {"type": "Feature", "properties": {"nombre": "Pozo Sintético"},
          "geometry": {"type": "Point", "coordinates": [-75.4, -14.75]}},
     ],
+    "SERV_OTRAS_FUENTES/MapServer/37": [
+        _caja(-76.6, -76.4, -16.4, -16.2, NOMB_LOTE="Z-99", CIA="Sintética", DEC_SUPREM="001-2020-EM", TIPO_CONTR="LICENCIA"),
+        _caja(-76.6, -76.4, -15.0, -14.8, NOMB_LOTE="LXX", CIA="Sintética", DEC_SUPREM=None, TIPO_CONTR=None),
+    ],
     "peru_sernanp_0213/MapServer/0": [
         _caja(-75.45, -75.35, -15.895, -15.85, anp_nomb="Reserva Sintética", tz_nomb="Protección Estricta", tz_cod="PE"),
         _caja(-77.0, -74.0, -14.65, -14.3, anp_nomb="Reserva Sintética", tz_nomb="Aprovechamiento Directo", tz_cod="AD"),

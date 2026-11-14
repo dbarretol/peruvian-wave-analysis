@@ -31,6 +31,18 @@ def test_clasificacion_anp(cate, clase):
     assert zonas._anp_definitiva({"anp_cate": cate}) == clase
 
 
+def test_lote_sin_contrato_se_descarta():
+    assert zonas._lote({"DEC_SUPREM": "029-2017-EM", "TIPO_CONTR": "LICENCIA"}) == zonas.COLISION
+    assert zonas._lote({"NOMB_LOTE": "LIV", "DEC_SUPREM": None, "TIPO_CONTR": " "}) == zonas.DESCARTADA
+
+
+def test_lotes_descartados_quedan_registrados_y_fuera_del_mapa(cfg_sintetica):
+    z = zonas.obtener(batimetria.recuadro_con_margen(cfg_sintetica), Path(cfg_sintetica.directorio_datos))
+    assert z.capas["lotes_contrato"]["descartadas"] == ["LXX · Sintética"]
+    nombres = [x.nombre for x in z.zonas]
+    assert any("Z-99" in n for n in nombres) and not any("LXX" in n for n in nombres)
+
+
 def test_zonificacion_solo_proteccion_estricta():
     assert zonas._zonificacion({"tz_cod": "PE"}) == zonas.EXCLUSION
     assert zonas._zonificacion({"tz_cod": "AD"}) == zonas.IGNORADA
@@ -49,7 +61,7 @@ def test_capas_se_registran_y_la_que_falla_queda_no_evaluada(cfg_sintetica):
         manifiesto.verificar(raiz / "raw", Path(c["ruta"]))
     assert z.capas["acr"]["n_poligonos"] == 0
     assert len(z.de_clase(zonas.EXCLUSION)) == 3  # parque + protección estricta + pozo (la zona AD se ignora)
-    assert len(z.de_clase(zonas.COLISION)) == 1
+    assert len(z.de_clase(zonas.COLISION)) == 2  # reserva + lote con contrato
 
 
 def test_consulta_por_lotes_de_identificadores(monkeypatch):
@@ -166,6 +178,7 @@ def test_mapa_exploratorio_declara_capas_no_evaluadas(cfg_sintetica):
     assert "Propuestas de ANP" in meta["no_evaluado"]
     textos = " ".join(t.get_text() for t in r.figura.axes[0].texts)
     assert "Propuestas de ANP" in textos and "MAPA EXPLORATORIO" in textos and "GEBCO" in textos
+    assert "LXX" in textos and "LXX ·" not in textos
     leyenda = [t.get_text() for t in r.figura.axes[0].get_legend().get_texts()]
     assert "EXCLUSIÓN · Áreas protegidas (SERNANP) (2)" in leyenda
     assert any(t.startswith("Resguardo de 1 km") for t in leyenda)
