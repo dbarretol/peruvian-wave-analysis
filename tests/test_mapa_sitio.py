@@ -18,6 +18,7 @@ def test_config_por_defecto():
     c = ConfigMapa(nombre="x", latitud=-15, longitud=-75)
     assert c.isobatas == [200, 100, 50]
     assert c.isobata_principal == 200
+    assert c.n_candidatos == 3 and c.resguardo_km == 1.0 and c.zonas
     assert c.recuadro == (-76, -74, -16, -14)
 
 
@@ -29,6 +30,8 @@ def test_config_por_defecto():
     {"semiancho_grados": 0},
     {"batimetria": {"fuente": "archivo"}},
     {"waverys": {"fuente": "otra"}},
+    {"resguardo_km": -1},
+    {"n_candidatos": 0},
 ])
 def test_config_invalida(kw):
     base = {"nombre": "x", "latitud": -15, "longitud": -75} | kw
@@ -109,10 +112,13 @@ def test_orden_de_candidatos(tabla):
     assert primero["lon"] == pytest.approx(-75.4)  # el nodo más cercano a la isóbata que cumple
     assert primero["lat"] == pytest.approx(LAT0)  # desempate por distancia a la referencia
     assert primero["dist_iso_200m_km"] == pytest.approx(0.2 * KM_POR_GRADO_LON, rel=0.02)
-    cumplen = tabla[tabla["cumple_criterios_basicos"]]
-    assert cumplen["candidato"].tolist() == list(range(1, len(cumplen) + 1))
-    assert tabla.loc[~tabla["cumple_criterios_basicos"], "candidato"].isna().all()
-    assert not tabla.loc[np.isclose(tabla["lon"], -75.2), "cumple_criterios_basicos"].any()
+    cumplen = tabla[tabla["cumple_criterios"]]
+    assert len(cumplen) > 3
+    assert cumplen["candidato"].head(3).tolist() == [1, 2, 3]  # ADR-0010: hasta 3
+    assert cumplen["candidato"].iloc[3:].isna().all()
+    assert tabla.loc[~tabla["cumple_criterios"], "candidato"].isna().all()
+    assert not tabla["zonas_evaluadas"].any()
+    assert not tabla.loc[np.isclose(tabla["lon"], -75.2), "cumple_criterios"].any()
 
 
 def test_isobata_ausente_avisa(cfg_sintetica):
@@ -138,6 +144,9 @@ def test_generar_mapa_escribe_salidas(cfg_sintetica):
     textos = [t.get_text() for t in r.figura.axes[0].get_legend().get_texts()]
     assert any("Isóbata 50 m" in t for t in textos)
     assert any("principal" in t for t in textos)
+    assert r.salidas["siguiente_paso"].exists()
+    assert "download.gebco.net" in r.salidas["siguiente_paso"].read_text(encoding="utf-8")
+    assert meta["recuadro_gebco_oeste_este_sur_norte"] == [-76.9, -74.3, -16.7, -14.1]
 
 
 def test_cli(cfg_sintetica, capsys):
