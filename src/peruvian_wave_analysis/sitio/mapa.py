@@ -10,6 +10,7 @@ Salidas en ``WAVE-DATA/interim/F01-sitio-y-fuentes/mapa-sitio/<nombre>/``: ``map
 ``candidatos.csv``, ``metadatos.json`` y ``siguiente_paso.md`` (qué recorte de GEBCO descargar
 para el mapa definitivo).
 """
+
 from __future__ import annotations
 
 import json
@@ -73,14 +74,34 @@ def _barra_de_escala(ax, cfg: ConfigMapa) -> None:
     largo = min((5, 10, 20, 25, 50, 100, 200), key=lambda L: abs(L - (e - o) * km_por_grado / 5))
     x0, y0 = o + 0.05 * (e - o), s + 0.05 * (n - s)
     ax.plot([x0, x0 + largo / km_por_grado], [y0, y0], color=estilo.TINTA, lw=3, solid_capstyle="butt", zorder=8)
-    ax.text(x0 + largo / km_por_grado / 2, y0 + 0.015 * (n - s), f"{largo} km", ha="center", va="bottom",
-            fontsize=8, color=estilo.TINTA, path_effects=_HALO, zorder=8)
+    ax.text(
+        x0 + largo / km_por_grado / 2,
+        y0 + 0.015 * (n - s),
+        f"{largo} km",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        color=estilo.TINTA,
+        path_effects=_HALO,
+        zorder=8,
+    )
 
 
 def _flecha_norte(ax) -> None:
-    ax.annotate("N", xy=(0.95, 0.95), xytext=(0.95, 0.86), xycoords="axes fraction",
-                ha="center", va="center", fontsize=10, fontweight="bold", color=estilo.TINTA,
-                arrowprops=dict(arrowstyle="-|>", color=estilo.TINTA, lw=1.5), path_effects=_HALO, zorder=8)
+    ax.annotate(
+        "N",
+        xy=(0.95, 0.95),
+        xytext=(0.95, 0.86),
+        xycoords="axes fraction",
+        ha="center",
+        va="center",
+        fontsize=10,
+        fontweight="bold",
+        color=estilo.TINTA,
+        arrowprops=dict(arrowstyle="-|>", color=estilo.TINTA, lw=1.5),
+        path_effects=_HALO,
+        zorder=8,
+    )
 
 
 def _trayecto(geom) -> MplPath | None:
@@ -107,8 +128,18 @@ def _etiquetar(ax, geom, texto: str, color: str, vista) -> None:
     if visible.is_empty or visible.area < 0.002:  # unos 25 km²: zonas menores no se etiquetan
         return
     p = visible.representative_point()
-    ax.text(p.x, p.y, texto, fontsize=6.5, color=color, ha="center", va="center", zorder=7, clip_on=True,
-            bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.75))
+    ax.text(
+        p.x,
+        p.y,
+        texto,
+        fontsize=6.5,
+        color=color,
+        ha="center",
+        va="center",
+        zorder=7,
+        clip_on=True,
+        bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.75),
+    )
 
 
 def _nombre_corto(z) -> str:
@@ -119,7 +150,8 @@ def _nombre_corto(z) -> str:
 
 
 def _dibujar_zonas(ax, zonas: zonas_mod.Zonas, cfg: ConfigMapa, evitar=None) -> list:
-    """Color por familia (verde SERNANP, pardo hidrocarburos); exclusión opaca con borde rojo; nombres sobre las zonas."""
+    """Color por familia (verde SERNANP, pardo hidrocarburos); exclusión opaca con borde rojo; nombres sobre las
+    zonas."""
     from shapely.geometry import box as caja
 
     o, e, s, n = cfg.recuadro
@@ -137,16 +169,27 @@ def _dibujar_zonas(ax, zonas: zonas_mod.Zonas, cfg: ConfigMapa, evitar=None) -> 
                 continue
             if st["relleno"] != "none":
                 ax.add_patch(PathPatch(t, facecolor=st["relleno"], edgecolor="none", alpha=st["alfa"], zorder=2))
-            ax.add_patch(PathPatch(t, facecolor="none", edgecolor=st["borde"], hatch=st["trama"], ls=st["linea"],
-                                   lw=1.1, zorder=2))
+            ax.add_patch(
+                PathPatch(
+                    t, facecolor="none", edgecolor=st["borde"], hatch=st["trama"], ls=st["linea"], lw=1.1, zorder=2
+                )
+            )
             nombre = _nombre_corto(z)
             if st["etiqueta"] and nombre not in etiquetados:
                 etiquetados.add(nombre)
                 _etiquetar(ax, z.geometria, nombre, st["borde"], vista)
         if col:
             relleno = matplotlib.colors.to_rgba(st["relleno"], st["alfa"]) if st["relleno"] != "none" else "none"
-            manejadores.append(Patch(facecolor=relleno, edgecolor=st["borde"], hatch=st["trama"], ls=st["linea"], lw=1.1,
-                                     label=f"{titulo} ({len(col)})"))
+            manejadores.append(
+                Patch(
+                    facecolor=relleno,
+                    edgecolor=st["borde"],
+                    hatch=st["trama"],
+                    ls=st["linea"],
+                    lw=1.1,
+                    label=f"{titulo} ({len(col)})",
+                )
+            )
     for familia, titulo in zonas_mod.FAMILIAS.items():
         st = estilo.ESTILO_FAMILIA[familia]
         exc = [z for z in zonas.de_clase(zonas_mod.EXCLUSION) if z.familia == familia]
@@ -155,28 +198,70 @@ def _dibujar_zonas(ax, zonas: zonas_mod.Zonas, cfg: ConfigMapa, evitar=None) -> 
         for z in poligonos:
             t = _trayecto(z.geometria)
             if t is not None:
-                ax.add_patch(PathPatch(t, facecolor=st["borde"], edgecolor=estilo.COLOR_BORDE_EXCLUSION, alpha=0.85,
-                                       lw=1.3, zorder=3))
+                ax.add_patch(
+                    PathPatch(
+                        t, facecolor=st["borde"], edgecolor=estilo.COLOR_BORDE_EXCLUSION, alpha=0.85, lw=1.3, zorder=3
+                    )
+                )
         for z in puntos:
             for g in getattr(z.geometria, "geoms", [z.geometria]):
-                ax.plot(g.x, g.y, marker="^", ms=7, color=st["borde"], mec=estilo.COLOR_BORDE_EXCLUSION, mew=1.2,
-                        ls="", zorder=6)
+                ax.plot(
+                    g.x,
+                    g.y,
+                    marker="^",
+                    ms=7,
+                    color=st["borde"],
+                    mec=estilo.COLOR_BORDE_EXCLUSION,
+                    mew=1.2,
+                    ls="",
+                    zorder=6,
+                )
         if poligonos:
-            manejadores.append(Patch(facecolor=st["borde"], edgecolor=estilo.COLOR_BORDE_EXCLUSION, lw=1.3, alpha=0.85,
-                                     label=f"EXCLUSIÓN · {titulo} ({len(poligonos)})"))
+            manejadores.append(
+                Patch(
+                    facecolor=st["borde"],
+                    edgecolor=estilo.COLOR_BORDE_EXCLUSION,
+                    lw=1.3,
+                    alpha=0.85,
+                    label=f"EXCLUSIÓN · {titulo} ({len(poligonos)})",
+                )
+            )
         if puntos:
-            manejadores.append(Line2D([], [], marker="^", ms=7, color=st["borde"], mec=estilo.COLOR_BORDE_EXCLUSION,
-                                      mew=1.2, ls="", label=f"EXCLUSIÓN · pozo petrolero ({len(puntos)})"))
+            manejadores.append(
+                Line2D(
+                    [],
+                    [],
+                    marker="^",
+                    ms=7,
+                    color=st["borde"],
+                    mec=estilo.COLOR_BORDE_EXCLUSION,
+                    mew=1.2,
+                    ls="",
+                    label=f"EXCLUSIÓN · pozo petrolero ({len(puntos)})",
+                )
+            )
     if zonas.de_clase(zonas_mod.EXCLUSION) and cfg.resguardo_km > 0:
         t = _trayecto(zonas_mod.exclusion_ampliada(zonas, cfg.longitud, cfg.latitud, cfg.resguardo_km))
         if t is not None:
-            ax.add_patch(PathPatch(t, facecolor="none", edgecolor=estilo.COLOR_BORDE_EXCLUSION, ls=":", lw=1.2, zorder=3))
-        manejadores.append(Line2D([], [], color=estilo.COLOR_BORDE_EXCLUSION, ls=":", lw=1.2,
-                                  label=f"Resguardo de {cfg.resguardo_km:g} km alrededor de la exclusión"))
+            ax.add_patch(
+                PathPatch(t, facecolor="none", edgecolor=estilo.COLOR_BORDE_EXCLUSION, ls=":", lw=1.2, zorder=3)
+            )
+        manejadores.append(
+            Line2D(
+                [],
+                [],
+                color=estilo.COLOR_BORDE_EXCLUSION,
+                ls=":",
+                lw=1.2,
+                label=f"Resguardo de {cfg.resguardo_km:g} km alrededor de la exclusión",
+            )
+        )
     if not manejadores:
         manejadores.append(Patch(facecolor="none", edgecolor="none", label="Sin zonas en el recuadro"))
     else:
-        manejadores.insert(0, Patch(facecolor="none", edgecolor="none", label="Zonas (colisión de usos salvo EXCLUSIÓN):"))
+        manejadores.insert(
+            0, Patch(facecolor="none", edgecolor="none", label="Zonas (colisión de usos salvo EXCLUSIÓN):")
+        )
     return manejadores
 
 
@@ -203,9 +288,16 @@ def _bordes_de_celda(malla: waverys.Malla, elev) -> list:
     return [list(s) for s in lados]
 
 
-def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, tabla: pd.DataFrame,
-            zonas: zonas_mod.Zonas | None, modo: str = "exploratorio",
-            nodo_elegido: tuple[float, float] | None = None, aviso: str | None = None):
+def dibujar(
+    cfg: ConfigMapa,
+    bat: batimetria.Batimetria,
+    malla: waverys.Malla,
+    tabla: pd.DataFrame,
+    zonas: zonas_mod.Zonas | None,
+    modo: str = "exploratorio",
+    nodo_elegido: tuple[float, float] | None = None,
+    aviso: str | None = None,
+):
     estilo.aplicar()
     o, e, s, n = cfg.recuadro
     elev = bat.elevacion
@@ -221,11 +313,28 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
     pmax = np.nanmax(prof) if np.isfinite(prof).any() else 1.0
     niveles = [v for v in NIVELES_PROFUNDIDAD if v < pmax] + [next(v for v in NIVELES_PROFUNDIDAD if v >= pmax)]
     cmap = LinearSegmentedColormap.from_list("profundidad", estilo.RAMPA_PROFUNDIDAD)
-    im = ax.imshow(prof, origin="lower", extent=extension, cmap=cmap, norm=BoundaryNorm(niveles, cmap.N),
-                   interpolation="nearest", aspect="auto", zorder=1)
-    ax.imshow(np.where(z >= 0, 1.0, np.nan), origin="lower", extent=extension, cmap=ListedColormap([estilo.TIERRA]),
-              interpolation="nearest", aspect="auto", zorder=1)
-    cb = fig.colorbar(im, ax=ax, orientation="horizontal", shrink=0.6, pad=0.01, aspect=40, spacing="uniform", ticks=niveles)
+    im = ax.imshow(
+        prof,
+        origin="lower",
+        extent=extension,
+        cmap=cmap,
+        norm=BoundaryNorm(niveles, cmap.N),
+        interpolation="nearest",
+        aspect="auto",
+        zorder=1,
+    )
+    ax.imshow(
+        np.where(z >= 0, 1.0, np.nan),
+        origin="lower",
+        extent=extension,
+        cmap=ListedColormap([estilo.TIERRA]),
+        interpolation="nearest",
+        aspect="auto",
+        zorder=1,
+    )
+    cb = fig.colorbar(
+        im, ax=ax, orientation="horizontal", shrink=0.6, pad=0.01, aspect=40, spacing="uniform", ticks=niveles
+    )
     cb.set_label("Profundidad (m)")
     cb.ax.tick_params(labelsize=7)
 
@@ -250,53 +359,164 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
 
     # Malla de WAVERYS: borde de las celdas que tienen algo de agua y nodos con dato.
     # Las celdas enteramente en tierra y los nodos sin dato no se dibujan: solo recargan la vista.
-    ax.add_collection(LineCollection(_bordes_de_celda(malla, elev), colors=estilo.TINTA_TENUE, linewidths=0.4,
-                                     alpha=0.7, zorder=5))
+    ax.add_collection(
+        LineCollection(_bordes_de_celda(malla, elev), colors=estilo.TINTA_TENUE, linewidths=0.4, alpha=0.7, zorder=5)
+    )
     LON, LAT = np.meshgrid(malla.lon, malla.lat)
     ax.scatter(LON[malla.valido], LAT[malla.valido], s=10, c=estilo.TINTA, linewidths=0, zorder=6)
     manejadores += [
-        Line2D([], [], color=estilo.TINTA_TENUE, lw=0.6,
-               label=f"Borde de celda WAVERYS ({malla.paso:.1f}°;\nse omiten las celdas solo de tierra)"),
+        Line2D(
+            [],
+            [],
+            color=estilo.TINTA_TENUE,
+            lw=0.6,
+            label=f"Borde de celda WAVERYS ({malla.paso:.1f}°;\nse omiten las celdas solo de tierra)",
+        ),
         Line2D([], [], color=estilo.TINTA, marker="o", ls="", ms=4, label="Nodo WAVERYS con dato"),
     ]
 
     # Nodos que cumplen todo salvo las vecinas: se marcan para que se vea por qué no son candidatos.
     solo_vecinas = tabla[tabla["motivo_descarte"].str.startswith("3:")]
     if len(solo_vecinas):
-        ax.scatter(solo_vecinas["lon"], solo_vecinas["lat"], s=70, marker="s", facecolors="none",
-                   edgecolors=estilo.TINTA_SECUNDARIA, linewidths=1.2, zorder=7)
-        manejadores.append(Line2D([], [], marker="s", mfc="none", mec=estilo.TINTA_SECUNDARIA, mew=1.2, ls="", ms=8,
-                                  label=f"Descartado por vecinas (< {cfg.min_vecinas}) ({len(solo_vecinas)})"))
+        ax.scatter(
+            solo_vecinas["lon"],
+            solo_vecinas["lat"],
+            s=70,
+            marker="s",
+            facecolors="none",
+            edgecolors=estilo.TINTA_SECUNDARIA,
+            linewidths=1.2,
+            zorder=7,
+        )
+        manejadores.append(
+            Line2D(
+                [],
+                [],
+                marker="s",
+                mfc="none",
+                mec=estilo.TINTA_SECUNDARIA,
+                mew=1.2,
+                ls="",
+                ms=8,
+                label=f"Descartado por vecinas (< {cfg.min_vecinas}) ({len(solo_vecinas)})",
+            )
+        )
 
     # Candidatos numerados (mismo número que en candidatos.csv). El mapa definitivo ya no tiene candidatos.
     if modo == "exploratorio":
         top = tabla[tabla["candidato"].notna()]
         ax.scatter(top["lon"], top["lat"], s=90, facecolors="none", edgecolors=estilo.TINTA, linewidths=1.6, zorder=7)
         for _, f in top.iterrows():
-            ax.annotate(str(int(f["candidato"])), (f["lon"], f["lat"]), xytext=(5, 5), textcoords="offset points",
-                        fontsize=9, fontweight="bold", color=estilo.TINTA, path_effects=_HALO, zorder=8)
-        manejadores.append(Line2D([], [], color=estilo.TINTA, marker="o", mfc="none", ls="", ms=9, mew=1.6,
-                                  label=f"Candidato n.º (fila de la tabla): {len(top)} de hasta {cfg.n_candidatos}"))
+            ax.annotate(
+                str(int(f["candidato"])),
+                (f["lon"], f["lat"]),
+                xytext=(5, 5),
+                textcoords="offset points",
+                fontsize=9,
+                fontweight="bold",
+                color=estilo.TINTA,
+                path_effects=_HALO,
+                zorder=8,
+            )
+        manejadores.append(
+            Line2D(
+                [],
+                [],
+                color=estilo.TINTA,
+                marker="o",
+                mfc="none",
+                ls="",
+                ms=9,
+                mew=1.6,
+                label=f"Candidato n.º (fila de la tabla): {len(top)} de hasta {cfg.n_candidatos}",
+            )
+        )
     if nodo_elegido is not None:
-        ax.annotate("Nodo elegido", (nodo_elegido[1], nodo_elegido[0]), xytext=(12, 10), textcoords="offset points",
-                    fontsize=8.5, fontweight="bold", color=estilo.TINTA, path_effects=_HALO, zorder=8)
-        ax.scatter([nodo_elegido[1]], [nodo_elegido[0]], s=420, facecolors="none", edgecolors=estilo.TINTA,
-                   linewidths=2.6, zorder=8)
-        manejadores.append(Line2D([], [], color=estilo.TINTA, marker="o", mfc="none", ls="", ms=15, mew=2.6,
-                                  label=f"Nodo elegido ({_fmt_lat(nodo_elegido[0])}, {_fmt_lon(nodo_elegido[1])})"))
+        ax.annotate(
+            "Nodo elegido",
+            (nodo_elegido[1], nodo_elegido[0]),
+            xytext=(12, 10),
+            textcoords="offset points",
+            fontsize=8.5,
+            fontweight="bold",
+            color=estilo.TINTA,
+            path_effects=_HALO,
+            zorder=8,
+        )
+        ax.scatter(
+            [nodo_elegido[1]],
+            [nodo_elegido[0]],
+            s=420,
+            facecolors="none",
+            edgecolors=estilo.TINTA,
+            linewidths=2.6,
+            zorder=8,
+        )
+        manejadores.append(
+            Line2D(
+                [],
+                [],
+                color=estilo.TINTA,
+                marker="o",
+                mfc="none",
+                ls="",
+                ms=15,
+                mew=2.6,
+                label=f"Nodo elegido ({_fmt_lat(nodo_elegido[0])}, {_fmt_lon(nodo_elegido[1])})",
+            )
+        )
 
-    ax.scatter([cfg.longitud], [cfg.latitud], s=220, marker="*", c=estilo.TINTA, edgecolors="white", linewidths=1.2, zorder=9)
-    manejadores.append(Line2D([], [], color=estilo.TINTA, marker="*", ls="", ms=12, mec="white",
-                              label=f"Referencia ({_fmt_lat(cfg.latitud)}, {_fmt_lon(cfg.longitud)})"))
+    ax.scatter(
+        [cfg.longitud], [cfg.latitud], s=220, marker="*", c=estilo.TINTA, edgecolors="white", linewidths=1.2, zorder=9
+    )
+    manejadores.append(
+        Line2D(
+            [],
+            [],
+            color=estilo.TINTA,
+            marker="*",
+            ls="",
+            ms=12,
+            mec="white",
+            label=f"Referencia ({_fmt_lat(cfg.latitud)}, {_fmt_lon(cfg.longitud)})",
+        )
+    )
     for p in cfg.puntos:
-        ax.scatter([p.longitud], [p.latitud], s=70, marker=p.marcador, c=estilo.TINTA_SECUNDARIA, edgecolors="white",
-                   linewidths=1.2, zorder=9)
+        ax.scatter(
+            [p.longitud],
+            [p.latitud],
+            s=70,
+            marker=p.marcador,
+            c=estilo.TINTA_SECUNDARIA,
+            edgecolors="white",
+            linewidths=1.2,
+            zorder=9,
+        )
         dx, dy = p.desplazamiento
-        ax.annotate(p.etiqueta, (p.longitud, p.latitud), xytext=(dx, dy), textcoords="offset points", fontsize=7.5,
-                    color=estilo.TINTA, path_effects=_HALO, zorder=9, ha="left" if dx >= 0 else "right",
-                    va="top" if dy < 0 else "bottom")
-        manejadores.append(Line2D([], [], color=estilo.TINTA_SECUNDARIA, marker=p.marcador, ls="", ms=7, mec="white",
-                                  label=f"{p.nombre} ({_dms(p.latitud, 'NS')}, {_dms(p.longitud, 'EO')})"))
+        ax.annotate(
+            p.etiqueta,
+            (p.longitud, p.latitud),
+            xytext=(dx, dy),
+            textcoords="offset points",
+            fontsize=7.5,
+            color=estilo.TINTA,
+            path_effects=_HALO,
+            zorder=9,
+            ha="left" if dx >= 0 else "right",
+            va="top" if dy < 0 else "bottom",
+        )
+        manejadores.append(
+            Line2D(
+                [],
+                [],
+                color=estilo.TINTA_SECUNDARIA,
+                marker=p.marcador,
+                ls="",
+                ms=7,
+                mec="white",
+                label=f"{p.nombre} ({_dms(p.latitud, 'NS')}, {_dms(p.longitud, 'EO')})",
+            )
+        )
 
     _barra_de_escala(ax, cfg)
     _flecha_norte(ax)
@@ -322,7 +542,7 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
         no_eval = zonas.no_evaluadas + list(zonas_mod.NO_CUBIERTAS)
         descartadas = sorted({d.split(" · ")[0] for c in zonas.capas.values() for d in c.get("descartadas", [])})
         if descartadas:
-            filas = [", ".join(descartadas[k:k + 3]) for k in range(0, len(descartadas), 3)]
+            filas = [", ".join(descartadas[k : k + 3]) for k in range(0, len(descartadas), 3)]
             lineas.append("Quitadas (lotes sin contrato\n  ni referencia pública):\n  " + "\n  ".join(filas))
     else:
         no_eval = ["todas las zonas"]
@@ -333,18 +553,37 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
     if cfg.min_vecinas:
         extra += f", ≥ {cfg.min_vecinas} vecinas"
     if modo == "exploratorio":
-        lineas += ["", "Criterios (ADR-0014): nodo con dato y", f"fuera de exclusión +{cfg.resguardo_km:g} km{extra}.",
-                   f"Numeración por distancia a la isóbata de {cfg.isobata_principal:g} m;",
-                   "la elección final es visual."]
+        lineas += [
+            "",
+            "Criterios (ADR-0014): nodo con dato y",
+            f"fuera de exclusión +{cfg.resguardo_km:g} km{extra}.",
+            f"Numeración por distancia a la isóbata de {cfg.isobata_principal:g} m;",
+            "la elección final es visual.",
+        ]
     else:
-        lineas += ["", "Nodo elegido (ADR-0007). Cumple con esta", "batimetría: tiene dato y su celda queda",
-                   f"fuera de exclusión +{cfg.resguardo_km:g} km (ADR-0014).", "Detalle de su celda y sus vecinas:",
-                   "detalle_nodo.png."]
+        lineas += [
+            "",
+            "Nodo elegido (ADR-0007). Cumple con esta",
+            "batimetría: tiene dato y su celda queda",
+            f"fuera de exclusión +{cfg.resguardo_km:g} km (ADR-0014).",
+            "Detalle de su celda y sus vecinas:",
+            "detalle_nodo.png.",
+        ]
     if aviso:
         lineas += ["", aviso]
     # Debajo de la leyenda, sea cual sea su alto (bbox_inches="tight" al guardar incluye todo).
-    notas = ax.annotate("\n".join(lineas), xy=(0, 0), xycoords=leyenda, xytext=(0, -10), textcoords="offset points",
-                        ha="left", va="top", fontsize=7, color=estilo.TINTA_SECUNDARIA, linespacing=1.35)
+    notas = ax.annotate(
+        "\n".join(lineas),
+        xy=(0, 0),
+        xycoords=leyenda,
+        xytext=(0, -10),
+        textcoords="offset points",
+        ha="left",
+        va="top",
+        fontsize=7,
+        color=estilo.TINTA_SECUNDARIA,
+        linespacing=1.35,
+    )
     notas.set_in_layout(False)  # que el diseño no reserve espacio bajo el mapa por estas notas
     return fig
 
@@ -366,14 +605,18 @@ def guardar_figura(fig, destino: Path, intentos: int = 10, espera_s: float = 0.5
         except PermissionError:
             if k == intentos - 1:
                 tmp.unlink(missing_ok=True)
-                raise PermissionError(f"No se pudo escribir {destino}: está abierto en otro programa. Ciérralo y vuelve a correr.")
+                raise PermissionError(
+                    f"No se pudo escribir {destino}: está abierto en otro programa. Ciérralo y vuelve a correr."
+                )
             time.sleep(espera_s)
 
 
 def _texto_siguiente_paso(cfg: ConfigMapa, caja: tuple[float, float, float, float], tabla: pd.DataFrame) -> str:
     o, e, s, n = caja
     top = tabla[tabla["candidato"].notna()]
-    filas = "\n".join(f"| {int(f.candidato)} | {f.lat:.4f} | {f.lon:.4f} | {f.zonas_colision or '—'} |" for f in top.itertuples())
+    filas = "\n".join(
+        f"| {int(f.candidato)} | {f.lat:.4f} | {f.lon:.4f} | {f.zonas_colision or '—'} |" for f in top.itertuples()
+    )
     return f"""# Siguiente paso: mapa definitivo de «{cfg.nombre}»
 
 Este mapa es **exploratorio** (batimetría GMRT, ADR-0011). Para el mapa definitivo:
@@ -382,7 +625,7 @@ Este mapa es **exploratorio** (batimetría GMRT, ADR-0011). Para el mapa definit
 
 | Candidato | Latitud | Longitud | Colisiones de uso declaradas |
 |---|---|---|---|
-{filas or '| — | — | — | ningún nodo cumple los criterios |'}
+{filas or "| — | — | — | ningún nodo cumple los criterios |"}
 
 2. Descargar el recorte de GEBCO en {URL_GEBCO} con este recuadro, en formato **NetCDF** (malla de elevación):
 
@@ -401,13 +644,17 @@ uv run registrar-gebco --archivo <ruta al .nc descargado> --version GEBCO_AAAA
 ```
 uv run mapa-sitio-final --exploratorio <ruta a este metadatos.json> --gebco <ruta en raw/batimetria/gebco> --nodo-lat <lat> --nodo-lon <lon>
 ```
-"""
+"""  # noqa: E501 (línea de un comando en el texto publicado de siguiente_paso.md: partirla cambiaría la salida)
 
 
 def _guardar(cfg: ConfigMapa, raiz: Path, res: ResultadoMapa) -> dict[str, Path]:
     destino = rutas.interim(raiz, FASE, "mapa-sitio", cfg.nombre)
-    salidas = {"mapa": destino / "mapa.png", "tabla": destino / "candidatos.csv",
-               "metadatos": destino / "metadatos.json", "siguiente_paso": destino / "siguiente_paso.md"}
+    salidas = {
+        "mapa": destino / "mapa.png",
+        "tabla": destino / "candidatos.csv",
+        "metadatos": destino / "metadatos.json",
+        "siguiente_paso": destino / "siguiente_paso.md",
+    }
     guardar_figura(res.figura, salidas["mapa"])
     res.tabla.to_csv(salidas["tabla"], index=False, float_format="%.4f", encoding="utf-8")
     meta = {
@@ -421,17 +668,23 @@ def _guardar(cfg: ConfigMapa, raiz: Path, res: ResultadoMapa) -> dict[str, Path]
         "n_nodos": int(len(res.tabla)),
         "n_nodos_validos": int(res.tabla["valido"].sum()),
         "n_cumplen_criterios": int(res.tabla["cumple_criterios"].sum()),
-        "candidatos": res.tabla.loc[res.tabla["candidato"].notna(), ["candidato", "lat", "lon"]].astype(float).to_dict("records"),
+        "candidatos": res.tabla.loc[res.tabla["candidato"].notna(), ["candidato", "lat", "lon"]]
+        .astype(float)
+        .to_dict("records"),
         "recuadro_gebco_oeste_este_sur_norte": list(res.recuadro_gebco),
-        "no_evaluado": (res.zonas.no_evaluadas if res.zonas is not None else ["todas las zonas"]) + list(zonas_mod.NO_CUBIERTAS),
+        "no_evaluado": (res.zonas.no_evaluadas if res.zonas is not None else ["todas las zonas"])
+        + list(zonas_mod.NO_CUBIERTAS),
     }
-    salidas["metadatos"].write_text(json.dumps(meta, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    salidas["metadatos"].write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8"
+    )
     salidas["siguiente_paso"].write_text(_texto_siguiente_paso(cfg, res.recuadro_gebco, res.tabla), encoding="utf-8")
     return salidas
 
 
 def generar_mapa(cfg: ConfigMapa, guardar: bool = True) -> ResultadoMapa:
-    """Descarga (o reutiliza) los insumos, arma la tabla de candidatos, dibuja el mapa exploratorio y guarda las salidas."""
+    """Descarga (o reutiliza) los insumos, arma la tabla de candidatos, dibuja el mapa exploratorio y guarda las
+    salidas."""
     raiz = rutas.directorio_datos(cfg.directorio_datos)
     bat = batimetria.obtener(cfg, raiz)
     malla = waverys.obtener(cfg, raiz)
@@ -439,9 +692,11 @@ def generar_mapa(cfg: ConfigMapa, guardar: bool = True) -> ResultadoMapa:
     tabla, _ = candidatos.tabla(cfg, bat.elevacion, malla, zonas)
     caja = recuadro_gebco(cfg)
     o, e, s, n = caja
-    aviso = ("MAPA EXPLORATORIO (GMRT). Para el definitivo,\n"
-             f"descargar GEBCO: N {n:.1f}, S {s:.1f}, O {o:.1f}, E {e:.1f}\n"
-             "(ver siguiente_paso.md).")
+    aviso = (
+        "MAPA EXPLORATORIO (GMRT). Para el definitivo,\n"
+        f"descargar GEBCO: N {n:.1f}, S {s:.1f}, O {o:.1f}, E {e:.1f}\n"
+        "(ver siguiente_paso.md)."
+    )
     fig = dibujar(cfg, bat, malla, tabla, zonas, modo="exploratorio", aviso=aviso)
     res = ResultadoMapa(figura=fig, tabla=tabla, batimetria=bat, malla=malla, zonas=zonas, recuadro_gebco=caja)
     if guardar:

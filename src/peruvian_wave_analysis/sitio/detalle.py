@@ -2,6 +2,7 @@
 
 Lo usa el mapa definitivo (ADR-0011) para documentar el nodo en la tesis. No decide nada: muestra.
 """
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -20,8 +21,34 @@ from . import batimetria, candidatos, waverys, zonas as zonas_mod
 from .config import ConfigMapa
 from .mapa import _HALO, _barra_de_escala, _dibujar_zonas, _dms, _flecha_norte
 
-NIVELES_DETALLE = [0, 10, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500, 600, 800, 1000, 1250, 1500,
-                   2000, 2500, 3000, 4000, 5000, 6000, 8000]
+NIVELES_DETALLE = [
+    0,
+    10,
+    25,
+    50,
+    75,
+    100,
+    125,
+    150,
+    175,
+    200,
+    250,
+    300,
+    400,
+    500,
+    600,
+    800,
+    1000,
+    1250,
+    1500,
+    2000,
+    2500,
+    3000,
+    4000,
+    5000,
+    6000,
+    8000,
+]
 MARGEN_GRADOS = 0.08  # alrededor del bloque de 3 × 3 celdas
 
 
@@ -30,7 +57,8 @@ def _fmt(v: float, hemisferios: str) -> str:
 
 
 def vecindario(malla: waverys.Malla, elev, lat: float, lon: float) -> list[dict]:
-    """El nodo y sus ocho vecinas: posición, dato en WAVERYS, profundidad en el nodo y fracción de tierra en la celda."""
+    """El nodo y sus ocho vecinas: posición, dato en WAVERYS, profundidad en el nodo y fracción de tierra de la
+    celda."""
     i = int(np.argmin(np.abs(malla.lat - lat)))
     j = int(np.argmin(np.abs(malla.lon - lon)))
     filas = []
@@ -41,19 +69,29 @@ def vecindario(malla: waverys.Malla, elev, lat: float, lon: float) -> list[dict]
                 continue
             la, lo = float(malla.lat[a]), float(malla.lon[b])
             pmin, pmed, ftierra = candidatos._estadisticas_celda(elev, la, lo, malla.paso)
-            filas.append({
-                "lat": round(la, 4), "lon": round(lo, 4), "es_nodo_elegido": di == dj == 0,
-                "valido": bool(malla.valido[a, b]),
-                "prof_nodo_m": round(float(-elev.sel(lat=la, lon=lo, method="nearest")), 1),
-                "prof_min_celda_m": None if np.isnan(pmin) else round(pmin, 1),
-                "prof_media_celda_m": None if np.isnan(pmed) else round(pmed, 1),
-                "frac_tierra_celda": None if np.isnan(ftierra) else round(ftierra, 4),
-            })
+            filas.append(
+                {
+                    "lat": round(la, 4),
+                    "lon": round(lo, 4),
+                    "es_nodo_elegido": di == dj == 0,
+                    "valido": bool(malla.valido[a, b]),
+                    "prof_nodo_m": round(float(-elev.sel(lat=la, lon=lo, method="nearest")), 1),
+                    "prof_min_celda_m": None if np.isnan(pmin) else round(pmin, 1),
+                    "prof_media_celda_m": None if np.isnan(pmed) else round(pmed, 1),
+                    "frac_tierra_celda": None if np.isnan(ftierra) else round(ftierra, 4),
+                }
+            )
     return filas
 
 
-def dibujar_detalle(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla,
-                    zonas: zonas_mod.Zonas | None, fila: dict, aviso: str | None = None):
+def dibujar_detalle(
+    cfg: ConfigMapa,
+    bat: batimetria.Batimetria,
+    malla: waverys.Malla,
+    zonas: zonas_mod.Zonas | None,
+    fila: dict,
+    aviso: str | None = None,
+):
     """Figura del bloque de 3 × 3 celdas centrado en el nodo elegido (``fila``: su fila de la tabla de nodos)."""
     estilo.aplicar()
     la0, lo0 = float(fila["lat"]), float(fila["lon"])
@@ -77,18 +115,36 @@ def dibujar_detalle(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.
     niveles = [v for v in niveles if v >= max(0, pmin) or v == niveles[-1]] or [0]
     niveles = sorted({0, *niveles, next((v for v in NIVELES_DETALLE if v >= pmax), NIVELES_DETALLE[-1])})
     cmap = LinearSegmentedColormap.from_list("profundidad", estilo.RAMPA_PROFUNDIDAD)
-    im = ax.imshow(prof, origin="lower", extent=extension, cmap=cmap, norm=BoundaryNorm(niveles, cmap.N),
-                   interpolation="nearest", aspect="auto", zorder=1)
-    ax.imshow(np.where(z >= 0, 1.0, np.nan), origin="lower", extent=extension, cmap=ListedColormap([estilo.TIERRA]),
-              interpolation="nearest", aspect="auto", zorder=1)
-    cb = fig.colorbar(im, ax=ax, orientation="horizontal", shrink=0.7, pad=0.01, aspect=45, spacing="uniform", ticks=niveles)
+    im = ax.imshow(
+        prof,
+        origin="lower",
+        extent=extension,
+        cmap=cmap,
+        norm=BoundaryNorm(niveles, cmap.N),
+        interpolation="nearest",
+        aspect="auto",
+        zorder=1,
+    )
+    ax.imshow(
+        np.where(z >= 0, 1.0, np.nan),
+        origin="lower",
+        extent=extension,
+        cmap=ListedColormap([estilo.TIERRA]),
+        interpolation="nearest",
+        aspect="auto",
+        zorder=1,
+    )
+    cb = fig.colorbar(
+        im, ax=ax, orientation="horizontal", shrink=0.7, pad=0.01, aspect=45, spacing="uniform", ticks=niveles
+    )
     cb.set_label("Profundidad (m)")
     cb.ax.tick_params(labelsize=6.5, labelrotation=45 if len(niveles) > 14 else 0)
 
     lineas_prof = [v for v in niveles[1:-1] if v not in cfg.isobatas]
     if lineas_prof:
-        cs = ax.contour(lon, lat, z, levels=sorted(-v for v in lineas_prof), colors=estilo.TINTA_TENUE,
-                        linewidths=0.5, zorder=3)
+        cs = ax.contour(
+            lon, lat, z, levels=sorted(-v for v in lineas_prof), colors=estilo.TINTA_TENUE, linewidths=0.5, zorder=3
+        )
         for t in ax.clabel(cs, fmt=lambda v: f"{-v:g}", fontsize=6, inline=False):
             t.set_color(estilo.TINTA_SECUNDARIA)
             t.set_path_effects(_HALO)
@@ -96,8 +152,9 @@ def dibujar_detalle(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.
     # Los nombres de las zonas no se colocan sobre los nodos ni sobre sus rótulos.
     h = malla.paso / 2
     vecinas = vecindario(malla, bat.elevacion, la0, lo0)
-    evitar = unary_union([caja(v["lon"] - 0.4 * h, v["lat"] - 0.6 * h, v["lon"] + 0.4 * h, v["lat"] + 0.25 * h)
-                          for v in vecinas])
+    evitar = unary_union(
+        [caja(v["lon"] - 0.4 * h, v["lat"] - 0.6 * h, v["lon"] + 0.4 * h, v["lat"] + 0.25 * h) for v in vecinas]
+    )
     manejadores_zonas = _dibujar_zonas(ax, zonas, vista, evitar=evitar) if zonas is not None else []
 
     ax.contour(lon, lat, z, levels=[0], colors=estilo.TINTA, linewidths=0.9, zorder=4)
@@ -120,9 +177,18 @@ def dibujar_detalle(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.
     # Celdas de WAVERYS: la del nodo elegido en trazo grueso; en cada nodo, su profundidad y la tierra de su celda.
     for v in vecinas:
         elegido = v["es_nodo_elegido"]
-        ax.add_patch(Rectangle((v["lon"] - h, v["lat"] - h), malla.paso, malla.paso, facecolor="none",
-                               edgecolor=estilo.TINTA, lw=2.4 if elegido else 0.8, ls="-" if elegido else "--",
-                               zorder=6 if elegido else 5))
+        ax.add_patch(
+            Rectangle(
+                (v["lon"] - h, v["lat"] - h),
+                malla.paso,
+                malla.paso,
+                facecolor="none",
+                edgecolor=estilo.TINTA,
+                lw=2.4 if elegido else 0.8,
+                ls="-" if elegido else "--",
+                zorder=6 if elegido else 5,
+            )
+        )
         if v["valido"]:
             ax.scatter([v["lon"]], [v["lat"]], s=40 if elegido else 22, c=estilo.TINTA, linewidths=0, zorder=7)
             tierra = v["frac_tierra_celda"] or 0.0
@@ -130,16 +196,36 @@ def dibujar_detalle(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.
         else:
             ax.scatter([v["lon"]], [v["lat"]], s=40, c=estilo.TINTA_SECUNDARIA, marker="x", linewidths=1.2, zorder=7)
             texto = "sin dato\nen WAVERYS"
-        ax.annotate(texto, (v["lon"], v["lat"]), xytext=(0, -8), textcoords="offset points", ha="center", va="top",
-                    fontsize=8 if elegido else 7, fontweight="bold" if elegido else "normal", color=estilo.TINTA,
-                    path_effects=_HALO, zorder=8)
+        ax.annotate(
+            texto,
+            (v["lon"], v["lat"]),
+            xytext=(0, -8),
+            textcoords="offset points",
+            ha="center",
+            va="top",
+            fontsize=8 if elegido else 7,
+            fontweight="bold" if elegido else "normal",
+            color=estilo.TINTA,
+            path_effects=_HALO,
+            zorder=8,
+        )
     ax.scatter([lo0], [la0], s=260, facecolors="none", edgecolors=estilo.TINTA, linewidths=2.2, zorder=8)
     manejadores += [
         Line2D([], [], color=estilo.TINTA, lw=2.4, label=f"Celda del nodo elegido ({malla.paso:.1f}°)"),
         Line2D([], [], color=estilo.TINTA, lw=0.8, ls="--", label="Celdas vecinas"),
         Line2D([], [], color=estilo.TINTA, marker="o", mfc="none", ms=12, mew=2.2, ls="", label="Nodo elegido"),
-        Line2D([], [], color=estilo.TINTA, marker="o", ls="", ms=4, label="Nodo con dato: profundidad\n(y % de tierra en su celda)"),
-        Line2D([], [], color=estilo.TINTA_SECUNDARIA, marker="x", ls="", ms=6, mew=1.2, label="Nodo sin dato en WAVERYS"),
+        Line2D(
+            [],
+            [],
+            color=estilo.TINTA,
+            marker="o",
+            ls="",
+            ms=4,
+            label="Nodo con dato: profundidad\n(y % de tierra en su celda)",
+        ),
+        Line2D(
+            [], [], color=estilo.TINTA_SECUNDARIA, marker="x", ls="", ms=6, mew=1.2, label="Nodo sin dato en WAVERYS"
+        ),
     ]
     if not np.isfinite(prof).any() or (z >= 0).any():
         manejadores.insert(1, Patch(facecolor=estilo.TIERRA, edgecolor="none", label="Tierra"))
@@ -181,11 +267,26 @@ def dibujar_detalle(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.
     if fila.get("zonas_colision"):
         lineas.append("  Colisión de usos (declarada):")
         lineas += [f"    {c.split(': ', 1)[-1]}" for c in str(fila["zonas_colision"]).split("; ")]
-    lineas += ["", "Fuentes", bat.etiqueta, f"  resolución {paso_bat * 3600:.0f}″ (≈ {paso_bat * 111.2:.2f} km)",
-               malla.etiqueta]
+    lineas += [
+        "",
+        "Fuentes",
+        bat.etiqueta,
+        f"  resolución {paso_bat * 3600:.0f}″ (≈ {paso_bat * 111.2:.2f} km)",
+        malla.etiqueta,
+    ]
     if aviso:
         lineas += ["", aviso]
-    notas = ax.annotate("\n".join(lineas), xy=(0, 0), xycoords=leyenda, xytext=(0, -10), textcoords="offset points",
-                        ha="left", va="top", fontsize=7.5, color=estilo.TINTA_SECUNDARIA, linespacing=1.35)
+    notas = ax.annotate(
+        "\n".join(lineas),
+        xy=(0, 0),
+        xycoords=leyenda,
+        xytext=(0, -10),
+        textcoords="offset points",
+        ha="left",
+        va="top",
+        fontsize=7.5,
+        color=estilo.TINTA_SECUNDARIA,
+        linespacing=1.35,
+    )
     notas.set_in_layout(False)
     return fig, vecinas

@@ -3,6 +3,7 @@
 La batimetría se devuelve como ``xarray.DataArray`` de elevación (m, positiva hacia arriba,
 negativa en el mar) con dimensiones ``(lat, lon)`` en orden creciente.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -3,6 +3,7 @@
 Se usan las capas ``ne_10m_land`` y ``ne_10m_minor_islands`` en GeoJSON, de una versión fija del
 repositorio oficial de Natural Earth. Se registran en ``raw/costa/natural_earth/`` con su hash.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,10 +41,18 @@ def obtener_natural_earth(raiz_raw: Path, version: str = VERSION_NE) -> list[Pat
             json.loads(contenido)  # que sea GeoJSON válido antes de registrarlo
             destino.parent.mkdir(parents=True, exist_ok=True)
             destino.write_bytes(contenido)
-            manifiesto.registrar(raiz_raw, destino, {
-                "fuente": "Natural Earth", "producto": f"{capa} (1:10 m)", "version": version,
-                "servicio": url, "licencia": "dominio público (naturalearthdata.com)",
-                "modulo": "peruvian_wave_analysis.sitio.costa"})
+            manifiesto.registrar(
+                raiz_raw,
+                destino,
+                {
+                    "fuente": "Natural Earth",
+                    "producto": f"{capa} (1:10 m)",
+                    "version": version,
+                    "servicio": url,
+                    "licencia": "dominio público (naturalearthdata.com)",
+                    "modulo": "peruvian_wave_analysis.sitio.costa",
+                },
+            )
         rutas.append(destino)
     return rutas
 

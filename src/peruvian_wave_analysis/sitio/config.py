@@ -1,4 +1,5 @@
 """Configuración del mapa de selección de sitio. Nada del sitio va fijo en el código."""
+
 from __future__ import annotations
 
 import re
@@ -53,6 +54,7 @@ def a_grados(valor: float | str) -> float:
 @dataclass
 class PuntoReferencia:
     """Punto que solo se dibuja (instalación, proyecto, localidad). No interviene en los criterios."""
+
     nombre: str
     latitud: float | str
     longitud: float | str

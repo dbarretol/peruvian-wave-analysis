@@ -2,14 +2,15 @@
 
 Recibe la corrida exploratoria (su ``metadatos.json``), el nodo elegido y el recorte de GEBCO
 registrado. Verifica el hash de cada insumo, recalcula la tabla con GEBCO y exige que el nodo
-elegido cumpla los criterios de ADR-0014 (gate: nodo con dato y fuera de exclusión). Si el gate falla, borra la salida publicada
-anterior y termina con error.
+elegido cumpla los criterios de ADR-0014 (gate: nodo con dato y fuera de exclusión). Si el gate falla, borra la salida
+publicada anterior y termina con error.
 
 Salida en ``WAVE-DATA/processed/F01-sitio-y-fuentes/mapa-sitio-final/<nombre>/``: ``mapa.png`` (contexto
 regional, solo el nodo elegido), ``detalle_nodo.png`` (su celda y las ocho vecinas, batimetría a resolución
 completa), ``nodos.csv`` (todos los nodos con GEBCO, sin numeración de candidatos), ``ficha_nodo.json``
 (nodo y vecindario de 3 × 3) y ``MANIFEST.json``.
 """
+
 from __future__ import annotations
 
 import json
@@ -72,7 +73,12 @@ def _verificar_gebco(ruta: Path, raiz: Path, cfg: ConfigMapa) -> dict:
     with xr.open_dataset(ruta) as ds:
         lat = ds[batimetria._primer_nombre(batimetria._NOMBRES_LAT, ds.coords)].values
         lon = ds[batimetria._primer_nombre(batimetria._NOMBRES_LON, ds.coords)].values
-    if lon.min() > o + TOL_COBERTURA or lon.max() < e - TOL_COBERTURA or lat.min() > s + TOL_COBERTURA or lat.max() < n - TOL_COBERTURA:
+    if (
+        lon.min() > o + TOL_COBERTURA
+        or lon.max() < e - TOL_COBERTURA
+        or lat.min() > s + TOL_COBERTURA
+        or lat.max() < n - TOL_COBERTURA
+    ):
         raise ErrorGate(
             f"El recorte de GEBCO ({lon.min():.2f}…{lon.max():.2f}, {lat.min():.2f}…{lat.max():.2f}) no cubre "
             f"el recuadro necesario (O {o}, E {e}, S {s}, N {n})."
@@ -89,9 +95,16 @@ def _publicar(destino: Path, archivos: dict[str, Path], insumos: dict) -> None:
     for nombre, p in archivos.items():
         shutil.copy2(p, destino / p.name)
         salidas[p.name] = manifiesto.sha256(destino / p.name)
-    (destino / "MANIFEST.json").write_text(json.dumps(
-        {"version_codigo": __version__, "salidas_sha256": salidas, "insumos": insumos},
-        ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    (destino / "MANIFEST.json").write_text(
+        json.dumps(
+            {"version_codigo": __version__, "salidas_sha256": salidas, "insumos": insumos},
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def generar_mapa_final(cf: ConfigFinal) -> ResultadoMapa:
@@ -112,12 +125,17 @@ def generar_mapa_final(cf: ConfigFinal) -> ResultadoMapa:
     try:
         entrada_gebco = _verificar_gebco(Path(cf.gebco), raiz, cfg)
         bat = batimetria.obtener(cfg, raiz)
-        bat.etiqueta = f"Batimetría: {entrada_gebco.get('producto', 'GEBCO')},\n  descarga {entrada_gebco['fecha_acceso_utc'][:10]}"
+        bat.etiqueta = (
+            f"Batimetría: {entrada_gebco.get('producto', 'GEBCO')},\n"
+            f"  descarga {entrada_gebco['fecha_acceso_utc'][:10]}"
+        )
         malla = waverys.obtener(cfg, raiz)  # verifica el hash: el archivo está en raw
         zonas = zonas_mod.desde_registro(meta["zonas"], raiz)
         tabla, _ = candidatos.tabla(cfg, bat.elevacion, malla, zonas)
 
-        elegido = tabla[np.isclose(tabla["lat"], cf.nodo_lat, atol=1e-3) & np.isclose(tabla["lon"], cf.nodo_lon, atol=1e-3)]
+        elegido = tabla[
+            np.isclose(tabla["lat"], cf.nodo_lat, atol=1e-3) & np.isclose(tabla["lon"], cf.nodo_lon, atol=1e-3)
+        ]
         if elegido.empty:
             raise ErrorGate(f"({cf.nodo_lat}, {cf.nodo_lon}) no es un nodo de WAVERYS dentro del recuadro.")
         fila = elegido.iloc[0]
@@ -131,7 +149,9 @@ def generar_mapa_final(cf: ConfigFinal) -> ResultadoMapa:
     # Ya hay un nodo elegido: el definitivo no numera candidatos (ni en el mapa ni en la tabla).
     tabla = tabla.drop(columns=["candidato"])
     fila = fila.drop(labels=["candidato"])
-    fig = dibujar(cfg, bat, malla, tabla, zonas, modo="definitivo", nodo_elegido=(float(fila["lat"]), float(fila["lon"])))
+    fig = dibujar(
+        cfg, bat, malla, tabla, zonas, modo="definitivo", nodo_elegido=(float(fila["lat"]), float(fila["lon"]))
+    )
     nodo = {k: (v.item() if hasattr(v, "item") else v) for k, v in fila.items()}
     fig_detalle, vecinas = dibujar_detalle(cfg, bat, malla, zonas, nodo)
     res = ResultadoMapa(figura=fig, tabla=tabla, batimetria=bat, malla=malla, zonas=zonas)
@@ -140,24 +160,53 @@ def generar_mapa_final(cf: ConfigFinal) -> ResultadoMapa:
         "nodo_elegido": nodo,
         "decision": "ADR-0007",
         "vecindario_3x3": vecinas,  # de norte a sur y de oeste a este; incluye el nodo elegido
-        "criterios": {"resguardo_km": cfg.resguardo_km, "isobata_principal_m": cfg.isobata_principal,
-                      "min_vecinas": cfg.min_vecinas, "max_tierra": cfg.max_tierra,
-                      "adr": ["ADR-0007", "ADR-0011", "ADR-0012", "ADR-0014"]},
+        "criterios": {
+            "resguardo_km": cfg.resguardo_km,
+            "isobata_principal_m": cfg.isobata_principal,
+            "min_vecinas": cfg.min_vecinas,
+            "max_tierra": cfg.max_tierra,
+            "adr": ["ADR-0007", "ADR-0011", "ADR-0012", "ADR-0014"],
+        },
         "no_evaluado": zonas.no_evaluadas + list(zonas_mod.NO_CUBIERTAS),
         "corrida_exploratoria": str(Path(cf.exploratorio)),
     }
-    insumos = {"batimetria": bat.origen, "waverys": malla.origen, "zonas": zonas.capas,
-               "corrida_exploratoria": {"ruta": str(cf.exploratorio), "sha256": manifiesto.sha256(Path(cf.exploratorio))}}
+    insumos = {
+        "batimetria": bat.origen,
+        "waverys": malla.origen,
+        "zonas": zonas.capas,
+        "corrida_exploratoria": {"ruta": str(cf.exploratorio), "sha256": manifiesto.sha256(Path(cf.exploratorio))},
+    }
 
     with tempfile.TemporaryDirectory() as tmp:  # staging
         t = Path(tmp)
         for f, nombre in ((fig, "mapa.png"), (fig_detalle, "detalle_nodo.png")):
-            f.savefig(t / nombre, facecolor=f.get_facecolor(), bbox_inches="tight", pad_inches=0.15, metadata={"Software": None})
+            f.savefig(
+                t / nombre,
+                facecolor=f.get_facecolor(),
+                bbox_inches="tight",
+                pad_inches=0.15,
+                metadata={"Software": None},
+            )
         tabla.to_csv(t / "nodos.csv", index=False, float_format="%.4f", encoding="utf-8")
-        (t / "ficha_nodo.json").write_text(json.dumps(ficha, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
-        _publicar(destino, {"mapa": t / "mapa.png", "detalle": t / "detalle_nodo.png", "tabla": t / "nodos.csv",
-                            "ficha": t / "ficha_nodo.json"}, insumos)
-    res.salidas = {"mapa": destino / "mapa.png", "detalle": destino / "detalle_nodo.png", "tabla": destino / "nodos.csv",
-                   "ficha": destino / "ficha_nodo.json", "manifiesto": destino / "MANIFEST.json"}
+        (t / "ficha_nodo.json").write_text(
+            json.dumps(ficha, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8"
+        )
+        _publicar(
+            destino,
+            {
+                "mapa": t / "mapa.png",
+                "detalle": t / "detalle_nodo.png",
+                "tabla": t / "nodos.csv",
+                "ficha": t / "ficha_nodo.json",
+            },
+            insumos,
+        )
+    res.salidas = {
+        "mapa": destino / "mapa.png",
+        "detalle": destino / "detalle_nodo.png",
+        "tabla": destino / "nodos.csv",
+        "ficha": destino / "ficha_nodo.json",
+        "manifiesto": destino / "MANIFEST.json",
+    }
     res.figura_detalle = fig_detalle
     return res

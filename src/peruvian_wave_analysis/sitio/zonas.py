@@ -4,6 +4,7 @@ Cada capa se pide a su servicio ArcGIS REST con el recuadro del sitio, paginando
 El archivo se guarda en ``raw/zonas/`` con la fecha de acceso en el nombre y se registra en
 el manifiesto. Una capa que falla queda como **no evaluada**; nunca como «sin zonas».
 """
+
 from __future__ import annotations
 
 import json
@@ -67,29 +68,95 @@ def _fija(clase: str) -> Callable[[dict], str]:
 
 # Clasificación: ADR-0012 (propuesta).
 CAPAS: tuple[Capa, ...] = (
-    Capa("anp_definitiva", "ANP nacionales definitivas", "SERNANP",
-         f"{SERNANP}/base_fisica/peru_sernanp_0102/MapServer/0", ("anp_nomb", "anp_sect"), _anp_definitiva),
-    Capa("zonificacion_anp", "Zonificación de ANP", "SERNANP",
-         f"{SERNANP}/gestion_de_anp/peru_sernanp_0213/MapServer/0", ("anp_nomb", "tz_nomb", "zanp_sect"), _zonificacion),
-    Capa("zonificacion_acr", "Zonificación de ACR", "SERNANP",
-         f"{SERNANP}/gestion_de_anp/peru_sernanp_0213/MapServer/1", ("acr_nomb", "tz_nomb", "zacr_sect"), _zonificacion),
-    Capa("anp_transitoria", "Zonas reservadas (ANP transitorias)", "SERNANP",
-         f"{SERNANP}/base_fisica/peru_sernanp_0102/MapServer/1", ("zr_nomb", "anp_sect"), _fija(EXCLUSION)),
-    Capa("acr", "Áreas de conservación regional", "SERNANP",
-         f"{SERNANP}/base_fisica/peru_sernanp_0102/MapServer/2", ("acr_nomb", "acr_sect"), _fija(COLISION)),
-    Capa("acp", "Áreas de conservación privada", "SERNANP",
-         f"{SERNANP}/base_fisica/peru_sernanp_0102/MapServer/3", ("acp_nomb",), _fija(COLISION)),
-    Capa("amortiguamiento", "Zonas de amortiguamiento", "SERNANP",
-         f"{SERNANP}/gestion_de_anp/peru_sernanp_0214/MapServer/0", ("anp_nomb",), _fija(COLISION)),
-    Capa("aavc_marina", "Áreas de alto valor para la conservación marina", "SERNANP",
-         f"{SERNANP}/sernanp_visor/servicio_descarga/MapServer/6", ("aavc_nomb",), _fija(COLISION)),
-    Capa("propuesta_anp", "Propuestas de ANP", "SERNANP",
-         f"{SERNANP}/servicios_ogc/peru_sernanp_0103/MapServer/0", ("p_nomb",), _fija(COLISION)),
-    Capa("lotes_contrato", "Lotes de hidrocarburos con contrato", "PERUPETRO vía GEOCATMIN-INGEMMET",
-         f"{GEOCATMIN}/SERV_OTRAS_FUENTES/MapServer/37", ("nomb_lote", "nom_lote", "cia"), _lote),
+    Capa(
+        "anp_definitiva",
+        "ANP nacionales definitivas",
+        "SERNANP",
+        f"{SERNANP}/base_fisica/peru_sernanp_0102/MapServer/0",
+        ("anp_nomb", "anp_sect"),
+        _anp_definitiva,
+    ),
+    Capa(
+        "zonificacion_anp",
+        "Zonificación de ANP",
+        "SERNANP",
+        f"{SERNANP}/gestion_de_anp/peru_sernanp_0213/MapServer/0",
+        ("anp_nomb", "tz_nomb", "zanp_sect"),
+        _zonificacion,
+    ),
+    Capa(
+        "zonificacion_acr",
+        "Zonificación de ACR",
+        "SERNANP",
+        f"{SERNANP}/gestion_de_anp/peru_sernanp_0213/MapServer/1",
+        ("acr_nomb", "tz_nomb", "zacr_sect"),
+        _zonificacion,
+    ),
+    Capa(
+        "anp_transitoria",
+        "Zonas reservadas (ANP transitorias)",
+        "SERNANP",
+        f"{SERNANP}/base_fisica/peru_sernanp_0102/MapServer/1",
+        ("zr_nomb", "anp_sect"),
+        _fija(EXCLUSION),
+    ),
+    Capa(
+        "acr",
+        "Áreas de conservación regional",
+        "SERNANP",
+        f"{SERNANP}/base_fisica/peru_sernanp_0102/MapServer/2",
+        ("acr_nomb", "acr_sect"),
+        _fija(COLISION),
+    ),
+    Capa(
+        "acp",
+        "Áreas de conservación privada",
+        "SERNANP",
+        f"{SERNANP}/base_fisica/peru_sernanp_0102/MapServer/3",
+        ("acp_nomb",),
+        _fija(COLISION),
+    ),
+    Capa(
+        "amortiguamiento",
+        "Zonas de amortiguamiento",
+        "SERNANP",
+        f"{SERNANP}/gestion_de_anp/peru_sernanp_0214/MapServer/0",
+        ("anp_nomb",),
+        _fija(COLISION),
+    ),
+    Capa(
+        "aavc_marina",
+        "Áreas de alto valor para la conservación marina",
+        "SERNANP",
+        f"{SERNANP}/sernanp_visor/servicio_descarga/MapServer/6",
+        ("aavc_nomb",),
+        _fija(COLISION),
+    ),
+    Capa(
+        "propuesta_anp",
+        "Propuestas de ANP",
+        "SERNANP",
+        f"{SERNANP}/servicios_ogc/peru_sernanp_0103/MapServer/0",
+        ("p_nomb",),
+        _fija(COLISION),
+    ),
+    Capa(
+        "lotes_contrato",
+        "Lotes de hidrocarburos con contrato",
+        "PERUPETRO vía GEOCATMIN-INGEMMET",
+        f"{GEOCATMIN}/SERV_OTRAS_FUENTES/MapServer/37",
+        ("nomb_lote", "nom_lote", "cia"),
+        _lote,
+    ),
     # La capa 35 («Hidrocarburos PERUPETRO») es un grupo de 36 y 37: no se consulta directamente.
-    Capa("pozos_petroleros", "Pozos petroleros", "PERUPETRO vía GEOCATMIN-INGEMMET",
-         f"{GEOCATMIN}/SERV_OTRAS_FUENTES/MapServer/36", ("nombre", "pozo", "nom_pozo", "lote"), _fija(EXCLUSION)),
+    Capa(
+        "pozos_petroleros",
+        "Pozos petroleros",
+        "PERUPETRO vía GEOCATMIN-INGEMMET",
+        f"{GEOCATMIN}/SERV_OTRAS_FUENTES/MapServer/36",
+        ("nombre", "pozo", "nom_pozo", "lote"),
+        _fija(EXCLUSION),
+    ),
 )
 
 # Familia de cada capa: decide el color en el mapa (no la clase, que decide ADR-0012).
@@ -101,15 +168,26 @@ FAMILIAS = {
     "petroleo": "Hidrocarburos (PERUPETRO)",
 }
 FAMILIA_DE_CAPA = {
-    "anp_definitiva": "areas_protegidas", "zonificacion_anp": "areas_protegidas", "zonificacion_acr": "areas_protegidas",
-    "anp_transitoria": "areas_protegidas", "acr": "areas_protegidas", "acp": "areas_protegidas",
-    "amortiguamiento": "amortiguamiento", "aavc_marina": "aavc", "propuesta_anp": "propuesta",
-    "lotes_contrato": "petroleo", "pozos_petroleros": "petroleo",
+    "anp_definitiva": "areas_protegidas",
+    "zonificacion_anp": "areas_protegidas",
+    "zonificacion_acr": "areas_protegidas",
+    "anp_transitoria": "areas_protegidas",
+    "acr": "areas_protegidas",
+    "acp": "areas_protegidas",
+    "amortiguamiento": "amortiguamiento",
+    "aavc_marina": "aavc",
+    "propuesta_anp": "propuesta",
+    "lotes_contrato": "petroleo",
+    "pozos_petroleros": "petroleo",
 }
 
 NO_CUBIERTAS = (
-    "zonas militares", "dispositivos de tráfico y fondeaderos", "cables y ductos",
-    "franja de 5 millas", "caladeros", "acuicultura",
+    "zonas militares",
+    "dispositivos de tráfico y fondeaderos",
+    "cables y ductos",
+    "franja de 5 millas",
+    "caladeros",
+    "acuicultura",
 )
 
 
@@ -136,6 +214,7 @@ class Zonas:
 
 
 # --- Descarga -----------------------------------------------------------------------------
+
 
 class _AdaptadorSistema(HTTPAdapter):
     """Verifica TLS con el almacén de certificados del sistema operativo (``truststore``).
@@ -177,14 +256,28 @@ def consultar_arcgis(url: str, recuadro: tuple[float, float, float, float], lote
     """
     o, e, s, n = recuadro
     sesion = _sesion()
-    filtro = {"geometry": f"{o},{s},{e},{n}", "geometryType": "esriGeometryEnvelope", "inSR": 4326,
-              "spatialRel": "esriSpatialRelIntersects", "where": "1=1"}
+    filtro = {
+        "geometry": f"{o},{s},{e},{n}",
+        "geometryType": "esriGeometryEnvelope",
+        "inSR": 4326,
+        "spatialRel": "esriSpatialRelIntersects",
+        "where": "1=1",
+    }
     ids = sorted(_pedir(sesion, url, {**filtro, "returnIdsOnly": "true", "f": "json"}).get("objectIds") or [])
     features = []
     for k in range(0, len(ids), lote):
-        bloque = ids[k:k + lote]
-        datos = _pedir(sesion, url, {"objectIds": ",".join(map(str, bloque)), "outFields": "*",
-                                     "returnGeometry": "true", "outSR": 4326, "f": "geojson"})
+        bloque = ids[k : k + lote]
+        datos = _pedir(
+            sesion,
+            url,
+            {
+                "objectIds": ",".join(map(str, bloque)),
+                "outFields": "*",
+                "returnGeometry": "true",
+                "outSR": 4326,
+                "f": "geojson",
+            },
+        )
         if datos.get("type") != "FeatureCollection":
             raise RuntimeError("La respuesta no es un FeatureCollection GeoJSON.")
         recibidos = datos.get("features", [])
@@ -199,15 +292,23 @@ _consultar = consultar_arcgis  # punto de sustitución en las pruebas
 
 def _descargar_capa(capa: Capa, recuadro, raiz_raw: Path, fecha: str) -> tuple[Path, dict]:
     o, e, s, n = recuadro
-    destino = raiz_raw / "zonas" / capa.clave / f"{capa.clave}_{fecha}_lat{_fmt(s)}_{_fmt(n)}_lon{_fmt(o)}_{_fmt(e)}.geojson"
+    destino = (
+        raiz_raw / "zonas" / capa.clave / f"{capa.clave}_{fecha}_lat{_fmt(s)}_{_fmt(n)}_lon{_fmt(o)}_{_fmt(e)}.geojson"
+    )
     if destino.exists():
         return destino, manifiesto.verificar(raiz_raw, destino)
     gj = _consultar(capa.url, recuadro)
     destino.parent.mkdir(parents=True, exist_ok=True)
     destino.write_text(json.dumps(gj, ensure_ascii=False), encoding="utf-8")
     origen = {
-        "fuente": capa.entidad, "capa": capa.titulo, "servicio": capa.url,
-        "parametros": {"recuadro_oeste_este_sur_norte": list(recuadro), "spatialRel": "esriSpatialRelIntersects", "f": "geojson"},
+        "fuente": capa.entidad,
+        "capa": capa.titulo,
+        "servicio": capa.url,
+        "parametros": {
+            "recuadro_oeste_este_sur_norte": list(recuadro),
+            "spatialRel": "esriSpatialRelIntersects",
+            "f": "geojson",
+        },
         "n_poligonos": len(gj["features"]),
         "ultima_actualizacion_declarada": "el servicio no la declara",
         "modulo": "peruvian_wave_analysis.sitio.zonas",
@@ -216,7 +317,8 @@ def _descargar_capa(capa: Capa, recuadro, raiz_raw: Path, fecha: str) -> tuple[P
 
 
 def _nombre(props: dict, campos: tuple[str, ...]) -> str:
-    """Nombre legible a partir de los campos indicados (sin distinguir mayúsculas); si no hay, el primer campo *nomb*."""
+    """Nombre legible a partir de los campos indicados (sin distinguir mayúsculas); si no hay, el primer campo
+    *nomb*."""
     p = {str(k).lower(): v for k, v in props.items()}
     partes = [str(p[c]).strip() for c in campos if p.get(c) is not None and str(p[c]).strip()]
     if not partes:
@@ -242,8 +344,9 @@ def leer_capa(capa: Capa, ruta: Path) -> tuple[list[Zona], list[str]]:
         if geom.is_empty:
             continue
         nombre = f"{capa.titulo}: {_nombre(props, capa.campos_nombre)}"
-        zonas.append(Zona(capa=capa.titulo, nombre=nombre, clase=clase, geometria=geom,
-                          familia=FAMILIA_DE_CAPA[capa.clave]))
+        zonas.append(
+            Zona(capa=capa.titulo, nombre=nombre, clase=clase, geometria=geom, familia=FAMILIA_DE_CAPA[capa.clave])
+        )
     return zonas, descartadas
 
 
@@ -257,9 +360,15 @@ def obtener(recuadro: tuple[float, float, float, float], raiz_datos: Path, capas
             ruta, origen = _descargar_capa(capa, recuadro, raiz_raw, fecha)
             zs, descartadas = leer_capa(capa, ruta)
             res.zonas += zs
-            res.capas[capa.clave] = {"titulo": capa.titulo, "estado": "ok", "n_poligonos": origen.get("n_poligonos"),
-                                     "descartadas": descartadas, "ruta": str(ruta), "sha256": origen["sha256"],
-                                     "fecha_acceso_utc": origen["fecha_acceso_utc"]}
+            res.capas[capa.clave] = {
+                "titulo": capa.titulo,
+                "estado": "ok",
+                "n_poligonos": origen.get("n_poligonos"),
+                "descartadas": descartadas,
+                "ruta": str(ruta),
+                "sha256": origen["sha256"],
+                "fecha_acceso_utc": origen["fecha_acceso_utc"],
+            }
         except Exception as exc:  # noqa: BLE001 — una capa que falla se declara, no se oculta
             res.capas[capa.clave] = {"titulo": capa.titulo, "estado": "no evaluada", "error": str(exc)[:300]}
     return res
@@ -285,6 +394,7 @@ def desde_registro(capas_registradas: dict[str, dict], raiz_datos: Path) -> Zona
 
 # --- Evaluación por celda -------------------------------------------------------------------
 
+
 def transform(fn, geom):
     """Aplica ``fn(x, y) -> (x, y)`` a las coordenadas de ``geom``."""
     return shapely.transform(geom, fn, interleaved=False)
@@ -292,6 +402,7 @@ def transform(fn, geom):
 
 def _a_km(lon0: float, lat0: float):
     from .candidatos import RADIO_TIERRA_KM
+
     k = RADIO_TIERRA_KM * np.pi / 180
     c = np.cos(np.radians(lat0))
     return lambda x, y, z=None: ((np.asarray(x) - lon0) * k * c, (np.asarray(y) - lat0) * k)
@@ -331,6 +442,7 @@ class Evaluador:
 
 def _de_km(lon0: float, lat0: float):
     from .candidatos import RADIO_TIERRA_KM
+
     k = RADIO_TIERRA_KM * np.pi / 180
     c = np.cos(np.radians(lat0))
     return lambda x, y, z=None: (np.asarray(x) / (k * c) + lon0, np.asarray(y) / k + lat0)

@@ -13,6 +13,7 @@ Sensibilidad (rotulada «posterior a ver los conteos», revisión de control del
 trata como no asimilado el tramo de una misión de la tabla 3 que cae fuera de su período de asimilación
 (p. ej. SARAL antes de 2016-03, GFO después de 2006-08, CFOSAT antes de 2020-02). No cambia la regla del contrato.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,17 +27,45 @@ import xarray as xr
 from .. import manifiesto
 from .exposicion import distancia_km, rumbo, sector_de
 
-URL_AODN = ("https://thredds.aodn.org.au/thredds/fileServer/IMOS/SRS/Surface-Waves/Wave-Wind-Altimetry-DM00/"
-            "{mision}/{bloque}/IMOS_SRS-Surface-Waves_MW_{mision}_FV02_{tesela}-DM00.nc")
-MISIONES_AODN = ["GEOSAT", "ERS-1", "TOPEX", "ERS-2", "GFO", "JASON-1", "ENVISAT", "JASON-2", "CRYOSAT-2", "HY-2",
-                 "SARAL", "JASON-3", "SENTINEL-3A", "HY-2B", "CFOSAT", "SENTINEL-3B", "SENTINEL-6A", "SWOT"]
+URL_AODN = (
+    "https://thredds.aodn.org.au/thredds/fileServer/IMOS/SRS/Surface-Waves/Wave-Wind-Altimetry-DM00/"
+    "{mision}/{bloque}/IMOS_SRS-Surface-Waves_MW_{mision}_FV02_{tesela}-DM00.nc"
+)
+MISIONES_AODN = [
+    "GEOSAT",
+    "ERS-1",
+    "TOPEX",
+    "ERS-2",
+    "GFO",
+    "JASON-1",
+    "ENVISAT",
+    "JASON-2",
+    "CRYOSAT-2",
+    "HY-2",
+    "SARAL",
+    "JASON-3",
+    "SENTINEL-3A",
+    "HY-2B",
+    "CFOSAT",
+    "SENTINEL-3B",
+    "SENTINEL-6A",
+    "SWOT",
+]
 
 # QUID 1.5, tabla 3 («List of assimilated satellite data and their period of use»).
 ASIMILADAS_QUID = {
-    "ERS-1": ("1993-01-01", "1996-06-02"), "TOPEX": ("1993-01-01", "2005-10-08"), "ERS-2": ("1995-05-15", "2011-07-04"),
-    "GFO": ("2000-01-07", "2006-08-01"), "JASON-1": ("2002-01-15", "2013-06-21"), "ENVISAT": ("2002-05-14", "2012-04-08"),
-    "JASON-2": ("2008-07-04", None), "JASON-3": ("2008-07-04", None), "CRYOSAT-2": ("2010-07-14", None),
-    "SARAL": ("2016-03-01", None), "SENTINEL-3A": ("2016-03-01", None), "CFOSAT": ("2020-02-01", None),
+    "ERS-1": ("1993-01-01", "1996-06-02"),
+    "TOPEX": ("1993-01-01", "2005-10-08"),
+    "ERS-2": ("1995-05-15", "2011-07-04"),
+    "GFO": ("2000-01-07", "2006-08-01"),
+    "JASON-1": ("2002-01-15", "2013-06-21"),
+    "ENVISAT": ("2002-05-14", "2012-04-08"),
+    "JASON-2": ("2008-07-04", None),
+    "JASON-3": ("2008-07-04", None),
+    "CRYOSAT-2": ("2010-07-14", None),
+    "SARAL": ("2016-03-01", None),
+    "SENTINEL-3A": ("2016-03-01", None),
+    "CFOSAT": ("2020-02-01", None),
 }
 NO_ASIMILADAS_QUID = {"HY-2": "QUID 1.5 §I.2 y §IV.1.1: HY-2A, «non-assimilated», usada para validar 2014–2018"}
 INICIO_ASIMILACION = pd.Timestamp("1993-01-01")
@@ -94,10 +123,19 @@ def descargar(raiz_raw: Path, lat0: float, lon0: float, misiones=MISIONES_AODN) 
                 continue
             destino.parent.mkdir(parents=True, exist_ok=True)
             destino.write_bytes(contenido)
-            manifiesto.registrar(raiz_raw, destino, {
-                "fuente": "IMOS / AODN", "producto": "Ribal y Young (2019), altimetría calibrada multimisión (DM00, FV02)",
-                "mision": m, "tesela": t, "servicio": url, "licencia": "CC BY 4.0",
-                "modulo": "peruvian_wave_analysis.sitio.observaciones"})
+            manifiesto.registrar(
+                raiz_raw,
+                destino,
+                {
+                    "fuente": "IMOS / AODN",
+                    "producto": "Ribal y Young (2019), altimetría calibrada multimisión (DM00, FV02)",
+                    "mision": m,
+                    "tesela": t,
+                    "servicio": url,
+                    "licencia": "CC BY 4.0",
+                    "modulo": "peruvian_wave_analysis.sitio.observaciones",
+                },
+            )
             rutas.append(destino)
     return rutas, faltan
 
@@ -114,11 +152,18 @@ def leer(rutas: list[Path]) -> pd.DataFrame:
             if banda is None:
                 raise ValueError(f"{r}: no tiene bandera de calidad de Hs en banda Ku ni Ka.")
             ok = np.asarray(ds[f"SWH_{banda}_quality_control"].values) == 1
-            partes.append(pd.DataFrame({
-                "mision": Path(r).parent.name, "banda": banda, "tiempo": pd.to_datetime(ds["TIME"].values[ok]),
-                "lat": ds["LATITUDE"].values[ok].astype(float),
-                "lon": (ds["LONGITUDE"].values[ok].astype(float) + 180.0) % 360.0 - 180.0,
-                "prof_archivo_m": ds["BOT_DEPTH"].values[ok].astype(float) if "BOT_DEPTH" in ds else np.nan}))
+            partes.append(
+                pd.DataFrame(
+                    {
+                        "mision": Path(r).parent.name,
+                        "banda": banda,
+                        "tiempo": pd.to_datetime(ds["TIME"].values[ok]),
+                        "lat": ds["LATITUDE"].values[ok].astype(float),
+                        "lon": (ds["LONGITUDE"].values[ok].astype(float) + 180.0) % 360.0 - 180.0,
+                        "prof_archivo_m": ds["BOT_DEPTH"].values[ok].astype(float) if "BOT_DEPTH" in ds else np.nan,
+                    }
+                )
+            )
     if not partes:
         return pd.DataFrame(columns=["mision", "tiempo", "lat", "lon", "prof_archivo_m"])
     return pd.concat(partes, ignore_index=True).sort_values(["mision", "tiempo"]).reset_index(drop=True)
@@ -150,17 +195,21 @@ def regimen(t: pd.Timestamp) -> str:
 @dataclass
 class Costa:
     """Tierra en coordenadas locales (km) alrededor del nodo, para medir distancias a la costa."""
+
     lat0: float
     lon0: float
     geom: object
 
     @classmethod
     def desde_tierra(cls, tierra, lat0: float, lon0: float, margen_grados: float = 4.0) -> "Costa":
-        recorte = shapely.clip_by_rect(tierra, lon0 - margen_grados, lat0 - margen_grados,
-                                       lon0 + margen_grados, lat0 + margen_grados)
+        recorte = shapely.clip_by_rect(
+            tierra, lon0 - margen_grados, lat0 - margen_grados, lon0 + margen_grados, lat0 + margen_grados
+        )
         k = 111.195
-        local = shapely.transform(recorte, lambda xy: np.column_stack(
-            [(xy[:, 0] - lon0) * k * np.cos(np.radians(lat0)), (xy[:, 1] - lat0) * k]))
+        local = shapely.transform(
+            recorte,
+            lambda xy: np.column_stack([(xy[:, 0] - lon0) * k * np.cos(np.radians(lat0)), (xy[:, 1] - lat0) * k]),
+        )
         shapely.prepare(local)
         return cls(lat0, lon0, local)
 
@@ -171,7 +220,9 @@ class Costa:
         return shapely.distance(self.geom, shapely.points(x, y))
 
 
-def clasificar(df: pd.DataFrame, lat0: float, lon0: float, costa: Costa, prof_gebco, sectores: pd.DataFrame) -> pd.DataFrame:
+def clasificar(
+    df: pd.DataFrame, lat0: float, lon0: float, costa: Costa, prof_gebco, sectores: pd.DataFrame
+) -> pd.DataFrame:
     """Clase de cada medición (sitio, región o cuenca), independencia y régimen. ``prof_gebco(lat, lon)`` recibe
     arreglos y devuelve la profundidad positiva en m (o NaN fuera del recorte; ahí se usa la del archivo, que solo
     se admite a más de 200 km del nodo: lo verifica el gate de la ficha)."""
@@ -189,7 +240,9 @@ def clasificar(df: pd.DataFrame, lat0: float, lon0: float, costa: Costa, prof_ge
     costa_nodo = float(np.asarray(costa.distancia_km([lat0], [lon0]))[0])  # N2: mismo código y misma costa
     hondo = d["prof_m"] > PROF_MIN_M
     sitio = (d["dist_nodo_km"] <= RADIO_SITIO_KM) & (d["dist_costa_km"] >= costa_nodo) & hondo & expuesto
-    region = ~sitio & (d["dist_nodo_km"] <= RADIO_REGION_KM) & (d["dist_costa_km"] >= COSTA_MIN_REGION_KM) & hondo & expuesto
+    region = (
+        ~sitio & (d["dist_nodo_km"] <= RADIO_REGION_KM) & (d["dist_costa_km"] >= COSTA_MIN_REGION_KM) & hondo & expuesto
+    )
     d["clase"] = np.select([sitio, region], ["sitio", "región"], "cuenca")
     d["asimilacion"] = [asimilacion(m, t) for m, t in zip(d["mision"], d["tiempo"])]
     d["asimilacion_periodo"] = [asimilacion_por_periodo(m, t) for m, t in zip(d["mision"], d["tiempo"])]
@@ -206,8 +259,14 @@ def resumen(d: pd.DataFrame, columna: str = "asimilacion") -> pd.DataFrame:
     la regla de independencia: la del contrato (``asimilacion``) o la sensibilidad (``asimilacion_periodo``)."""
     filas = []
     for (m, reg, asim), g in d.groupby(["mision", "regimen", columna]):
-        fila = {"mision": m, "regimen": reg, "asimilacion": asim, "util_para_sesgo": asim == "no asimilada",
-                "inicio": g["tiempo"].min(), "fin": g["tiempo"].max()}
+        fila = {
+            "mision": m,
+            "regimen": reg,
+            "asimilacion": asim,
+            "util_para_sesgo": asim == "no asimilada",
+            "inicio": g["tiempo"].min(),
+            "fin": g["tiempo"].max(),
+        }
         for c in ("sitio", "región", "cuenca"):
             gc = g[g["clase"] == c]
             fila[f"pasadas_{c}"] = int(gc[["mision", "pasada"]].drop_duplicates().shape[0])
@@ -223,10 +282,17 @@ def cobertura(res: pd.DataFrame) -> pd.DataFrame:
         g = res[(res["regimen"] == reg) & res["util_para_sesgo"]] if len(res) else res
         n_sitio = int(g["pasadas_sitio"].sum()) if len(g) else 0
         n_region = int(g["pasadas_región"].sum()) if len(g) else 0
-        filas.append({"regimen": reg, "pasadas_sitio_N": n_sitio, "esperadas_sobre_P90": 0.10 * n_sitio,
-                      "esperadas_sobre_P99": 0.01 * n_sitio,
-                      "cobertura_util_sitio": 0.10 * n_sitio >= MIN_COLOCALIZACIONES_P90,
-                      "pasadas_region": n_region, "esperadas_sobre_P90_region": 0.10 * n_region})
+        filas.append(
+            {
+                "regimen": reg,
+                "pasadas_sitio_N": n_sitio,
+                "esperadas_sobre_P90": 0.10 * n_sitio,
+                "esperadas_sobre_P99": 0.01 * n_sitio,
+                "cobertura_util_sitio": 0.10 * n_sitio >= MIN_COLOCALIZACIONES_P90,
+                "pasadas_region": n_region,
+                "esperadas_sobre_P90_region": 0.10 * n_region,
+            }
+        )
     return pd.DataFrame(filas)
 
 
