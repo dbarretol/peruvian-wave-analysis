@@ -80,6 +80,7 @@ r.tabla.head()
 | `n_candidatos` | `3` | Candidatos numerados como máximo. |
 | `resguardo_km` | `1.0` | Distancia de resguardo alrededor de las zonas de exclusión. |
 | `min_vecinas` | `0` | Mínimo de vecinas con dato para ser candidato (0 = no descarta). |
+| `max_tierra` | `1.0` | Fracción de tierra tolerada en la celda (1 = no descarta). |
 | `zonas` | `true` | `false` omite las zonas (el mapa lo declara). |
 | `batimetria.fuente` | `gmrt` | `gmrt` (descarga) o `archivo` (NetCDF local). |
 | `batimetria.resolucion_gmrt` | `med` | `low`, `med`, `high` o `max`. |
@@ -88,12 +89,12 @@ r.tabla.head()
 
 ## Criterios de selección
 
-Un nodo es candidato si:
+La elección final del nodo es visual. La herramienta solo descarta un nodo si:
 
-1. tiene dato en WAVERYS y su celda de 0,2° no tiene ningún píxel de tierra;
-2. su celda no toca ninguna zona de exclusión ampliada en el resguardo.
+1. no tiene dato en WAVERYS (es tierra para el modelo), o
+2. su celda toca una zona de exclusión ampliada en el resguardo.
 
-Las vecinas con dato se informan pero no descartan (salvo que se fije `min_vecinas`). Las zonas de colisión de usos tampoco descartan: se listan por nombre. Los candidatos se ordenan por distancia a la isóbata principal.
+La fracción de tierra en la celda y las vecinas con dato se informan pero no descartan (salvo que se fijen `max_tierra` o `min_vecinas`). Las zonas de colisión de usos tampoco descartan: se listan por nombre. Los candidatos se ordenan por distancia a la isóbata principal.
 
 | Zonas de exclusión | Zonas de colisión de usos |
 |---|---|
