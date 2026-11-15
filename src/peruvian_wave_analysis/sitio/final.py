@@ -2,7 +2,7 @@
 
 Recibe la corrida exploratoria (su ``metadatos.json``), el nodo elegido y el recorte de GEBCO
 registrado. Verifica el hash de cada insumo, recalcula la tabla con GEBCO y exige que el nodo
-elegido cumpla los criterios de ADR-0013 (gate). Si el gate falla, borra la salida publicada
+elegido cumpla los criterios de ADR-0014 (gate: nodo con dato y fuera de exclusión). Si el gate falla, borra la salida publicada
 anterior y termina con error.
 
 Salida en ``WAVE-DATA/processed/F01-sitio-y-fuentes/mapa-sitio-final/<nombre>/``: ``mapa.png``,
@@ -136,7 +136,7 @@ def generar_mapa_final(cf: ConfigFinal) -> ResultadoMapa:
                                   ["candidato", "lat", "lon", "zonas_colision"]].astype({"candidato": int}).to_dict("records"),
         "criterios": {"resguardo_km": cfg.resguardo_km, "n_candidatos": cfg.n_candidatos,
                       "isobata_principal_m": cfg.isobata_principal, "min_vecinas": cfg.min_vecinas,
-                      "adr": ["ADR-0011", "ADR-0012", "ADR-0013"]},
+                      "max_tierra": cfg.max_tierra, "adr": ["ADR-0011", "ADR-0012", "ADR-0014"]},
         "no_evaluado": zonas.no_evaluadas + list(zonas_mod.NO_CUBIERTAS),
         "corrida_exploratoria": str(Path(cf.exploratorio)),
     }

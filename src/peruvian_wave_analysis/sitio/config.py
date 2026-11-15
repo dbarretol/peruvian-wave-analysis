@@ -37,9 +37,10 @@ class ConfigMapa:
     isobatas: list[float] = field(default_factory=lambda: [200.0, 100.0, 50.0])
     isobata_principal: float | None = None  # None: la primera de la lista
     semiancho_grados: float = 1.0
-    n_candidatos: int = 3  # ADR-0013: hasta 3
-    resguardo_km: float = 1.0  # ADR-0013: resguardo alrededor de las zonas de exclusión
-    min_vecinas: int = 0  # ADR-0013: las vecinas no descartan salvo que se fije un mínimo (0 a 8)
+    n_candidatos: int = 3  # ADR-0013: hasta 3 (vigente en ADR-0014)
+    resguardo_km: float = 1.0  # ADR-0014: resguardo alrededor de las zonas de exclusión
+    min_vecinas: int = 0  # ADR-0014: las vecinas no descartan salvo que se fije un mínimo (0 a 8)
+    max_tierra: float = 1.0  # ADR-0014: fracción de tierra tolerada en la celda (1 = no descarta)
     zonas: bool = True  # False solo para pruebas o exploración rápida: el mapa lo declara
     directorio_datos: str | None = None  # None: variable de entorno WAVE_DATA_DIR
     batimetria: ConfigBatimetria = field(default_factory=ConfigBatimetria)
@@ -68,6 +69,8 @@ class ConfigMapa:
             raise ValueError("semiancho_grados debe estar en (0, 5].")
         if self.resguardo_km < 0:
             raise ValueError("resguardo_km no puede ser negativo.")
+        if not 0 <= self.max_tierra <= 1:
+            raise ValueError("max_tierra debe estar entre 0 y 1.")
         if not 0 <= self.min_vecinas <= 8:
             raise ValueError("min_vecinas debe estar entre 0 y 8.")
         if self.n_candidatos < 1:

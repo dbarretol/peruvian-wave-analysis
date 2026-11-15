@@ -291,15 +291,40 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
     else:
         no_eval = ["todas las zonas"]
     lineas += ["", "No evaluado:"] + [f"  {x}" for x in no_eval]
-    vecinas = f", ≥ {cfg.min_vecinas} vecinas con dato" if cfg.min_vecinas else ""
-    lineas += ["", "Criterios (ADR-0013): nodo con dato,", "celda sin tierra, fuera de exclusión",
-               f"+{cfg.resguardo_km:g} km{vecinas};",
-               f"orden por distancia a la isóbata de {cfg.isobata_principal:g} m."]
+    extra = ""
+    if cfg.max_tierra < 1:
+        extra += f", ≤ {100 * cfg.max_tierra:g} % de tierra"
+    if cfg.min_vecinas:
+        extra += f", ≥ {cfg.min_vecinas} vecinas"
+    lineas += ["", "Criterios (ADR-0014): nodo con dato y", f"fuera de exclusión +{cfg.resguardo_km:g} km{extra}.",
+               f"Numeración por distancia a la isóbata de {cfg.isobata_principal:g} m;",
+               "la elección final es visual."]
     if aviso:
         lineas += ["", aviso]
     ax.text(1.02, 0.0, "\n".join(lineas), transform=ax.transAxes, ha="left", va="bottom", fontsize=7,
             color=estilo.TINTA_SECUNDARIA, linespacing=1.35)
     return fig
+
+
+def guardar_figura(fig, destino: Path, intentos: int = 10, espera_s: float = 0.5) -> None:
+    """Guarda en un temporal y lo pone en su lugar con reintentos.
+
+    En Windows un PNG abierto en un visor queda bloqueado y ``savefig`` directo falla a medias.
+    """
+    import os
+    import time
+
+    tmp = destino.with_suffix(".tmp.png")
+    fig.savefig(tmp, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15, metadata={"Software": None})
+    for k in range(intentos):
+        try:
+            os.replace(tmp, destino)
+            return
+        except PermissionError:
+            if k == intentos - 1:
+                tmp.unlink(missing_ok=True)
+                raise PermissionError(f"No se pudo escribir {destino}: está abierto en otro programa. Ciérralo y vuelve a correr.")
+            time.sleep(espera_s)
 
 
 def _texto_siguiente_paso(cfg: ConfigMapa, caja: tuple[float, float, float, float], tabla: pd.DataFrame) -> str:
@@ -340,8 +365,7 @@ def _guardar(cfg: ConfigMapa, raiz: Path, res: ResultadoMapa) -> dict[str, Path]
     destino = rutas.interim(raiz, FASE, "mapa-sitio", cfg.nombre)
     salidas = {"mapa": destino / "mapa.png", "tabla": destino / "candidatos.csv",
                "metadatos": destino / "metadatos.json", "siguiente_paso": destino / "siguiente_paso.md"}
-    res.figura.savefig(salidas["mapa"], facecolor=res.figura.get_facecolor(), bbox_inches="tight",
-                       pad_inches=0.15, metadata={"Software": None})
+    guardar_figura(res.figura, salidas["mapa"])
     res.tabla.to_csv(salidas["tabla"], index=False, float_format="%.4f", encoding="utf-8")
     meta = {
         "tipo": "mapa exploratorio",
