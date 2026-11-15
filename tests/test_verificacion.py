@@ -54,6 +54,17 @@ def test_serie_continua_sin_bajadas_internas():
     assert ((df["Hs"] == 0) | (df["Hs"] >= 1.0)).all()
 
 
+def test_tormenta_en_el_borde_de_la_serie():
+    hs = np.zeros(10)
+    esc.poner_tormenta(hs, 7, 12, np.random.default_rng(0))  # se corta en la última celda
+    assert (hs[:7] == 0).all() and (hs[7:] >= 1.0).all()
+    esc.poner_tormenta(hs, 12, 5, np.random.default_rng(0))  # empieza fuera: no hace nada
+    a, b = np.random.default_rng(1), np.random.default_rng(1)
+    esc.poner_tormenta(np.zeros(3), 0, 12, a)
+    esc.poner_tormenta(np.zeros(30), 0, 12, b)
+    assert a.random() == b.random()  # el corte no cambia cuántos números consume
+
+
 def test_determinismo_con_uno_y_dos_procesos(tmp_path):
     datos = tmp_path / "WAVE-DATA"
     datos.mkdir()

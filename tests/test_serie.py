@@ -8,6 +8,8 @@ import pytest
 import xarray as xr
 
 from peruvian_wave_analysis import manifiesto
+from peruvian_wave_analysis.comun import etapa
+from peruvian_wave_analysis.comun.errores import GateFallido
 from peruvian_wave_analysis.sitio import serie
 
 LATS = np.round(np.arange(-15.4, -14.59, 0.2), 4)
@@ -242,7 +244,6 @@ def _raiz_con_serie(tmp_path, monkeypatch, **kw):
 
 
 def test_gate_publicado_sin_red(tmp_path, monkeypatch, mascara):
-    from peruvian_wave_analysis.comun import etapa
 
     raiz, cfg, raiz_raw, rutas, malla = _raiz_con_serie(tmp_path, monkeypatch)
     monkeypatch.setattr(serie, "_describir", lambda *_: pytest.fail("el gate no debe consultar el catálogo"))
@@ -262,8 +263,6 @@ def test_gate_publicado_sin_red(tmp_path, monkeypatch, mascara):
 
 
 def test_gate_publicado_falla_y_borra_el_anterior(tmp_path, monkeypatch, mascara):
-    from peruvian_wave_analysis.comun import etapa
-    from peruvian_wave_analysis.comun.errores import GateFallido
 
     raiz, cfg, raiz_raw, rutas, malla = _raiz_con_serie(tmp_path, monkeypatch)
     serie.publicar_gate(raiz, "sitio", cfg, malla, mascara)
@@ -276,7 +275,6 @@ def test_gate_publicado_falla_y_borra_el_anterior(tmp_path, monkeypatch, mascara
 
 
 def test_gate_publicado_exige_todos_los_anios(tmp_path, monkeypatch, mascara):
-    from peruvian_wave_analysis.comun import etapa
 
     raiz, cfg, raiz_raw, rutas, malla = _raiz_con_serie(tmp_path, monkeypatch)
     rutas[1].unlink()

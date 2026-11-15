@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import xarray as xr
+import yaml
 
 from peruvian_wave_analysis import manifiesto
 from peruvian_wave_analysis.sitio import batimetria, candidatos, gebco, generar_mapa, waverys, zonas
@@ -327,7 +328,6 @@ def test_cli_registrar_y_final(exploratorio, gebco_descargado, cfg_sintetica, ca
 
 
 def test_cli_exploratorio_avisa_gebco(cfg_sintetica, capsys, tmp_path):
-    import yaml
 
     p = tmp_path / "cfg.yaml"
     p.write_text(yaml.safe_dump(cfg_sintetica.como_dict(), allow_unicode=True), encoding="utf-8")

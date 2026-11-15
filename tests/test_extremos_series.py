@@ -11,7 +11,6 @@ from peruvian_wave_analysis.extremos import bootstrap, decluster, reescalado, re
 from peruvian_wave_analysis.extremos.estratos import Estratificacion
 from peruvian_wave_analysis.extremos.retorno import EstratoRetorno
 
-
 # --- Estratos -----------------------------------------------------------------------------------
 
 
@@ -198,9 +197,13 @@ def test_bootstrap_por_estrato_exige_declaracion():
     est, s = _serie_bloques()
     por_estrato = bootstrap.bloques_por_estrato(s, est)
     with pytest.raises(ValueError, match="independientes"):
-        bootstrap.bootstrap_bloques(por_estrato, lambda l: 0.0, 5, np.random.default_rng(0))
+        bootstrap.bootstrap_bloques(por_estrato, lambda _: 0.0, 5, np.random.default_rng(0))
     r = bootstrap.bootstrap_bloques(
-        por_estrato, lambda l: float(len(l)), 5, np.random.default_rng(0), estratos_independientes=True
+        por_estrato,
+        lambda bloques_rep: float(len(bloques_rep)),
+        5,
+        np.random.default_rng(0),
+        estratos_independientes=True,
     )
     assert (r == 6).all()
 

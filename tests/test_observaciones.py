@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import shapely
+import xarray as xr
 from shapely.geometry import box
 
 from peruvian_wave_analysis.sitio import exposicion as ex
@@ -166,7 +167,6 @@ def test_regla_del_respaldo():
 
 
 def test_leer_usa_la_banda_que_trae_el_archivo(tmp_path):
-    import xarray as xr
 
     def archivo(mision, banda):
         d = tmp_path / mision

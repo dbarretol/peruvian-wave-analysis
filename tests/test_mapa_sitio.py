@@ -1,11 +1,15 @@
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import yaml
 
-from peruvian_wave_analysis.sitio import ConfigMapa, candidatos, generar_mapa
-from peruvian_wave_analysis.sitio import batimetria, waverys
+from peruvian_wave_analysis.sitio import ConfigMapa, batimetria, candidatos, generar_mapa, waverys
 from peruvian_wave_analysis.sitio.cli import main
+from peruvian_wave_analysis.sitio.config import PuntoReferencia, a_grados
+from peruvian_wave_analysis.sitio.mapa import _bordes_de_celda, _dms
 
 from .conftest import LAT0, LON0
 
@@ -171,9 +175,6 @@ def test_generar_mapa_escribe_salidas(cfg_sintetica):
 
 
 def test_cli(cfg_sintetica, capsys):
-    b, w = cfg_sintetica.batimetria, cfg_sintetica.waverys
-    import yaml
-    from pathlib import Path
 
     ruta_cfg = Path(cfg_sintetica.directorio_datos).parent / "cfg.yaml"
     ruta_cfg.write_text(yaml.safe_dump(cfg_sintetica.como_dict(), allow_unicode=True), encoding="utf-8")
@@ -189,7 +190,6 @@ def test_cli_sin_coordenada(capsys):
 
 def test_tierra_en_la_celda_es_informativa_salvo_max_tierra():
     """ADR-0014: un nodo con dato y una esquina de tierra en la celda es elegible; max_tierra lo puede filtrar."""
-    from types import SimpleNamespace
 
     f = SimpleNamespace(valido=True, frac_tierra_celda=0.01, excluido_por_zona=False, vecinas_validas=7)
     assert candidatos._motivo(f) == ""
@@ -208,7 +208,6 @@ def test_max_tierra_fuera_de_rango():
 
 
 def test_grados_sexagesimales():
-    from peruvian_wave_analysis.sitio.config import a_grados
 
     assert a_grados("15°23′20″S") == pytest.approx(-(15 + 23 / 60 + 20 / 3600))
     assert a_grados("75°04'15\"O") == pytest.approx(-(75 + 4 / 60 + 15 / 3600))
@@ -220,7 +219,6 @@ def test_grados_sexagesimales():
 
 
 def test_puntos_en_config_y_mapa(cfg_sintetica):
-    from peruvian_wave_analysis.sitio.mapa import _dms
 
     cfg_sintetica.puntos = [{"nombre": "Parque eólico (aprox.)", "latitud": "15°23′20″S", "longitud": "75°04′15″O"}]
     cfg_sintetica.__post_init__()
@@ -235,7 +233,6 @@ def test_puntos_en_config_y_mapa(cfg_sintetica):
 
 
 def test_no_se_dibujan_bordes_de_celdas_solo_de_tierra(cfg_sintetica):
-    from peruvian_wave_analysis.sitio.mapa import _bordes_de_celda
 
     r = generar_mapa(cfg_sintetica, guardar=False)
     elev, malla = r.batimetria.elevacion, r.malla
@@ -257,12 +254,11 @@ def test_no_se_dibujan_bordes_de_celdas_solo_de_tierra(cfg_sintetica):
             for dy, dx in ((0, 2 * h), (0, -2 * h), (2 * h, 0), (-2 * h, 0))
         ]
         lados_celda = [(la, round(lo + h, 4)), (la, round(lo - h, 4)), (round(la + h, 4), lo), (round(la - h, 4), lo)]
-        for lado, compartido in zip(lados_celda, vecinas_con_agua):
+        for lado, compartido in zip(lados_celda, vecinas_con_agua, strict=True):
             assert (tuple(round(v, 4) for v in lado) in centros) == compartido
 
 
 def test_punto_etiqueta_y_desplazamiento():
-    from peruvian_wave_analysis.sitio.config import PuntoReferencia
 
     p = PuntoReferencia(nombre="S.E. Larga 220 kV (R.M. x)", latitud=-15.4, longitud=-75.1)
     assert p.etiqueta == p.nombre and p.marcador == "D" and p.desplazamiento == [7.0, -3.0]

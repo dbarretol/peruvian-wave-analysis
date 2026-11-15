@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -10,7 +11,6 @@ import pytest
 
 from peruvian_wave_analysis.comun import etapa, huella, json_estricto, orquestador, semillas
 from peruvian_wave_analysis.comun.errores import GateFallido, HashDistinto, InsumoFaltante
-
 
 # --- JSON estricto -----------------------------------------------------------------------------
 
@@ -168,7 +168,7 @@ def test_excepcion_en_el_staging_borra_la_salida_anterior(entorno):
     with pytest.raises(ZeroDivisionError):
         with etapa.staging_protegido(salida, codigo, base_codigo=codigo[0].parent) as st:
             (st / "parcial.txt").write_text("x", encoding="utf-8")
-            1 / 0
+            raise ZeroDivisionError("fallo simulado dentro del staging")
     assert sorted(p.name for p in salida.iterdir()) == [etapa.GATE_FALLIDO]
     assert "ZeroDivisionError" in json_estricto.leer(salida / etapa.GATE_FALLIDO)["motivos"][0]
     assert not etapa.ruta_staging(salida).exists()
@@ -303,7 +303,6 @@ def test_estados_por_codigo_insumo_y_dependencia(proyecto):
 
 def test_dependencia_desconocida_y_ciclo(proyecto):
     raiz, paquete, datos, crudo, (a, b) = proyecto
-    from dataclasses import replace
 
     with pytest.raises(ValueError, match="desconocida"):
         orquestador.orden_topologico([replace(a, depende_de=("z",))])

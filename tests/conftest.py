@@ -8,6 +8,9 @@ Malla tipo WAVERYS de 0.2°: nodos con lon ≥ −75.0 sin dato (tierra).
 from __future__ import annotations
 
 import matplotlib
+import requests
+
+from peruvian_wave_analysis.sitio import ConfigMapa, zonas
 
 matplotlib.use("Agg")
 
@@ -46,7 +49,6 @@ def datos_sinteticos(tmp_path):
 
 @pytest.fixture
 def cfg_sintetica(datos_sinteticos):
-    from peruvian_wave_analysis.sitio import ConfigMapa
 
     raiz, ruta_bat, ruta_wav = datos_sinteticos
     return ConfigMapa(
@@ -125,14 +127,11 @@ def consultar_falso(url, recuadro, pagina=1000):
 @pytest.fixture(autouse=True)
 def sin_red(monkeypatch):
     """Ninguna prueba accede a la red: las zonas salen de ZONAS_SINTETICAS."""
-    from peruvian_wave_analysis.sitio import zonas
 
     monkeypatch.setattr(zonas, "_consultar", consultar_falso)
 
     def _prohibido(*a, **k):
         raise AssertionError("acceso a la red en una prueba")
-
-    import requests
 
     monkeypatch.setattr(requests, "get", _prohibido)
     monkeypatch.setattr(requests.Session, "request", _prohibido)

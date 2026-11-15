@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -57,7 +58,6 @@ def test_profundidad_vectorizada_y_nan_fuera(tmp_path):
 
 
 # --- Gate de la ficha (F01-K-01, F01-K-02) ---
-import pandas as pd  # noqa: E402
 
 GATE_SERIE = {
     "cumple": True,

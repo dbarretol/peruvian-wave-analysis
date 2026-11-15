@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from peruvian_wave_analysis import estilo
+from peruvian_wave_analysis import estilo, manifiesto
 
 
 def test_posiciones_de_trazado():
@@ -47,7 +47,6 @@ def test_atributos_privados_de_matplotlib_existen():
 
 
 def test_guardado_determinista(tmp_path):
-    from peruvian_wave_analysis import manifiesto
 
     hashes = []
     for i in range(2):
