@@ -27,17 +27,17 @@ class Estratificacion:
     mes_inicio: int = 1
 
     @classmethod
-    def desde(cls, meses: Mapping[str, Sequence[int]], mes_inicio: int = 1) -> "Estratificacion":
+    def desde(cls, meses: Mapping[str, Sequence[int]], mes_inicio: int = 1) -> Estratificacion:
         e = cls(tuple((str(k), tuple(int(m) for m in v)) for k, v in meses.items()), int(mes_inicio))
         e.validar()
         return e
 
     @classmethod
-    def mensual(cls, mes_inicio: int = 1) -> "Estratificacion":
+    def mensual(cls, mes_inicio: int = 1) -> Estratificacion:
         return cls.desde({f"{m:02d}": [m] for m in range(1, 13)}, mes_inicio)
 
     @classmethod
-    def anual(cls, mes_inicio: int = 1) -> "Estratificacion":
+    def anual(cls, mes_inicio: int = 1) -> Estratificacion:
         return cls.desde({"anual": list(range(1, 13))}, mes_inicio)
 
     @property

@@ -32,7 +32,7 @@ def bloques_anuales(serie: pd.Series | pd.DataFrame, est: Estratificacion) -> di
 def bloques_por_estrato(serie: pd.Series | pd.DataFrame, est: Estratificacion) -> dict[tuple[int, str], Any]:
     """Bloques (año de bloque, estrato), solo para el remuestreo por estrato con estratos declarados independientes."""
     anio, etq = est.anio_bloque(serie.index), est.etiqueta(serie.index)
-    claves = sorted(set(zip(anio.tolist(), etq.tolist())), key=lambda c: (c[0], est.nombres.index(c[1])))
+    claves = sorted(set(zip(anio.tolist(), etq.tolist(), strict=True)), key=lambda c: (c[0], est.nombres.index(c[1])))
     return {(int(a), str(s)): serie.iloc[np.flatnonzero((anio == a) & (etq == s))] for a, s in claves}
 
 

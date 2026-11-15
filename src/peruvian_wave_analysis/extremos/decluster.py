@@ -57,7 +57,7 @@ def decluster_rachas(
     grupo = np.cumsum(nueva) - 1
     inicios = np.flatnonzero(nueva)
     fines = np.concatenate([inicios[1:], [exc.size]])
-    pos_pico = np.array([exc[s + int(np.argmax(v[exc[s:e]]))] for s, e in zip(inicios, fines)])
+    pos_pico = np.array([exc[s + int(np.argmax(v[exc[s:e]]))] for s, e in zip(inicios, fines, strict=True)])
     pos_ini, pos_fin = exc[inicios], exc[fines - 1]
     k = int(np.floor(iet_horas / paso_horas + 1e-9))
     acum = np.concatenate([[0], np.cumsum(hueco)])

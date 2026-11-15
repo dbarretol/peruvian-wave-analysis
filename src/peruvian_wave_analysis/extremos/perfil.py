@@ -322,17 +322,19 @@ def perfil_rl_multiestrato(
     n, E = [int(v) for v in n], [float(v) for v in anios_con_dato]
     if not xs or not (len(xs) == len(n) == len(E) == len(ajustes)):
         raise ValueError("excesos, n, anios_con_dato y ajustes deben tener un elemento por estrato")
-    if any(nj != x.size or nj == 0 for nj, x in zip(n, xs)):
+    if any(nj != x.size or nj == 0 for nj, x in zip(n, xs, strict=True)):
         raise ValueError("n de cada estrato debe ser su número de excesos (> 0)")
     if not all(a.valido for a in ajustes):
         raise ValueError("El perfil requiere ajustes válidos en todos los estratos")
-    lam = [nj / ej for nj, ej in zip(n, E)]
-    rl = nivel_retorno_multiestrato(u, [EstratoRetorno(lj, a.xi, a.sigma) for lj, a in zip(lam, ajustes)], T)
+    lam = [nj / ej for nj, ej in zip(n, E, strict=True)]
+    rl = nivel_retorno_multiestrato(
+        u, [EstratoRetorno(lj, a.xi, a.sigma) for lj, a in zip(lam, ajustes, strict=True)], T
+    )
     if not np.isfinite(rl):
         raise ValueError("El RL_T con varios estratos no tiene solución sobre el umbral")
     z_hat = rl - u
     m = _Multi(xs, n, E, T)
-    th_hat = m.a_theta([(a.xi, a.sigma, lj) for a, lj in zip(ajustes, lam)])
+    th_hat = m.a_theta([(a.xi, a.sigma, lj) for a, lj in zip(ajustes, lam, strict=True)])
     l_hat = m.loglik(th_hat)
     q = float(stats.chi2.ppf(nivel, 1))
     estado = {"th": th_hat, "rescates": 0, "sin_resolver": 0}
