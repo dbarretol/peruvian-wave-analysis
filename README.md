@@ -117,7 +117,7 @@ En `WAVE_DATA_DIR`:
 
 - `raw/`: insumos descargados, de solo lectura, registrados en `raw/MANIFEST.sha256` y `raw/MANIFEST.json` (hash, origen, parámetros, fecha de acceso). Un insumo existente se reutiliza tras verificar su hash; las zonas, solo si son del mismo día.
 - `interim/F01-sitio-y-fuentes/mapa-sitio/<nombre>/` (exploratorio): `mapa.png`, `candidatos.csv`, `metadatos.json`, `siguiente_paso.md`.
-- `processed/F01-sitio-y-fuentes/mapa-sitio-final/<nombre>/` (definitivo): `mapa.png`, `candidatos.csv`, `ficha_nodo.json`, `MANIFEST.json`.
+- `processed/F01-sitio-y-fuentes/mapa-sitio-final/<nombre>/` (definitivo): `mapa.png` (contexto regional con el nodo elegido, sin candidatos), `detalle_nodo.png` (la celda del nodo y sus ocho vecinas con la batimetría a resolución completa, líneas de profundidad, profundidad y tierra de cada celda), `nodos.csv` (todos los nodos recalculados con GEBCO, sin numeración), `ficha_nodo.json` (nodo elegido y vecindario de 3 × 3) y `MANIFEST.json`.
 
 ### Columnas de `candidatos.csv`
 
