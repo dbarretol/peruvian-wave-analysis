@@ -1,0 +1,4 @@
+# Resoluciones manuales de la F3 (contrato de la F3, §3.9 y §3.10). Versionadas en git; entran en la huella de
+# la etapa datos-serie. Cada entrada: tiempo (UTC), regla, decision (descartar | mantener), motivo, fecha, autor.
+# Descartar uno de los 20 máximos (regla: maximo) exige además confirmado_por_usuario: AAAA-MM-DD.
+[]
