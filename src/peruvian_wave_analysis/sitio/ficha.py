@@ -16,7 +16,7 @@ import pandas as pd
 import xarray as xr
 
 from .. import __version__, manifiesto, rutas
-from . import batimetria, costa, exposicion as ex, ficha_md, observaciones as ob, waverys
+from . import batimetria, costa, exposicion as ex, ficha_md, observaciones as ob, serie, waverys
 
 RESPALDO = (-14.8, -76.0)
 URL_IBTRACS = ("https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/"
@@ -258,6 +258,8 @@ def generar(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> dict
 
     # Gate de la F1 (§4).
     fallas = gate_ficha(resultados, crono, expo.sectores, gate, gebco.name)
+    if gate:
+        fallas += serie.corresponde(gate, raiz_raw)  # F01-K-03: el informe corresponde a los archivos actuales
 
     # Publicación (staging + MANIFEST.json).
     with tempfile.TemporaryDirectory() as tmp:

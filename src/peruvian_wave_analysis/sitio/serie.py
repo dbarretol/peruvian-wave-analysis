@@ -172,6 +172,48 @@ def _abrir(rutas: list[Path]) -> xr.Dataset:
     return xr.concat(partes, dim="time", data_vars="all", coords="minimal", compat="override", join="override")
 
 
+def cobertura_de_manifiesto(rutas: list[Path], raiz_raw: Path) -> Cobertura:
+    """Cobertura del catálogo anotada en el manifiesto el día de la descarga (contrato §4.2; F01-K-03).
+
+    Exige que todos los archivos anuales anoten el mismo dataset, versión, período, paso y variables.
+    """
+    claves = ("dataset_id", "version", "inicio", "fin", "paso_h")
+    catalogos = []
+    for r in rutas:
+        c = manifiesto.verificar(raiz_raw, r).get("catalogo")
+        if not c:
+            raise ErrorSerie(f"{Path(r).name}: el manifiesto no anota el catálogo del día de la descarga.")
+        catalogos.append(c)
+    firmas = {tuple(c[k] for k in claves) + (tuple(sorted(c["variables"])),) for c in catalogos}
+    if len(firmas) != 1:
+        raise ErrorSerie(f"Los archivos anuales anotan coberturas distintas del catálogo: {sorted(firmas)}. "
+                         "Volver a descargar los años afectados con el mismo catálogo.")
+    c = catalogos[0]
+    return Cobertura(c["dataset_id"], c["version"], c["inicio"], c["fin"], float(c["paso_h"]), sorted(c["variables"]),
+                     min(x.get("consulta_utc", "") for x in catalogos))
+
+
+def corresponde(informe: dict, raiz_raw: Path) -> list[str]:
+    """Fallas si el informe del gate no corresponde a los archivos anuales actuales del manifiesto (F01-K-03)."""
+    anotados = informe.get("archivos_sha256")
+    if not anotados:
+        return ["el informe del gate de la serie no anota los hashes de los archivos (volver a correr `serie-waverys`)"]
+    entradas = manifiesto.leer(raiz_raw)
+    actuales = {Path(k).name: v["sha256"] for k, v in entradas.items() if k.replace("\\", "/").startswith("waverys/serie/")}
+    fallas = []
+    for nombre, h in anotados.items():
+        if nombre not in actuales:
+            fallas.append(f"{nombre} del informe de la serie ya no está en el manifiesto")
+        elif actuales[nombre] != h:
+            fallas.append(f"{nombre}: el hash cambió desde que se verificó la serie")
+        elif not (raiz_raw / "waverys" / "serie" / nombre).exists():
+            fallas.append(f"{nombre}: falta el archivo")
+    sobran = sorted(set(actuales) - set(anotados))
+    if sobran:
+        fallas.append(f"archivos de la serie no verificados por el gate: {', '.join(sobran)}")
+    return fallas
+
+
 def verificar(rutas: list[Path], cob: Cobertura, cfg: ConfigSerie, raiz_raw: Path,
               valido_malla: xr.DataArray) -> dict:
     """Gate de la serie (contrato §4.2). Devuelve el informe; lanza ErrorSerie si algo falla.
@@ -179,7 +221,8 @@ def verificar(rutas: list[Path], cob: Cobertura, cfg: ConfigSerie, raiz_raw: Pat
     ``valido_malla``: máscara de la malla registrada (True = con dato), con coordenadas lat y lon.
     """
     fallas: list[str] = []
-    versiones = {manifiesto.verificar(raiz_raw, r).get("version_dataset") for r in rutas}  # verifica también el hash
+    entradas = {Path(r).name: manifiesto.verificar(raiz_raw, r) for r in rutas}  # verifica también el hash
+    versiones = {e.get("version_dataset") for e in entradas.values()}
     if versiones != {cob.version}:
         fallas.append(f"versiones de dataset distintas o inesperadas: {sorted(map(str, versiones))}")
 
@@ -221,6 +264,7 @@ def verificar(rutas: list[Path], cob: Cobertura, cfg: ConfigSerie, raiz_raw: Pat
             "inicio": str(t.min()) if t.size else None, "fin": str(t.max()) if t.size else None,
             "fraccion_sin_dato_en_el_nodo": faltan_nodo, "celdas_con_dato": int(con_dato.values.sum()),
             "celdas": int(con_dato.size), "versiones": sorted(map(str, versiones)), "archivos": len(rutas),
+            "archivos_sha256": {k: e["sha256"] for k, e in sorted(entradas.items())},
             "fallas": fallas, "cumple": not fallas,
         }
     finally:

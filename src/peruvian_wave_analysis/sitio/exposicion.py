@@ -53,7 +53,12 @@ def rumbo(lat0, lon0, lat, lon) -> np.ndarray:
 
 
 def sector_de(rumbo_deg) -> np.ndarray:
-    return (np.round(np.asarray(rumbo_deg, float) / ANCHO_SECTOR) % N_SECTORES).astype(int)
+    """Sector de 22.5° de un rumbo, con intervalos semiabiertos [centro − 11.25°, centro + 11.25°) (F01-K-06).
+
+    Así un rumbo en el límite exacto va siempre al sector siguiente en sentido horario. La cuña de rayos
+    del contrato (§3.1) cubre ±11° alrededor del centro: los 0.25° de cada borde no tienen rayo propio.
+    """
+    return (np.floor((np.asarray(rumbo_deg, float) + ANCHO_SECTOR / 2) / ANCHO_SECTOR) % N_SECTORES).astype(int)
 
 
 def _dentro(extension, lat, lon) -> bool:

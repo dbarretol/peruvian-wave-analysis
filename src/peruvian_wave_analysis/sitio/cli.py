@@ -172,14 +172,19 @@ def main_serie(argv=None) -> int:
     lat, lon, valido = waverys.leer_malla(malla, "VHM0", (cfg.oeste, cfg.este, cfg.sur, cfg.norte))
     mascara = xr.DataArray(valido, coords={"lat": lat, "lon": lon}, dims=("lat", "lon"))
     try:
-        informe = serie.verificar(archivos, cob, cfg, raiz_raw, mascara)
+        cob_descarga = serie.cobertura_de_manifiesto(archivos, raiz_raw)  # F01-K-03: el catálogo del día de la descarga
+        if (cob_descarga.inicio, cob_descarga.fin) != (cob.inicio, cob.fin):
+            print(f"Nota: el catálogo de hoy ({cob.inicio} → {cob.fin}) difiere del anotado al descargar "
+                  f"({cob_descarga.inicio} → {cob_descarga.fin}); el gate usa el de la descarga.")
+        informe = serie.verificar(archivos, cob_descarga, cfg, raiz_raw, mascara)
     except serie.ErrorSerie as exc:
         if destino.exists():
             destino.unlink()  # un gate fallido invalida el informe publicado anterior
         print(f"GATE FALLIDO: {exc}", file=sys.stderr)
         return 1
     destino.parent.mkdir(parents=True, exist_ok=True)
-    informe["catalogo"] = cob.__dict__
+    informe["catalogo"] = cob_descarga.__dict__
+    informe["catalogo_consulta_de_hoy"] = cob.__dict__
     informe["malla_referencia"] = str(malla)
     destino.write_text(json.dumps(informe, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     print(f"Gate de la serie: CUMPLE. Informe en {destino}")
