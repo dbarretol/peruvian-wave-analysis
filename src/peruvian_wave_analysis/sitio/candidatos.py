@@ -54,7 +54,7 @@ def _densificar(lineas: list[np.ndarray], paso_grados: float) -> np.ndarray:
     """Vértices de las líneas con puntos intermedios cada ``paso_grados`` como máximo."""
     pts = []
     for ln in lineas:
-        for a, b in zip(ln[:-1], ln[1:]):
+        for a, b in zip(ln[:-1], ln[1:], strict=True):
             n = max(1, int(np.ceil(np.hypot(*(b - a)) / paso_grados)))
             t = np.linspace(0.0, 1.0, n, endpoint=False)[:, None]
             pts.append(a + t * (b - a))

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import requests
 import shapely
 from shapely.geometry import shape
 
@@ -21,7 +22,6 @@ URL_NE = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v{versi
 
 def _bajar(url: str) -> bytes:
     """Punto de sustitución en las pruebas."""
-    import requests
 
     r = requests.get(url, timeout=120)
     r.raise_for_status()

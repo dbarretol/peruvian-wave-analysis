@@ -16,16 +16,25 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
+from pathlib import Path
 
 import matplotlib
+import matplotlib.pyplot as plt
+import pandas as pd
 
+from .. import rutas
+from ..comun.errores import ErrorGate as ErrorGateComun
+from . import serie
 from .config import ConfigMapa
+from .final import ConfigFinal, ErrorGate, generar_mapa_final
+from .gebco import registrar
+from .mapa import generar_mapa
 
 _COLUMNAS = ["candidato", "lat", "lon", "prof_nodo_m", "prof_media_celda_m", "dist_costa_km", "zonas_colision"]
 
 
 def _imprimir(res, cfg: ConfigMapa) -> None:
-    import pandas as pd
 
     cols = _COLUMNAS[:5] + [f"dist_iso_{cfg.isobata_principal:g}m_km"] + _COLUMNAS[5:]
     top = res.tabla[res.tabla["candidato"].notna()]
@@ -100,7 +109,6 @@ def main(argv=None) -> int:
         return 2
     if not a.mostrar:
         matplotlib.use("Agg")
-    from .mapa import generar_mapa  # después de fijar el backend
 
     cfg = ConfigMapa(**base)
     res = generar_mapa(cfg)
@@ -111,8 +119,6 @@ def main(argv=None) -> int:
         f"(NetCDF) con N {n:.1f}, S {s:.1f}, O {o:.1f}, E {e:.1f}; ver {res.salidas['siguiente_paso']}"
     )
     if a.mostrar:
-        import matplotlib.pyplot as plt
-
         plt.show()
     return 0
 
@@ -125,8 +131,6 @@ def main_registrar_gebco(argv=None) -> int:
     p.add_argument("--version", required=True, help="Versión de la malla, p. ej. GEBCO_2025.")
     p.add_argument("--datos", help="Raíz de WAVE-DATA (si no, WAVE_DATA_DIR).")
     a = p.parse_args(argv)
-    from .. import rutas
-    from .gebco import registrar
 
     ruta, entrada = registrar(a.archivo, rutas.directorio_datos(a.datos), a.version)
     print(f"Registrado: {ruta}\nsha256: {entrada['sha256']}")
@@ -146,7 +150,6 @@ def main_final(argv=None) -> int:
     p.add_argument("--datos", help="Raíz de WAVE-DATA (si no, la de la corrida exploratoria o WAVE_DATA_DIR).")
     a = p.parse_args(argv)
     matplotlib.use("Agg")
-    from .final import ConfigFinal, ErrorGate, generar_mapa_final
 
     try:
         res = generar_mapa_final(
@@ -177,11 +180,6 @@ def main_serie(argv=None) -> int:
     Escribe solo en ``raw/`` (con el catálogo del día anotado en el manifiesto). No publica nada: el gate lo hace
     ``serie-waverys-gate``, sin red.
     """
-    import time
-    from pathlib import Path
-
-    from .. import rutas
-    from . import serie
 
     p = argparse.ArgumentParser(
         prog="serie-waverys",
@@ -218,11 +216,6 @@ def main_serie(argv=None) -> int:
 
 def main_serie_gate(argv=None) -> int:
     """Gate de la serie, sin red, publicado con staging y manifiesto."""
-    from pathlib import Path
-
-    from .. import rutas
-    from ..comun.errores import ErrorGate
-    from . import serie
 
     p = argparse.ArgumentParser(
         prog="serie-waverys-gate", description="Verifica la serie descargada y publica su gate."
@@ -233,7 +226,7 @@ def main_serie_gate(argv=None) -> int:
     raiz = Path(rutas.directorio_datos(a.datos))
     try:
         salida = serie.publicar_gate(raiz, a.nombre)
-    except (ErrorGate, serie.ErrorSerie) as exc:
+    except (ErrorGateComun, serie.ErrorSerie) as exc:
         print(f"GATE FALLIDO: {exc}", file=sys.stderr)
         return 1
     print(f"Gate de la serie: CUMPLE. Publicado en {salida}")

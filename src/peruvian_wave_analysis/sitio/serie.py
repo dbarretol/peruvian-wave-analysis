@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -30,8 +30,9 @@ import xarray as xr
 
 from .. import manifiesto
 from ..comun import etapa, json_estricto, orquestador
+from ..comun.errores import GateFallido, InsumoFaltante
 from .batimetria import _NOMBRES_LAT, _NOMBRES_LON, _fmt, _primer_nombre
-from .waverys import PRODUCTO_WAVERYS
+from .waverys import PRODUCTO_WAVERYS, leer_malla
 
 DATASET = "cmems_mod_glo_wav_my_0.2deg_PT3H-i"
 VARIABLES_ADR_0016 = [
@@ -94,7 +95,7 @@ class ConfigSerie:
 
 def _describir(dataset_id: str) -> dict:
     """Punto de sustitución en las pruebas: devuelve el JSON de ``copernicusmarine describe``."""
-    import copernicusmarine
+    import copernicusmarine  # noqa: PLC0415 (importación diferida: copernicusmarine es pesado y solo hace falta al descargar)
 
     return copernicusmarine.describe(dataset_id=dataset_id).model_dump()
 
@@ -123,7 +124,7 @@ def consultar_catalogo(cfg: ConfigSerie) -> Cobertura:
                             a(t["maximum_value"]),
                             t["step"] / 3.6e6,
                             variables,
-                            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                         )
                         _comprobar_catalogo(cfg, cob)
                         return cob
@@ -147,7 +148,7 @@ def _comprobar_catalogo(cfg: ConfigSerie, cob: Cobertura) -> None:
 
 def _subset(**params) -> None:
     """Punto de sustitución en las pruebas."""
-    import copernicusmarine
+    import copernicusmarine  # noqa: PLC0415 (importación diferida: copernicusmarine es pesado y solo hace falta al descargar)
 
     copernicusmarine.subset(**params)
 
@@ -327,6 +328,7 @@ def verificar(rutas: list[Path], cob: Cobertura, cfg: ConfigSerie, raiz_raw: Pat
                 np.tile(con_dato["lon"].values, con_dato.sizes["lat"]),
                 con_dato.transpose("lat", "lon").values.ravel(),
                 ref.transpose("lat", "lon").values.ravel(),
+                strict=True,
             )
             if bool(x) != bool(y)
         ]
@@ -402,7 +404,6 @@ def publicar_gate(
 ) -> Path:
     """Verifica la serie descargada sin red y publica ``serie_gate.json``. Un gate fallido borra el informe anterior
     y lanza ``GateFallido``. ``mascara`` solo para las pruebas: si falta, se lee de ``malla``."""
-    from .waverys import leer_malla
 
     cfg = cfg or ConfigSerie()
     raiz = Path(raiz)
@@ -432,7 +433,6 @@ def publicar_gate(
 
 def leer_gate(raiz: Path, nombre: str) -> tuple[Path, dict] | None:
     """(ruta, informe) del gate publicado de la serie; None si no hay salida publicada o su gate falló."""
-    from ..comun.errores import GateFallido, InsumoFaltante
 
     salida = ruta_gate(raiz, nombre)
     try:

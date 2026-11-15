@@ -17,7 +17,8 @@ from shapely.geometry import box as caja
 from shapely.ops import unary_union
 
 from .. import estilo
-from . import batimetria, candidatos, waverys, zonas as zonas_mod
+from . import batimetria, candidatos, waverys
+from . import zonas as zonas_mod
 from .config import ConfigMapa
 from .mapa import _HALO, _barra_de_escala, _dibujar_zonas, _dms, _flecha_norte
 

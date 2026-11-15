@@ -8,15 +8,17 @@ el manifiesto. Una capa que falla queda como **no evaluada**; nunca como «sin z
 from __future__ import annotations
 
 import json
+import ssl
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import requests
-from requests.adapters import HTTPAdapter
 import shapely
+import truststore
+from requests.adapters import HTTPAdapter
 from shapely import make_valid
 from shapely.geometry import Point, box, shape
 from shapely.ops import unary_union
@@ -224,9 +226,6 @@ class _AdaptadorSistema(HTTPAdapter):
     """
 
     def init_poolmanager(self, *args, **kwargs):
-        import ssl
-
-        import truststore
 
         kwargs["ssl_context"] = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         return super().init_poolmanager(*args, **kwargs)
@@ -353,7 +352,7 @@ def leer_capa(capa: Capa, ruta: Path) -> tuple[list[Zona], list[str]]:
 def obtener(recuadro: tuple[float, float, float, float], raiz_datos: Path, capas: tuple[Capa, ...] = CAPAS) -> Zonas:
     """Descarga (o reutiliza las del mismo día) y lee todas las capas para el recuadro."""
     raiz_raw = rutas.raw(raiz_datos)
-    fecha = datetime.now(timezone.utc).strftime("%Y%m%d")
+    fecha = datetime.now(UTC).strftime("%Y%m%d")
     res = Zonas()
     for capa in capas:
         try:
@@ -401,7 +400,7 @@ def transform(fn, geom):
 
 
 def _a_km(lon0: float, lat0: float):
-    from .candidatos import RADIO_TIERRA_KM
+    from .candidatos import RADIO_TIERRA_KM  # noqa: PLC0415 (importación diferida: candidatos importa zonas (ciclo))
 
     k = RADIO_TIERRA_KM * np.pi / 180
     c = np.cos(np.radians(lat0))
@@ -441,7 +440,7 @@ class Evaluador:
 
 
 def _de_km(lon0: float, lat0: float):
-    from .candidatos import RADIO_TIERRA_KM
+    from .candidatos import RADIO_TIERRA_KM  # noqa: PLC0415 (importación diferida: candidatos importa zonas (ciclo))
 
     k = RADIO_TIERRA_KM * np.pi / 180
     c = np.cos(np.radians(lat0))

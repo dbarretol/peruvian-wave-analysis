@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 QUID = "CMEMS-GLO-QUID-001-032 v1.5 (31/05/2024)"
 SEMEDO = (
@@ -309,11 +310,7 @@ def componer(d: Path, ficha_nodo: dict, gate_serie: dict | None, deptho_m: float
     nv = sorted(obs.loc[obs["asimilacion"] == "no verificable", "mision"].unique())
     if nv:
         a(f"\nMisiones «no verificables» (no figuran en el QUID; se tratan como asimiladas): {', '.join(nv)}.\n")
-    a(
-        f"\n**Regla del respaldo:** "
-        + "; ".join(f"{k}: {v}" for k, v in r["regla_respaldo_por_regimen"].items())
-        + ".\n"
-    )
+    a("\n**Regla del respaldo:** " + "; ".join(f"{k}: {v}" for k, v in r["regla_respaldo_por_regimen"].items()) + ".\n")
     inex = r.get("teselas_inexistentes", [])
     a(
         f"\nTeselas sin archivo en AODN: {len(inex)}. El código solo las marca así ante un 404 (cualquier otro error "
@@ -513,7 +510,6 @@ def componer(d: Path, ficha_nodo: dict, gate_serie: dict | None, deptho_m: float
 def deptho_en(ruta: Path | None, lat: float, lon: float) -> float | None:
     if ruta is None or not Path(ruta).exists():
         return None
-    import xarray as xr
 
     with xr.open_dataset(ruta) as ds:
         nl = "latitude" if "latitude" in ds.coords else "lat"

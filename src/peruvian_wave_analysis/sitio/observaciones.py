@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import requests
 import shapely
 import xarray as xr
 
@@ -97,7 +98,6 @@ def _bloque(tesela: str) -> str:
 
 def _bajar(url: str) -> bytes | None:
     """Punto de sustitución en las pruebas. Devuelve None si la tesela no existe (404)."""
-    import requests
 
     r = requests.get(url, timeout=120)
     if r.status_code == 404:
@@ -201,7 +201,7 @@ class Costa:
     geom: object
 
     @classmethod
-    def desde_tierra(cls, tierra, lat0: float, lon0: float, margen_grados: float = 4.0) -> "Costa":
+    def desde_tierra(cls, tierra, lat0: float, lon0: float, margen_grados: float = 4.0) -> Costa:
         recorte = shapely.clip_by_rect(
             tierra, lon0 - margen_grados, lat0 - margen_grados, lon0 + margen_grados, lat0 + margen_grados
         )
@@ -244,8 +244,8 @@ def clasificar(
         ~sitio & (d["dist_nodo_km"] <= RADIO_REGION_KM) & (d["dist_costa_km"] >= COSTA_MIN_REGION_KM) & hondo & expuesto
     )
     d["clase"] = np.select([sitio, region], ["sitio", "región"], "cuenca")
-    d["asimilacion"] = [asimilacion(m, t) for m, t in zip(d["mision"], d["tiempo"])]
-    d["asimilacion_periodo"] = [asimilacion_por_periodo(m, t) for m, t in zip(d["mision"], d["tiempo"])]
+    d["asimilacion"] = [asimilacion(m, t) for m, t in zip(d["mision"], d["tiempo"], strict=True)]
+    d["asimilacion_periodo"] = [asimilacion_por_periodo(m, t) for m, t in zip(d["mision"], d["tiempo"], strict=True)]
     d["regimen"] = [regimen(t) for t in d["tiempo"]]
     d["util_para_sesgo"] = d["asimilacion"] == "no asimilada"
     nuevo = d.groupby("mision")["tiempo"].diff().dt.total_seconds().fillna(np.inf) > CORTE_PASADA_S

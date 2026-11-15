@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import platform
+import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import matplotlib
@@ -31,9 +33,11 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, PathPatch
 from matplotlib.path import Path as MplPath
 from matplotlib.ticker import FuncFormatter, MaxNLocator
+from shapely.geometry import box as caja
 
 from .. import __version__, estilo, rutas
-from . import batimetria, candidatos, waverys, zonas as zonas_mod
+from . import batimetria, candidatos, waverys
+from . import zonas as zonas_mod
 from .config import ConfigMapa
 
 FASE = "F01-sitio-y-fuentes"
@@ -152,7 +156,6 @@ def _nombre_corto(z) -> str:
 def _dibujar_zonas(ax, zonas: zonas_mod.Zonas, cfg: ConfigMapa, evitar=None) -> list:
     """Color por familia (verde SERNANP, pardo hidrocarburos); exclusión opaca con borde rojo; nombres sobre las
     zonas."""
-    from shapely.geometry import box as caja
 
     o, e, s, n = cfg.recuadro
     m = 0.12 * (e - o)  # las etiquetas se colocan lejos del borde para que no se salgan del marco
@@ -593,8 +596,6 @@ def guardar_figura(fig, destino: Path, intentos: int = 10, espera_s: float = 0.5
 
     En Windows un PNG abierto en un visor queda bloqueado y ``savefig`` directo falla a medias.
     """
-    import os
-    import time
 
     tmp = destino.with_suffix(".tmp.png")
     fig.savefig(tmp, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15, metadata={"Software": None})
@@ -602,12 +603,12 @@ def guardar_figura(fig, destino: Path, intentos: int = 10, espera_s: float = 0.5
         try:
             os.replace(tmp, destino)
             return
-        except PermissionError:
+        except PermissionError as exc:
             if k == intentos - 1:
                 tmp.unlink(missing_ok=True)
                 raise PermissionError(
                     f"No se pudo escribir {destino}: está abierto en otro programa. Ciérralo y vuelve a correr."
-                )
+                ) from exc
             time.sleep(espera_s)
 
 
@@ -659,7 +660,7 @@ def _guardar(cfg: ConfigMapa, raiz: Path, res: ResultadoMapa) -> dict[str, Path]
     res.tabla.to_csv(salidas["tabla"], index=False, float_format="%.4f", encoding="utf-8")
     meta = {
         "tipo": "mapa exploratorio",
-        "generado_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generado_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "version_codigo": __version__,
         "python": platform.python_version(),
         "configuracion": cfg.como_dict(),

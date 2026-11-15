@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import shapely
+from scipy import ndimage
 
 R_TIERRA_KM = 6371.0
 N_SECTORES = 16
@@ -127,7 +128,7 @@ def calcular(
                 o, e, s, n = ext_m
                 en = (lo >= o) & (lo <= e) & (la >= s) & (la <= n)
                 hasta = int(np.argmin(en)) if not en.all() else en.size
-                tm = np.array([es_tierra_modelo(a, b) for a, b in zip(la[:hasta], lo[:hasta])], bool)
+                tm = np.array([es_tierra_modelo(a, b) for a, b in zip(la[:hasta], lo[:hasta], strict=True)], bool)
                 fila["dist_tierra_modelo_km"] = float(d_loc[int(np.argmax(tm))]) if tm.any() else np.nan
                 fila["extension_malla_km"] = float(d_loc[hasta - 1]) if hasta else 0.0
             filas.append(fila)
@@ -167,7 +168,6 @@ def obstaculos(
     mayor área del recorte; las demás son islas. ``tierra_islas``: polígonos de islas menores (lista de
     geometrías shapely) que se agregan si no coinciden con una isla de GEBCO.
     """
-    from scipy import ndimage
 
     lat, lon = elev["lat"].values, elev["lon"].values
     t = elev.values > 0
@@ -222,6 +222,6 @@ def obstaculos(
     df["sector"] = sector_de(df["rumbo"])
     df["clase_sector"] = df["sector"].map(sectores.set_index("sector")["clase"])
     df["tierra_en_modelo"] = [
-        bool(es_tierra_modelo(a, b)) if es_tierra_modelo else np.nan for a, b in zip(df["lat"], df["lon"])
+        bool(es_tierra_modelo(a, b)) if es_tierra_modelo else np.nan for a, b in zip(df["lat"], df["lon"], strict=True)
     ]
     return df.sort_values("dist_min_km").reset_index(drop=True)

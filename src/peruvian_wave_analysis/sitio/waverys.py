@@ -14,7 +14,7 @@ import numpy as np
 import xarray as xr
 
 from .. import manifiesto, rutas
-from .batimetria import _fmt, _primer_nombre, _NOMBRES_LAT, _NOMBRES_LON
+from .batimetria import _NOMBRES_LAT, _NOMBRES_LON, _fmt, _primer_nombre
 from .config import PASO_WAVERYS, ConfigMapa
 
 PRODUCTO_WAVERYS = "GLOBAL_MULTIYEAR_WAV_001_032"
@@ -50,7 +50,7 @@ def _descargar(cfg: ConfigMapa, raiz_raw: Path) -> tuple[Path, dict]:
     if destino.exists():
         return destino, manifiesto.verificar(raiz_raw, destino)
     destino.parent.mkdir(parents=True, exist_ok=True)
-    import copernicusmarine  # importación diferida: es pesada y solo hace falta al descargar
+    import copernicusmarine  # noqa: PLC0415 (importación diferida: copernicusmarine es pesado y solo hace falta al descargar)
 
     params = dict(
         dataset_id=w.dataset_id,

@@ -23,10 +23,11 @@ import numpy as np
 import xarray as xr
 
 from .. import __version__, manifiesto, rutas
-from . import batimetria, candidatos, waverys, zonas as zonas_mod
+from . import batimetria, candidatos, waverys
+from . import zonas as zonas_mod
 from .config import ConfigMapa
-from .gebco import FUENTE_GEBCO
 from .detalle import dibujar_detalle
+from .gebco import FUENTE_GEBCO
 from .mapa import FASE, ResultadoMapa, dibujar
 
 TOL_COBERTURA = 0.01  # grados
@@ -92,7 +93,7 @@ def _publicar(destino: Path, archivos: dict[str, Path], insumos: dict) -> None:
         shutil.rmtree(destino)
     destino.mkdir(parents=True)
     salidas = {}
-    for nombre, p in archivos.items():
+    for p in archivos.values():
         shutil.copy2(p, destino / p.name)
         salidas[p.name] = manifiesto.sha256(destino / p.name)
     (destino / "MANIFEST.json").write_text(

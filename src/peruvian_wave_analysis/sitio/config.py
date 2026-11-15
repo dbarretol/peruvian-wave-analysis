@@ -141,6 +141,6 @@ class ConfigMapa:
         return asdict(self)
 
     @classmethod
-    def desde_yaml(cls, ruta: str | Path) -> "ConfigMapa":
+    def desde_yaml(cls, ruta: str | Path) -> ConfigMapa:
         datos = yaml.safe_load(Path(ruta).read_text(encoding="utf-8"))
         return cls(**datos)

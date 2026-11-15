@@ -8,18 +8,25 @@ como insumo con su hash.
 
 from __future__ import annotations
 
+import argparse
 import json
+import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import requests
 import xarray as xr
+from shapely.geometry import shape
 
 from .. import __version__, manifiesto, rutas
 from ..comun import etapa, orquestador
 from ..comun.errores import GateFallido
-from . import batimetria, costa, exposicion as ex, ficha_md, observaciones as ob, serie, waverys
+from . import batimetria, costa, ficha_md, serie, waverys
+from . import exposicion as ex
+from . import observaciones as ob
 
 RESPALDO = (-14.8, -76.0)
 URL_IBTRACS = (
@@ -149,7 +156,6 @@ def gate_ficha(
 
 def _bajar(url: str) -> bytes:
     """Punto de sustitución en las pruebas."""
-    import requests
 
     r = requests.get(url, timeout=300)
     r.raise_for_status()
@@ -450,7 +456,6 @@ def _escribir_md(carpeta: Path, raiz_raw: Path, ficha_nodo: dict, gate: dict | N
 def regenerar_md(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> Path:
     """Rehace solo ``ficha_sitio.md`` desde las salidas ya publicadas, sin recalcular, y vuelve a publicar la ficha
     con los mismos insumos (verificados de nuevo por hash)."""
-    import shutil
 
     raiz = Path(rutas.directorio_datos(raiz_datos))
     final = raiz / "processed" / "F01-sitio-y-fuentes" / "mapa-sitio-final" / nombre
@@ -470,15 +475,12 @@ def regenerar_md(nombre: str = "marcona-200m", raiz_datos: str | None = None) ->
 
 
 def json_geoms(ruta: Path) -> list:
-    from shapely.geometry import shape
 
     datos = json.loads(Path(ruta).read_text(encoding="utf-8"))
     return [shape(f["geometry"]) for f in datos["features"] if f.get("geometry")]
 
 
 def main(argv=None) -> int:
-    import argparse
-    import sys
 
     p = argparse.ArgumentParser(prog="ficha-sitio", description="Ficha del sitio de la F1 y su gate (contrato §2–§4).")
     p.add_argument("--nombre", default="marcona-200m")
