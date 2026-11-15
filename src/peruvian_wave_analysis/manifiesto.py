@@ -8,6 +8,7 @@ El manifiesto vive en la raíz de ``raw/`` en dos archivos:
 - ``MANIFEST.sha256``: una línea ``<sha256>  <ruta relativa>`` por archivo (verificable con ``sha256sum -c``);
 - ``MANIFEST.json``: los mismos archivos con su origen, parámetros de la consulta y fecha de acceso.
 """
+
 from __future__ import annotations
 
 import hashlib
