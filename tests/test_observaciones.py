@@ -84,6 +84,37 @@ def test_asimilacion(mision, fecha, esperado):
     assert ob.asimilacion(mision, pd.Timestamp(fecha)) == esperado
 
 
+@pytest.mark.parametrize("mision,fecha,contrato,periodo", [
+    ("SARAL", "2014-06-01", "asimilada", "no asimilada"),    # antes de su período (2016-03)
+    ("SARAL", "2017-06-01", "asimilada", "asimilada"),
+    ("GFO", "2007-06-01", "asimilada", "no asimilada"),      # después de su período (2006-08)
+    ("CFOSAT", "2019-06-01", "asimilada", "no asimilada"),   # antes de 2020-02
+    ("ERS-1", "1992-06-01", "no asimilada", "no asimilada"),
+    ("HY-2", "2016-06-01", "no asimilada", "no asimilada"),
+    ("SWOT", "2024-06-01", "no verificable", "no verificable"),
+])
+def test_sensibilidad_por_periodo(mision, fecha, contrato, periodo):
+    t = pd.Timestamp(fecha)
+    assert ob.asimilacion(mision, t) == contrato
+    assert ob.asimilacion_por_periodo(mision, t) == periodo
+
+
+def test_resumen_con_la_regla_de_sensibilidad(sectores, costa):
+    p = _punto(270, 5)
+    d = ob.clasificar(_df([("SARAL", "2014-01-01", p), ("SARAL", "2017-01-01", p)]), LAT0, LON0, costa, _prof, sectores)
+    contrato = ob.cobertura(ob.resumen(d)).set_index("regimen")
+    sens = ob.cobertura(ob.resumen(d, "asimilacion_periodo")).set_index("regimen")
+    assert contrato.loc["desde 1993 (asimilado)", "pasadas_sitio_N"] == 0
+    assert sens.loc["desde 1993 (asimilado)", "pasadas_sitio_N"] == 1
+
+
+def test_profundidad_vectorizada(sectores, costa):
+    p1, p2 = _punto(270, 10), _punto(270, 15)
+    prof = lambda la, lo: np.where(np.asarray(lo) < -75.9, 3000.0, np.nan)  # noqa: E731
+    d = ob.clasificar(_df([("HY-2", "2015-01-01", p1), ("HY-2", "2015-01-02", p2)]), LAT0, LON0, costa, prof, sectores)
+    assert list(d["fuente_prof"]) == ["archivo (SRTM30+)", "GEBCO_2026"]
+
+
 def test_pasadas_y_cobertura_por_regimen(sectores, costa):
     p = _punto(270, 5)
     filas = []
