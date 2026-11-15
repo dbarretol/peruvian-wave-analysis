@@ -17,6 +17,7 @@ huella es semántica (``huella.huella_codigo``): comentarios, docstrings y forma
 Las dependencias son las declaradas más las deducidas del manifiesto: una etapa que registra un insumo dentro de
 la salida de otra depende de ella aunque no lo declare.
 """
+
 from __future__ import annotations
 
 import ast
@@ -46,6 +47,7 @@ class Etapa:
 
 
 # --- Cierre de importaciones -------------------------------------------------------------------
+
 
 def _archivos_de_modulo(nombre: str, raiz: Path) -> tuple[list[Path], bool]:
     """Archivos que ejecuta ``import <nombre>`` dentro de ``raiz`` (el paquete) y si el último es un paquete."""
@@ -114,8 +116,12 @@ def modulos_importados(et: Etapa, raiz: Path = DIR_PAQUETE) -> list[Path]:
     """Cierre de importaciones fuera del código propio de la etapa, con los YAML junto a cada módulo."""
     raiz = Path(raiz).resolve()
     propios = [Path(et.codigo).resolve(), *(Path(e).resolve() for e in et.codigo_extra)]
-    pendientes = [p for b in propios for p in ([b] if b.is_file() else sorted(b.rglob("*.py")))
-                  if p.suffix == ".py" and "__pycache__" not in p.parts]
+    pendientes = [
+        p
+        for b in propios
+        for p in ([b] if b.is_file() else sorted(b.rglob("*.py")))
+        if p.suffix == ".py" and "__pycache__" not in p.parts
+    ]
     vistos: set[Path] = set()
     while pendientes:
         f = pendientes.pop()
@@ -131,8 +137,12 @@ def modulos_importados(et: Etapa, raiz: Path = DIR_PAQUETE) -> list[Path]:
 def rutas_codigo(et: Etapa, raiz: Path = DIR_PAQUETE, proyecto: Path = DIR_PROYECTO) -> list[Path]:
     """Rutas cuya huella registra la publicación y compara el orquestador. Único punto de verdad."""
     lock = Path(proyecto) / LOCK
-    return [Path(et.codigo), *map(Path, et.codigo_extra), *modulos_importados(et, raiz),
-            *([lock] if lock.is_file() else [])]
+    return [
+        Path(et.codigo),
+        *map(Path, et.codigo_extra),
+        *modulos_importados(et, raiz),
+        *([lock] if lock.is_file() else []),
+    ]
 
 
 def huella_etapa(et: Etapa, raiz: Path = DIR_PAQUETE, proyecto: Path = DIR_PROYECTO) -> str:
@@ -140,6 +150,7 @@ def huella_etapa(et: Etapa, raiz: Path = DIR_PAQUETE, proyecto: Path = DIR_PROYE
 
 
 # --- Orden y estado -----------------------------------------------------------------------------
+
 
 def orden_topologico(etapas: Sequence[Etapa]) -> list[str]:
     por_nombre = {e.nombre: e for e in etapas}
@@ -206,8 +217,9 @@ class Estado:
     motivos: tuple[str, ...] = ()
 
 
-def diagnostico(etapas: Sequence[Etapa], raiz_datos: Path, raiz: Path = DIR_PAQUETE,
-                proyecto: Path = DIR_PROYECTO) -> dict[str, Estado]:
+def diagnostico(
+    etapas: Sequence[Etapa], raiz_datos: Path, raiz: Path = DIR_PAQUETE, proyecto: Path = DIR_PROYECTO
+) -> dict[str, Estado]:
     """Estado de cada etapa leyendo sus salidas publicadas, en orden topológico."""
     etapas = dependencias_deducidas(etapas, raiz_datos)
     por_nombre = {e.nombre: e for e in etapas}

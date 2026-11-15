@@ -17,6 +17,7 @@ Reglas:
   ``GATE_FAILED.json`` con el motivo. Ninguna etapa siguiente puede leer resultados viejos.
 - Leer una salida publicada (``exigir_publicada``) verifica el hash de cada archivo.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -77,42 +78,61 @@ def abrir_staging(salida: Path) -> Path:
     return st
 
 
-def fallar(staging: Path, salida: Path, motivos: Sequence[str], raices_codigo: Sequence[Path],
-           criterios: Mapping[str, Any] | None = None, base_codigo: Path = huella.DIR_PROYECTO) -> Path:
+def fallar(
+    staging: Path,
+    salida: Path,
+    motivos: Sequence[str],
+    raices_codigo: Sequence[Path],
+    criterios: Mapping[str, Any] | None = None,
+    base_codigo: Path = huella.DIR_PROYECTO,
+) -> Path:
     """Borra la salida publicada y el staging y deja solo GATE_FAILED.json. No lanza la excepción."""
     staging, salida = Path(staging), Path(salida)
     shutil.rmtree(staging, ignore_errors=True)
     if salida.exists():
         shutil.rmtree(salida)
     salida.mkdir(parents=True)
-    json_estricto.escribir(salida / GATE_FALLIDO, {
-        "motivos": list(motivos),
-        "criterios": dict(criterios or {}),
-        "huella_codigo": huella.huella_codigo(raices_codigo, base_codigo),
-        "huella_version": huella.VERSION,
-    })
+    json_estricto.escribir(
+        salida / GATE_FALLIDO,
+        {
+            "motivos": list(motivos),
+            "criterios": dict(criterios or {}),
+            "huella_codigo": huella.huella_codigo(raices_codigo, base_codigo),
+            "huella_version": huella.VERSION,
+        },
+    )
     return salida
 
 
-def publicar(staging: Path, salida: Path, gate: Gate, raices_codigo: Sequence[Path], insumos: Mapping[str, Path],
-             raiz_datos: Path, semilla: int | None, base_codigo: Path = huella.DIR_PROYECTO,
-             extra: Mapping[str, Any] | None = None) -> Path:
+def publicar(
+    staging: Path,
+    salida: Path,
+    gate: Gate,
+    raices_codigo: Sequence[Path],
+    insumos: Mapping[str, Path],
+    raiz_datos: Path,
+    semilla: int | None,
+    base_codigo: Path = huella.DIR_PROYECTO,
+    extra: Mapping[str, Any] | None = None,
+) -> Path:
     """Publica el staging como salida si el gate pasa; si no, aplica ``fallar`` y lanza GateFallido."""
     staging, salida = Path(staging), Path(salida)
     if not gate.aprobado:
         fallar(staging, salida, gate.motivos, raices_codigo, gate.criterios, base_codigo)
         raise GateFallido(f"Gate fallido en {salida.name}: {'; '.join(gate.motivos) or 'sin motivo'}")
     hashes = exigir_insumos(insumos)
-    salidas = {p.relative_to(staging).as_posix(): manifiesto.sha256(p)
-               for p in sorted(staging.rglob("*")) if p.is_file()}
+    salidas = {
+        p.relative_to(staging).as_posix(): manifiesto.sha256(p) for p in sorted(staging.rglob("*")) if p.is_file()
+    }
     if MANIFIESTO in salidas or GATE_FALLIDO in salidas:
         raise ValueError(f"El staging no puede contener {MANIFIESTO} ni {GATE_FALLIDO}")
     contenido: dict[str, Any] = {
         "gate": {"aprobado": True, "criterios": gate.criterios},
         "huella_codigo": huella.huella_codigo(raices_codigo, base_codigo),
         "huella_version": huella.VERSION,
-        "insumos": {k: {"ruta": ruta_relativa(Path(v), raiz_datos), "sha256": hashes[k]}
-                    for k, v in sorted(insumos.items())},
+        "insumos": {
+            k: {"ruta": ruta_relativa(Path(v), raiz_datos), "sha256": hashes[k]} for k, v in sorted(insumos.items())
+        },
         "salidas": salidas,
         "semilla": semilla,
     }
@@ -149,7 +169,9 @@ def exigir_publicada(salida: Path) -> dict[str, Any]:
 
 
 @contextmanager
-def staging_protegido(salida: Path, raices_codigo: Sequence[Path], base_codigo: Path = huella.DIR_PROYECTO) -> Iterator[Path]:
+def staging_protegido(
+    salida: Path, raices_codigo: Sequence[Path], base_codigo: Path = huella.DIR_PROYECTO
+) -> Iterator[Path]:
     """Abre el staging; si algo falla antes de publicar, borra la salida publicada y relanza.
 
     ``publicar`` consume el staging (lo renombra o lo borra): si sigue existiendo al salir con error, el fallo

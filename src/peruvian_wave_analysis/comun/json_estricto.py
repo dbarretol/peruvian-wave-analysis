@@ -8,6 +8,7 @@
   serializable es un error.
 - ``leer(ruta)`` rechaza ``NaN``, ``Infinity`` y ``-Infinity``.
 """
+
 from __future__ import annotations
 
 import json
@@ -42,8 +43,12 @@ def finitos(obj: Any) -> Any:
 
 def dumps(obj: Any, *, indent: int | None = 2, ordenar: bool = True) -> str:
     """JSON estándar, UTF-8 sin escapar, terminado en salto de línea."""
-    return json.dumps(finitos(obj), ensure_ascii=False, indent=indent, sort_keys=ordenar,
-                      default=_por_defecto, allow_nan=False) + "\n"
+    return (
+        json.dumps(
+            finitos(obj), ensure_ascii=False, indent=indent, sort_keys=ordenar, default=_por_defecto, allow_nan=False
+        )
+        + "\n"
+    )
 
 
 def escribir(ruta: Path, obj: Any, **kwargs: Any) -> Path:

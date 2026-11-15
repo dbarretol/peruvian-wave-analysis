@@ -7,6 +7,7 @@ Cualquier otro archivo (por ejemplo ``uv.lock``) cuenta por sus bytes, con los f
 La huella lleva su versión y la de Python, porque el volcado del árbol sintáctico puede cambiar entre versiones.
 El sha256 de un archivo es el de ``manifiesto.sha256``: no se duplica.
 """
+
 from __future__ import annotations
 
 import ast
@@ -28,8 +29,12 @@ def _sin_docstrings(arbol: ast.AST) -> ast.AST:
     for nodo in ast.walk(arbol):
         if isinstance(nodo, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             cuerpo = nodo.body
-            if (cuerpo and isinstance(cuerpo[0], ast.Expr) and isinstance(cuerpo[0].value, ast.Constant)
-                    and isinstance(cuerpo[0].value.value, str)):
+            if (
+                cuerpo
+                and isinstance(cuerpo[0], ast.Expr)
+                and isinstance(cuerpo[0].value, ast.Constant)
+                and isinstance(cuerpo[0].value.value, str)
+            ):
                 nodo.body = cuerpo[1:] or [ast.Pass()]
     return arbol
 
@@ -70,8 +75,11 @@ def _archivos(raiz: Path) -> list[tuple[str, Path]]:
         return [(raiz.name, raiz)]
     if not raiz.is_dir():
         raise FileNotFoundError(f"No existe la raíz de código {raiz}")
-    return [(p.relative_to(raiz).as_posix(), p) for p in sorted(raiz.rglob("*"))
-            if p.is_file() and p.suffix in SUFIJOS and "__pycache__" not in p.parts]
+    return [
+        (p.relative_to(raiz).as_posix(), p)
+        for p in sorted(raiz.rglob("*"))
+        if p.is_file() and p.suffix in SUFIJOS and "__pycache__" not in p.parts
+    ]
 
 
 def huella_codigo(raices: Iterable[Path], base: Path | None = DIR_PROYECTO) -> str:

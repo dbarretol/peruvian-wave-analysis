@@ -1,4 +1,5 @@
 """Errores que detienen una etapa. Un insumo faltante o alterado es un error, nunca una advertencia."""
+
 from __future__ import annotations
 
 

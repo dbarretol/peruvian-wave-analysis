@@ -3,6 +3,7 @@
 Una semilla raíz del proyecto; cada (etapa, propósito, ...) deriva la suya con ``SeedSequence`` a partir de un hash
 estable de los nombres. Ninguna función usa el estado global del generador.
 """
+
 from __future__ import annotations
 
 import hashlib
