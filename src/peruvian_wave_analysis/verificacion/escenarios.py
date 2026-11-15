@@ -162,13 +162,13 @@ def _replica_rl(p: dict, rng: np.random.Generator) -> dict:
 def _replica_rl_multi(p: dict, rng: np.random.Generator) -> dict:
     E = float(p["anios"])
     xs, ns, ajustes = [], [], []
-    for xi, sigma, lam in zip(p["xi"], p["sigma"], p["tasa"]):
+    for xi, sigma, lam in zip(p["xi"], p["sigma"], p["tasa"], strict=True):
         n = int(rng.poisson(lam * E))
         xs.append(stats.genpareto.rvs(c=xi, scale=sigma, size=n, random_state=rng))
         ns.append(n)
         ajustes.append(gpd.ajustar_gpd(xs[-1]))
     rl_v = retorno.nivel_retorno_multiestrato(
-        0.0, [EstratoRetorno(l_, xi, s) for xi, s, l_ in zip(p["xi"], p["sigma"], p["tasa"])], T_RETORNO
+        0.0, [EstratoRetorno(l_, xi, s) for xi, s, l_ in zip(p["xi"], p["sigma"], p["tasa"], strict=True)], T_RETORNO
     )
     fila = {"n": sum(ns), "valido": all(a.valido for a in ajustes)}
     if not fila["valido"]:
@@ -221,6 +221,14 @@ def _replica_poisson_param(p: dict, rng: np.random.Generator) -> dict:
     }
 
 
+def poner_tormenta(hs: np.ndarray, i: int, largo: int, rng: np.random.Generator) -> None:
+    """Racha continua sobre u = 1 desde la celda ``i``; si llega al final de la serie, se corta allí. Siempre consume
+    ``largo`` números del generador, de modo que el corte no altera el resto de la réplica."""
+    valores = 1.0 + rng.random(largo)
+    tramo = hs[i : i + largo]
+    hs[i : i + largo] = np.maximum(tramo, valores[: tramo.size])
+
+
 def serie_continua(p: dict, rng: np.random.Generator) -> pd.DataFrame:
     """Serie de 3 h sin huecos: tormentas con llegadas Poisson por estrato en tiempo calendario, cada una una racha
     continua sobre u = 1 de 1 a 12 celdas, sin bajadas internas; las que se solapan se funden. Con ``frac_replica``
@@ -232,12 +240,11 @@ def serie_continua(p: dict, rng: np.random.Generator) -> pd.DataFrame:
     inicios = np.flatnonzero(rng.random(rejilla.size) < inten * PASO_H)
     for i in inicios:
         largo = int(rng.integers(1, 13))
-        hs[i : i + largo] = np.maximum(hs[i : i + largo], 1.0 + rng.random(largo))
+        poner_tormenta(hs, i, largo, rng)
         if p["frac_replica"] > 0 and rng.random() < p["frac_replica"]:
             fin = i + largo - 1
             j = fin + int(np.ceil(rng.uniform(IET_H, 2 * IET_H) / PASO_H))
-            largo2 = int(rng.integers(1, 13))
-            hs[j : j + largo2] = np.maximum(hs[j : j + largo2], 1.0 + rng.random(len(hs[j : j + largo2])))
+            poner_tormenta(hs, j, int(rng.integers(1, 13)), rng)
     return pd.DataFrame({"Hs": hs}, index=rejilla)
 
 
@@ -282,7 +289,7 @@ def _replica_boot_ar3h(p: dict, rng: np.random.Generator) -> dict:
     serie = pd.Series(y, index=rejilla)
     bloques = bootstrap.bloques_anuales(serie, _ANUAL)
     reps = bootstrap.bootstrap_bloques(
-        bloques, lambda l: float(np.concatenate([b.to_numpy() for b in l]).mean()), B_BOOT, rng
+        bloques, lambda bloques_rep: float(np.concatenate([b.to_numpy() for b in bloques_rep]).mean()), B_BOOT, rng
     )
     ic = bootstrap.ic_percentil(reps, float(y.mean()))
     ee_iid = y.std(ddof=1) / np.sqrt(y.size)
@@ -304,7 +311,10 @@ def _replica_boot_tasa_ar(p: dict, rng: np.random.Generator) -> dict:
     cuentas = rng.poisson(p["tasa"] * np.exp(eta - var_eta / 2))  # E[λ_y] = tasa
     serie = pd.Series(cuentas.astype(float), index=pd.date_range("1980-07-01", periods=n_a, freq="12MS"))
     reps = bootstrap.bootstrap_bloques(
-        bootstrap.bloques_anuales(serie, _ANUAL), lambda l: float(np.mean([b.iloc[0] for b in l])), B_BOOT, rng
+        bootstrap.bloques_anuales(serie, _ANUAL),
+        lambda bloques_rep: float(np.mean([b.iloc[0] for b in bloques_rep])),
+        B_BOOT,
+        rng,
     )
     ic = bootstrap.ic_percentil(reps, float(cuentas.mean()))
     return {

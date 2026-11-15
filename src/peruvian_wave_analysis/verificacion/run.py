@@ -22,7 +22,6 @@ import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from .. import estilo, rutas
@@ -135,7 +134,7 @@ def correr_escenario(e: esc.Escenario, r: int, procesos: int, repeticion: bool =
         filas = [esc.correr_replica(*a) for a in args]
     else:
         with ProcessPoolExecutor(max_workers=procesos) as ex:
-            filas = list(ex.map(esc.correr_replica, *zip(*args), chunksize=max(1, r // (4 * procesos))))
+            filas = list(ex.map(esc.correr_replica, *zip(*args, strict=True), chunksize=max(1, r // (4 * procesos))))
     return pd.DataFrame(filas).sort_values("replica").reset_index(drop=True)
 
 
@@ -147,7 +146,7 @@ def _escribir_csv(df: pd.DataFrame, ruta: Path) -> None:
 def _figura(resultados: list[dict], ruta: Path) -> None:
     filas = [(r["id"], b) for r in resultados for b in r["bandas"]]
     fig, ax = estilo.nueva_figura(figsize=(8.0, 0.32 * len(filas) + 1.4))
-    for k, (eid, b) in enumerate(filas):
+    for k, (_, b) in enumerate(filas):
         y = len(filas) - 1 - k
         ax.plot([100 * b["lo"], 100 * b["hi"]], [y, y], color=estilo.TINTA_TENUE, lw=3, solid_capstyle="butt")
         ax.plot([100 * b["valor"]], [y], "o", color=estilo.TINTA if b["cumple"] else estilo.COLOR_BORDE_EXCLUSION, ms=4)

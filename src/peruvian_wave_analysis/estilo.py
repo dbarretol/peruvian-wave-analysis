@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 
 RC = {
@@ -126,7 +127,6 @@ _TOL_PX = 1.0
 
 
 def nueva_figura(filas: int = 1, columnas: int = 1, **kw):
-    import matplotlib.pyplot as plt
 
     matplotlib.rcParams.update(RC)
     matplotlib.rcParams.update(RC_ANALISIS)
@@ -220,7 +220,6 @@ def guardar_figura(fig, ruta: Path) -> Path:
 
     Solo PNG: PDF y SVG incrustan la fecha de creación.
     """
-    import matplotlib.pyplot as plt
 
     ruta = Path(ruta)
     if ruta.suffix.lower() != ".png":
