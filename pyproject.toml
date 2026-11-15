@@ -32,6 +32,7 @@ mapa-sitio-final = "peruvian_wave_analysis.sitio.cli:main_final"
 registrar-gebco = "peruvian_wave_analysis.sitio.cli:main_registrar_gebco"
 serie-waverys = "peruvian_wave_analysis.sitio.cli:main_serie"
 ficha-sitio = "peruvian_wave_analysis.sitio.ficha:main"
+verificacion-f2 = "peruvian_wave_analysis.verificacion.run:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -45,4 +46,5 @@ testpaths = ["tests"]
 addopts = "--strict-markers"
 markers = [
     "red: descarga datos de servicios externos; excluir con -m \"not red\"",
+    "lento: tarda más de un minuto; excluir con -m \"not lento\"",
 ]
