@@ -30,6 +30,8 @@ dev = [
 mapa-sitio = "peruvian_wave_analysis.sitio.cli:main"
 mapa-sitio-final = "peruvian_wave_analysis.sitio.cli:main_final"
 registrar-gebco = "peruvian_wave_analysis.sitio.cli:main_registrar_gebco"
+serie-waverys = "peruvian_wave_analysis.sitio.cli:main_serie"
+ficha-sitio = "peruvian_wave_analysis.sitio.ficha:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -4,10 +4,17 @@ Análisis de oleaje extremo y contornos ambientales Hs–Tp a partir del reanál
 
 ## Estado
 
+Fase 1 (sitio y fuentes) completa: mapa de selección de sitio, serie de WAVERYS y ficha del sitio.
+
 Primera herramienta: **mapa de selección de sitio**, en dos pasos.
 
 1. **Mapa exploratorio** (`mapa-sitio`): dada una coordenada de referencia, descarga la batimetría (GMRT), la malla de nodos de WAVERYS y las zonas protegidas y de hidrocarburos, y dibuja las isóbatas elegidas (por defecto 200, 100 y 50 m), la malla con el recuadro de cada celda, las zonas de exclusión y de colisión de usos, y hasta 3 nodos candidatos.
 2. **Mapa definitivo** (`mapa-sitio-final`): con el nodo ya elegido y un recorte de GEBCO descargado a mano, rehace el mapa **sin descargar nada**, verificando el hash de cada insumo, y comprueba que el nodo cumple los criterios.
+
+Después:
+
+3. **Serie de WAVERYS** (`serie-waverys`): consulta el catálogo, descarga el registro completo del bloque de 5 × 5 nodos alrededor del nodo, un archivo por año, con la versión del dataset fija, reanudación y hash por archivo, y pasa el gate de la serie.
+4. **Ficha del sitio** (`ficha-sitio`): exposición por sectores (Natural Earth), obstáculos (GEBCO), inventario de observaciones de altimetría (Ribal y Young, 2019, en AODN) con su independencia respecto de WAVERYS, ciclones tropicales (IBTrACS), cronología del producto, gate de la fase y `ficha_sitio.md`. No lee valores de Hs ni de Tp.
 
 ## Instalación
 
@@ -55,6 +62,24 @@ uv run mapa-sitio-final \
 ```
 
 Si el nodo no cumple los criterios con GEBCO, termina con `GATE FALLIDO` y borra la salida definitiva anterior.
+
+### 4. Serie de WAVERYS
+
+```bash
+uv run serie-waverys                 # registro completo y gate
+uv run serie-waverys --anio 2020     # prueba con un año (sin gate)
+```
+
+Si el gate falla, termina con `GATE FALLIDO` y borra el informe anterior. El gate usa la cobertura del catálogo anotada en el manifiesto el día de la descarga y guarda el hash de cada archivo verificado.
+
+### 5. Ficha del sitio
+
+```bash
+uv run ficha-sitio              # todo (≈ 8 min; descarga Natural Earth, teselas de AODN e IBTrACS si faltan)
+uv run ficha-sitio --solo-md    # rehace solo ficha_sitio.md desde las salidas ya publicadas
+```
+
+Requiere el mapa definitivo (`ficha_nodo.json`), el informe del gate de la serie y un recorte de GEBCO que cubra 200 km alrededor del nodo y del respaldo. Termina con código 1 si el gate de la fase no cumple.
 
 ### Cuaderno
 
@@ -118,6 +143,8 @@ En `WAVE_DATA_DIR`:
 - `raw/`: insumos descargados, de solo lectura, registrados en `raw/MANIFEST.sha256` y `raw/MANIFEST.json` (hash, origen, parámetros, fecha de acceso). Un insumo existente se reutiliza tras verificar su hash; las zonas, solo si son del mismo día.
 - `interim/F01-sitio-y-fuentes/mapa-sitio/<nombre>/` (exploratorio): `mapa.png`, `candidatos.csv`, `metadatos.json`, `siguiente_paso.md`.
 - `processed/F01-sitio-y-fuentes/mapa-sitio-final/<nombre>/` (definitivo): `mapa.png` (contexto regional con el nodo elegido, sin candidatos), `detalle_nodo.png` (la celda del nodo y sus ocho vecinas con la batimetría a resolución completa, líneas de profundidad, profundidad y tierra de cada celda), `nodos.csv` (todos los nodos recalculados con GEBCO, sin numeración), `ficha_nodo.json` (nodo elegido y vecindario de 3 × 3) y `MANIFEST.json`.
+- `raw/waverys/serie/`: la serie de WAVERYS, un NetCDF por año.
+- `processed/F01-sitio-y-fuentes/ficha-sitio/<nombre>/`: `serie_gate.json` (gate de la serie), `ficha_sitio.md`, `exposicion.csv` (por sector) y `exposicion_rayos.csv` (por rayo), `obstaculos.csv`, `observaciones.csv` y `cobertura_observaciones.csv` (por misión y por régimen), `observaciones_sensibilidad_periodo.csv` y `cobertura_sensibilidad_periodo.csv` (sensibilidad rotulada), `cronologia_waverys.csv`, `misiones_asimiladas_waverys.csv`, `resumen_ficha.json` (con el gate de la fase) y `MANIFEST.json`.
 
 ### Columnas de `candidatos.csv`
 
@@ -152,5 +179,8 @@ Las pruebas usan datos sintéticos en directorios temporales y **no acceden a la
 - **WAVERYS**: Copernicus Marine Service, producto `GLOBAL_MULTIYEAR_WAV_001_032`, dataset `cmems_mod_glo_wav_my_0.2deg_PT3H-i`. DOI: 10.48670/moi-00022.
 - **Batimetría**: GMRT, Global Multi-Resolution Topography (Ryan et al., 2009), para el mapa exploratorio; GEBCO para el definitivo.
 - **Zonas**: SERNANP (geoservicios.sernanp.gob.pe) y PERUPETRO vía GEOCATMIN-INGEMMET (geocatmin.ingemmet.gob.pe).
+- **Costa**: Natural Earth 1:10 m (`ne_10m_land`, `ne_10m_minor_islands`), versión 5.1.2.
+- **Altimetría**: Ribal y Young (2019), altimetría calibrada multimisión, IMOS/AODN (thredds.aodn.org.au). doi 10.1038/s41597-019-0083-9.
+- **Ciclones tropicales**: IBTrACS v04r01 (NOAA NCEI), cuenca del Pacífico Sur.
 
 Ver las condiciones de uso de cada servicio antes de redistribuir datos derivados. Este mapa es un filtro exploratorio para una tesis; no sustituye la consulta a las autoridades.
