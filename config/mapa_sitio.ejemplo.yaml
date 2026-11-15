@@ -11,6 +11,10 @@ n_candidatos: 5                  # ADR-0013 fija 3 por defecto; aquí 5 a pedido
 resguardo_km: 1.0                # ADR-0013
 min_vecinas: 0                   # ADR-0014: las vecinas no descartan (0 a 8)
 max_tierra: 1.0                  # ADR-0014: tierra en la celda no descarta (0 a 1)
+puntos:                          # solo se dibujan; no intervienen en los criterios
+  - nombre: Parque eólico Tres Hermanas (aprox.)
+    latitud: 15°23′20″S          # grados decimales o sexagesimales (O = oeste)
+    longitud: 75°04′15″O
 # directorio_datos: C:/WORKSPACES/TESIS-M5-WAVE/WAVE-DATA   # o variable de entorno WAVE_DATA_DIR
 
 batimetria:

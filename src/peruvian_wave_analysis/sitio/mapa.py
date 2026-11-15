@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib import patheffects
+from matplotlib.collections import LineCollection
 from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, PathPatch
@@ -176,6 +177,29 @@ def _dibujar_zonas(ax, zonas: zonas_mod.Zonas, cfg: ConfigMapa) -> list:
     return manejadores
 
 
+def _dms(v: float, hemisferios: str) -> str:
+    """15°23′20″S: grados, minutos y segundos redondeados al segundo."""
+    s = round(abs(v) * 3600)
+    return f"{s // 3600}°{s % 3600 // 60:02d}′{s % 60:02d}″{hemisferios[1] if v < 0 else hemisferios[0]}"
+
+
+def _bordes_de_celda(malla: waverys.Malla, elev) -> list:
+    """Segmentos únicos del borde de las celdas con algo de agua según la batimetría.
+
+    Una celda sin batimetría (fuera del recorte) se dibuja: no se sabe si es tierra.
+    """
+    h = malla.paso / 2
+    lados = set()
+    for la in malla.lat:
+        for lo in malla.lon:
+            frac_tierra = candidatos._estadisticas_celda(elev, float(la), float(lo), malla.paso)[2]
+            if frac_tierra >= 1:
+                continue
+            x0, x1, y0, y1 = (round(float(v), 6) for v in (lo - h, lo + h, la - h, la + h))
+            lados |= {((x0, y0), (x1, y0)), ((x0, y1), (x1, y1)), ((x0, y0), (x0, y1)), ((x1, y0), (x1, y1))}
+    return [list(s) for s in lados]
+
+
 def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, tabla: pd.DataFrame,
             zonas: zonas_mod.Zonas | None, modo: str = "exploratorio",
             nodo_elegido: tuple[float, float] | None = None, aviso: str | None = None):
@@ -221,19 +245,16 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
         manejadores.append(Line2D([], [], color=color, lw=lw, ls=ls, label=f"Isóbata {d:g} m{principal}"))
     manejadores += manejadores_zonas
 
-    # Malla de WAVERYS: recuadro de cada celda, nodos válidos y enmascarados.
-    h = malla.paso / 2
-    for x in np.unique(np.concatenate([malla.lon - h, malla.lon + h])):
-        ax.axvline(x, color=estilo.TINTA_TENUE, lw=0.4, alpha=0.7, zorder=5)
-    for y in np.unique(np.concatenate([malla.lat - h, malla.lat + h])):
-        ax.axhline(y, color=estilo.TINTA_TENUE, lw=0.4, alpha=0.7, zorder=5)
+    # Malla de WAVERYS: borde de las celdas que tienen algo de agua y nodos con dato.
+    # Las celdas enteramente en tierra y los nodos sin dato no se dibujan: solo recargan la vista.
+    ax.add_collection(LineCollection(_bordes_de_celda(malla, elev), colors=estilo.TINTA_TENUE, linewidths=0.4,
+                                     alpha=0.7, zorder=5))
     LON, LAT = np.meshgrid(malla.lon, malla.lat)
     ax.scatter(LON[malla.valido], LAT[malla.valido], s=10, c=estilo.TINTA, linewidths=0, zorder=6)
-    ax.scatter(LON[~malla.valido], LAT[~malla.valido], s=14, c=estilo.TINTA_SECUNDARIA, marker="x", linewidths=0.8, zorder=6)
     manejadores += [
-        Line2D([], [], color=estilo.TINTA_TENUE, lw=0.6, label=f"Borde de celda WAVERYS ({malla.paso:.1f}°)"),
+        Line2D([], [], color=estilo.TINTA_TENUE, lw=0.6,
+               label=f"Borde de celda WAVERYS ({malla.paso:.1f}°;\nse omiten las celdas solo de tierra)"),
         Line2D([], [], color=estilo.TINTA, marker="o", ls="", ms=4, label="Nodo WAVERYS con dato"),
-        Line2D([], [], color=estilo.TINTA_SECUNDARIA, marker="x", ls="", ms=5, label="Nodo WAVERYS sin dato (tierra)"),
     ]
 
     # Nodos que cumplen todo salvo las vecinas: se marcan para que se vea por qué no son candidatos.
@@ -261,6 +282,13 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
     ax.scatter([cfg.longitud], [cfg.latitud], s=220, marker="*", c=estilo.TINTA, edgecolors="white", linewidths=1.2, zorder=9)
     manejadores.append(Line2D([], [], color=estilo.TINTA, marker="*", ls="", ms=12, mec="white",
                               label=f"Referencia ({_fmt_lat(cfg.latitud)}, {_fmt_lon(cfg.longitud)})"))
+    for p in cfg.puntos:
+        ax.scatter([p.longitud], [p.latitud], s=70, marker="D", c=estilo.TINTA_SECUNDARIA, edgecolors="white",
+                   linewidths=1.2, zorder=9)
+        ax.annotate(p.nombre, (p.longitud, p.latitud), xytext=(7, -3), textcoords="offset points", fontsize=7.5,
+                    color=estilo.TINTA, path_effects=_HALO, zorder=9, va="top")
+        manejadores.append(Line2D([], [], color=estilo.TINTA_SECUNDARIA, marker="D", ls="", ms=7, mec="white",
+                                  label=f"{p.nombre} ({_dms(p.latitud, 'NS')}, {_dms(p.longitud, 'EO')})"))
 
     _barra_de_escala(ax, cfg)
     _flecha_norte(ax)

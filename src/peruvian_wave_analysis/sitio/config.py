@@ -29,6 +29,38 @@ class ConfigWaverys:
     archivo: str | None = None
 
 
+_SEXAGESIMAL = re.compile(
+    r"^\s*(\d+(?:\.\d+)?)\s*°\s*(?:(\d+(?:\.\d+)?)\s*['′]\s*)?(?:(\d+(?:\.\d+)?)\s*(?:[\"″]|'')\s*)?([NSEOW])\s*$",
+    re.IGNORECASE,
+)
+
+
+def a_grados(valor: float | str) -> float:
+    """Grados decimales desde un número o un texto sexagesimal como 15°23′20″S o 75°04'15\"O (O = W)."""
+    if not isinstance(valor, str):
+        return float(valor)
+    m = _SEXAGESIMAL.match(valor)
+    if not m:
+        return float(valor)
+    g, mi, se, h = m.groups()
+    v = float(g) + float(mi or 0) / 60 + float(se or 0) / 3600
+    return -v if h.upper() in "SOW" else v
+
+
+@dataclass
+class PuntoReferencia:
+    """Punto que solo se dibuja (instalación, proyecto, localidad). No interviene en los criterios."""
+    nombre: str
+    latitud: float | str
+    longitud: float | str
+
+    def __post_init__(self) -> None:
+        self.latitud = a_grados(self.latitud)
+        self.longitud = a_grados(self.longitud)
+        if not -90 < self.latitud < 90 or not -180 <= self.longitud <= 180:
+            raise ValueError(f"Punto de referencia «{self.nombre}» fuera de rango.")
+
+
 @dataclass
 class ConfigMapa:
     nombre: str
@@ -45,8 +77,10 @@ class ConfigMapa:
     directorio_datos: str | None = None  # None: variable de entorno WAVE_DATA_DIR
     batimetria: ConfigBatimetria = field(default_factory=ConfigBatimetria)
     waverys: ConfigWaverys = field(default_factory=ConfigWaverys)
+    puntos: list[PuntoReferencia] = field(default_factory=list)  # solo se dibujan
 
     def __post_init__(self) -> None:
+        self.puntos = [p if isinstance(p, PuntoReferencia) else PuntoReferencia(**p) for p in self.puntos or []]
         if isinstance(self.batimetria, dict):
             self.batimetria = ConfigBatimetria(**self.batimetria)
         if isinstance(self.waverys, dict):

@@ -194,3 +194,48 @@ def test_tierra_en_la_celda_es_informativa_salvo_max_tierra():
 def test_max_tierra_fuera_de_rango():
     with pytest.raises(ValueError):
         ConfigMapa(nombre="x", latitud=-15, longitud=-75, max_tierra=1.5)
+
+
+# --- Puntos de referencia y malla dibujada ---------------------------------------------------
+
+def test_grados_sexagesimales():
+    from peruvian_wave_analysis.sitio.config import a_grados
+    assert a_grados("15°23′20″S") == pytest.approx(-(15 + 23 / 60 + 20 / 3600))
+    assert a_grados("75°04'15\"O") == pytest.approx(-(75 + 4 / 60 + 15 / 3600))
+    assert a_grados("75°04′15″W") == a_grados("75°04′15″O")
+    assert a_grados("12°N") == 12 and a_grados(-15.5) == -15.5 and a_grados("-15.5") == -15.5
+    with pytest.raises(ValueError):
+        a_grados("15 grados sur")
+
+
+def test_puntos_en_config_y_mapa(cfg_sintetica):
+    from peruvian_wave_analysis.sitio.mapa import _dms
+    cfg_sintetica.puntos = [{"nombre": "Parque eólico (aprox.)", "latitud": "15°23′20″S", "longitud": "75°04′15″O"}]
+    cfg_sintetica.__post_init__()
+    p = cfg_sintetica.puntos[0]
+    assert (_dms(p.latitud, "NS"), _dms(p.longitud, "EO")) == ("15°23′20″S", "75°04′15″O")
+    r = generar_mapa(cfg_sintetica)
+    meta = json.loads(r.salidas["metadatos"].read_text(encoding="utf-8"))
+    assert meta["configuracion"]["puntos"][0]["latitud"] == pytest.approx(p.latitud)
+    textos = [t.get_text() for t in r.figura.axes[0].get_legend().get_texts()]
+    assert any(t.startswith("Parque eólico (aprox.) (15°23′20″S") for t in textos)
+    assert not any("sin dato" in t for t in textos)
+
+
+def test_no_se_dibujan_bordes_de_celdas_solo_de_tierra(cfg_sintetica):
+    from peruvian_wave_analysis.sitio.mapa import _bordes_de_celda
+    r = generar_mapa(cfg_sintetica, guardar=False)
+    elev, malla = r.batimetria.elevacion, r.malla
+    lados = _bordes_de_celda(malla, elev)
+    h = malla.paso / 2
+    fracs = {(round(float(la), 4), round(float(lo), 4)): candidatos._estadisticas_celda(elev, float(la), float(lo), malla.paso)[2]
+             for la in malla.lat for lo in malla.lon}
+    tierra = [c for c, f in fracs.items() if f >= 1]
+    assert tierra and any(f < 1 for f in fracs.values())  # el caso sintético tiene de ambas
+    centros = {(round((a[1] + b[1]) / 2, 4), round((a[0] + b[0]) / 2, 4)) for a, b in lados}
+    for la, lo in tierra:  # ningún lado de una celda solo de tierra que no comparta con una celda con agua
+        vecinas_con_agua = [fracs.get((round(la + dy, 4), round(lo + dx, 4)), 1) < 1
+                            for dy, dx in ((0, 2 * h), (0, -2 * h), (2 * h, 0), (-2 * h, 0))]
+        lados_celda = [(la, round(lo + h, 4)), (la, round(lo - h, 4)), (round(la + h, 4), lo), (round(la - h, 4), lo)]
+        for lado, compartido in zip(lados_celda, vecinas_con_agua):
+            assert (tuple(round(v, 4) for v in lado) in centros) == compartido

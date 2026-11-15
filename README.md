@@ -32,6 +32,7 @@ $env:WAVE_DATA_DIR = "C:\ruta\a\WAVE-DATA"
 uv run mapa-sitio --nombre marcona --lat -15.4 --lon -75.3
 uv run mapa-sitio --nombre marcona --lat -15.4 --lon -75.3 --isobatas 300 200 100 --semiancho 1.5
 uv run mapa-sitio --config config/mapa_sitio.ejemplo.yaml
+uv run mapa-sitio --nombre marcona --lat -15.4 --lon -75.3 --punto "Parque eólico (aprox.)" "15°23′20″S" "75°04′15″O"
 ```
 
 Al terminar indica el recuadro de GEBCO que hay que descargar, y lo deja escrito en `siguiente_paso.md`.
@@ -82,6 +83,7 @@ r.tabla.head()
 | `min_vecinas` | `0` | Mínimo de vecinas con dato para ser candidato (0 = no descarta). |
 | `max_tierra` | `1.0` | Fracción de tierra tolerada en la celda (1 = no descarta). |
 | `zonas` | `true` | `false` omite las zonas (el mapa lo declara). |
+| `puntos` | `[]` | Puntos que solo se dibujan (nombre, latitud, longitud), en grados decimales o sexagesimales (`15°23′20″S`, `75°04′15″O`). No intervienen en los criterios. En la línea de comandos: `--punto NOMBRE LAT LON`, repetible. |
 | `batimetria.fuente` | `gmrt` | `gmrt` (descarga) o `archivo` (NetCDF local). |
 | `batimetria.resolucion_gmrt` | `med` | `low`, `med`, `high` o `max`. |
 | `waverys.fuente` | `copernicus` | `copernicus` (descarga) o `archivo`. |
@@ -104,6 +106,8 @@ La fracción de tierra en la celda y las vecinas con dato se informan pero no de
 | Pozos petroleros | Áreas de alto valor para la conservación marina |
 | | Propuestas de ANP |
 | | Lotes de hidrocarburos con contrato |
+
+En el mapa, la malla de WAVERYS muestra el borde de las celdas que tienen algo de agua según la batimetría y los nodos con dato; las celdas enteramente en tierra y los nodos sin dato no se dibujan (siguen en `candidatos.csv`).
 
 Una capa que no se puede descargar queda como **no evaluada** en el mapa y en los metadatos; nunca se trata como «sin zonas». No hay fuente en línea para zonas militares, tráfico marítimo, fondeaderos, cables, franja de 5 millas, caladeros ni acuicultura: el mapa las lista como no evaluadas.
 

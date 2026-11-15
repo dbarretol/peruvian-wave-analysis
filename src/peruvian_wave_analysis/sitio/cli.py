@@ -52,6 +52,8 @@ def main(argv=None) -> int:
     p.add_argument("--resguardo-km", type=float, help="Resguardo alrededor de las zonas de exclusión (ADR-0013: 1 km).")
     p.add_argument("--min-vecinas", type=int, help="Mínimo de vecinas con dato (0 a 8). ADR-0014: 0, no descartan.")
     p.add_argument("--max-tierra", type=float, help="Fracción de tierra tolerada en la celda (0 a 1). ADR-0014: 1, no descarta.")
+    p.add_argument("--punto", nargs=3, action="append", metavar=("NOMBRE", "LAT", "LON"),
+                   help="Punto que solo se dibuja; acepta grados decimales o 15°23′20″S. Se puede repetir.")
     p.add_argument("--sin-zonas", action="store_true", help="No descarga zonas (el mapa lo declara).")
     p.add_argument("--datos", help="Raíz de WAVE-DATA (si no, variable de entorno WAVE_DATA_DIR).")
     p.add_argument("--mostrar", action="store_true", help="Abre la figura en una ventana además de guardarla.")
@@ -70,6 +72,8 @@ def main(argv=None) -> int:
         base["isobata_principal"] = None
     if a.sin_zonas:
         base["zonas"] = False
+    if a.punto:
+        base["puntos"] = [{"nombre": n, "latitud": la, "longitud": lo} for n, la, lo in a.punto]
     faltan = [k for k in ("nombre", "latitud", "longitud") if k not in base]
     if faltan:
         print(f"Faltan argumentos: {', '.join(faltan)} (o usa --config).", file=sys.stderr)
