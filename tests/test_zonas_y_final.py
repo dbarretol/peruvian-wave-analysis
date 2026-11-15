@@ -165,8 +165,7 @@ def test_hasta_tres_candidatos_fuera_de_exclusion(tabla_con_zonas):
     top = df[df["candidato"].notna()]
     assert top["candidato"].tolist() == [1, 2, 3]
     assert not top["excluido_por_zona"].any()
-    assert np.allclose(top["lon"], -75.4)
-    assert set(top["lat"].round(1)) <= {-15.2, -15.6, -15.0, -14.8, -14.6, -14.4, -16.2, -16.4}
+    assert np.allclose(top["lon"], -75.2)  # sobre la isóbata de 200 m (ADR-0013)
 
 
 # --- Mapa exploratorio con zonas --------------------------------------------------------------

@@ -18,7 +18,7 @@ def test_config_por_defecto():
     c = ConfigMapa(nombre="x", latitud=-15, longitud=-75)
     assert c.isobatas == [200, 100, 50]
     assert c.isobata_principal == 200
-    assert c.n_candidatos == 3 and c.resguardo_km == 1.0 and c.zonas
+    assert c.n_candidatos == 3 and c.resguardo_km == 1.0 and c.zonas and c.min_vecinas == 0
     assert c.recuadro == (-76, -74, -16, -14)
 
 
@@ -32,6 +32,7 @@ def test_config_por_defecto():
     {"waverys": {"fuente": "otra"}},
     {"resguardo_km": -1},
     {"n_candidatos": 0},
+    {"min_vecinas": 9},
 ])
 def test_config_invalida(kw):
     base = {"nombre": "x", "latitud": -15, "longitud": -75} | kw
@@ -107,18 +108,30 @@ def test_vecinas(tabla):
 
 
 def test_orden_de_candidatos(tabla):
+    """ADR-0013: las vecinas no descartan; gana el nodo sobre la isóbata de 200 m (lon −75.2, 5 vecinas)."""
     primero = tabla.iloc[0]
     assert primero["candidato"] == 1
-    assert primero["lon"] == pytest.approx(-75.4)  # el nodo más cercano a la isóbata que cumple
+    assert primero["lon"] == pytest.approx(-75.2)
     assert primero["lat"] == pytest.approx(LAT0)  # desempate por distancia a la referencia
-    assert primero["dist_iso_200m_km"] == pytest.approx(0.2 * KM_POR_GRADO_LON, rel=0.02)
+    assert primero["dist_iso_200m_km"] == pytest.approx(0, abs=0.3)
+    assert primero["vecinas_validas"] == 5  # se informa, no descarta
     cumplen = tabla[tabla["cumple_criterios"]]
     assert len(cumplen) > 3
-    assert cumplen["candidato"].head(3).tolist() == [1, 2, 3]  # ADR-0010: hasta 3
+    assert cumplen["candidato"].head(3).tolist() == [1, 2, 3]  # hasta 3
     assert cumplen["candidato"].iloc[3:].isna().all()
     assert tabla.loc[~tabla["cumple_criterios"], "candidato"].isna().all()
     assert not tabla["zonas_evaluadas"].any()
-    assert not tabla.loc[np.isclose(tabla["lon"], -75.2), "cumple_criterios"].any()
+
+
+def test_min_vecinas_opcional(cfg_sintetica):
+    """Con min_vecinas = 8 vuelve el criterio estricto: el nodo de −75.2 queda descartado."""
+    cfg_sintetica.min_vecinas = 8
+    raiz = cfg_sintetica.directorio_datos
+    df, _ = candidatos.tabla(cfg_sintetica, batimetria.obtener(cfg_sintetica, raiz).elevacion,
+                             waverys.obtener(cfg_sintetica, raiz))
+    f = _fila(df, LAT0, -75.2)
+    assert not f["cumple_criterios"] and f["motivo_descarte"] == "3: menos de 8 vecinas con dato"
+    assert df.iloc[0]["lon"] == pytest.approx(-75.4)
 
 
 def test_isobata_ausente_avisa(cfg_sintetica):
