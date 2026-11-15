@@ -131,7 +131,7 @@ def _replica_rl(p: dict, rng: np.random.Generator) -> dict:
     xi, sigma, lam, E = p["xi"], p["sigma"], p["tasa"], float(p["anios"])
     n = int(rng.poisson(lam * E))
     x = stats.genpareto.rvs(c=xi, scale=sigma, size=n, random_state=rng)
-    rl_v = retorno.nivel_retorno(0.0, xi, sigma, lam, T_RETORNO)
+    rl_v = retorno.nivel_retorno(0.0, xi, sigma, lam, T_RETORNO).valor
     a = gpd.ajustar_gpd(x)
     fila = {"n": n, "valido": a.valido, "xi_hat": a.xi, "frontera": a.frontera}
     if not a.valido or n / E * T_RETORNO <= 1:
@@ -169,7 +169,7 @@ def _replica_rl_multi(p: dict, rng: np.random.Generator) -> dict:
         ajustes.append(gpd.ajustar_gpd(xs[-1]))
     rl_v = retorno.nivel_retorno_multiestrato(
         0.0, [EstratoRetorno(l_, xi, s) for xi, s, l_ in zip(p["xi"], p["sigma"], p["tasa"], strict=True)], T_RETORNO
-    )
+    ).valor
     fila = {"n": sum(ns), "valido": all(a.valido for a in ajustes)}
     if not fila["valido"]:
         return fila | {"ajuste_fallido": True}
@@ -291,7 +291,7 @@ def _replica_boot_ar3h(p: dict, rng: np.random.Generator) -> dict:
     reps = bootstrap.bootstrap_bloques(
         bloques, lambda bloques_rep: float(np.concatenate([b.to_numpy() for b in bloques_rep]).mean()), B_BOOT, rng
     )
-    ic = bootstrap.ic_percentil(reps, float(y.mean()))
+    ic = bootstrap.ic_percentil(reps, float(y.mean()), no_regular=False)
     ee_iid = y.std(ddof=1) / np.sqrt(y.size)
     return {
         "bloques_cubre_abajo": ic.lo <= 0.0,
@@ -316,7 +316,7 @@ def _replica_boot_tasa_ar(p: dict, rng: np.random.Generator) -> dict:
         B_BOOT,
         rng,
     )
-    ic = bootstrap.ic_percentil(reps, float(cuentas.mean()))
+    ic = bootstrap.ic_percentil(reps, float(cuentas.mean()), no_regular=False)
     return {
         "bloques_cubre_abajo": ic.lo <= p["tasa"],
         "bloques_cubre_arriba": p["tasa"] <= ic.hi,
@@ -328,12 +328,12 @@ def _replica_boot_rl(p: dict, rng: np.random.Generator) -> dict:
     xi, sigma, lam, n_a = p["xi"], p["sigma"], p["tasa"], p["anios"]
     n_por_anio = rng.poisson(lam, n_a)
     excesos = [stats.genpareto.rvs(c=xi, scale=sigma, size=k, random_state=rng) for k in n_por_anio]
-    rl_v = retorno.nivel_retorno(0.0, xi, sigma, lam, T_RETORNO)
+    rl_v = retorno.nivel_retorno(0.0, xi, sigma, lam, T_RETORNO).valor
 
     def rl(lista) -> float:
         x = np.concatenate(lista)
         a = gpd.ajustar_gpd(x)
-        return retorno.nivel_retorno(0.0, a.xi, a.sigma, x.size / n_a, T_RETORNO) if a.valido else np.nan
+        return retorno.nivel_retorno(0.0, a.xi, a.sigma, x.size / n_a, T_RETORNO).valor if a.valido else np.nan
 
     a0 = gpd.ajustar_gpd(np.concatenate(excesos))
     punto = rl(excesos)

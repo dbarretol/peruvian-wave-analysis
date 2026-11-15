@@ -19,13 +19,13 @@ import argparse
 import math
 import os
 import sys
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import pandas as pd
 
 from .. import estilo, rutas
 from ..comun import etapa, json_estricto, orquestador, semillas
+from ..comun import procesos as procs
 from ..comun.errores import GateFallido
 from . import escenarios as esc
 
@@ -35,7 +35,6 @@ FASE = "F02-biblioteca-comun"
 TOPE_MAX = 0.01
 N_BANDAS = 21  # contrato, §5.2: A1–A4 (3 + 1 cada uno), B (3), D1 y D2 (1 cada uno)
 POTENCIA_MIN = 0.80
-VARIABLES_HILOS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS")
 ETAPA = orquestador.Etapa("verificacion", Path(__file__).resolve().parent, Path("."))
 
 
@@ -131,11 +130,8 @@ def evaluar(e: esc.Escenario, df: pd.DataFrame) -> dict:
 
 def correr_escenario(e: esc.Escenario, r: int, procesos: int, repeticion: bool = False) -> pd.DataFrame:
     args = [(e.id, i, repeticion) for i in range(r)]
-    if procesos <= 1:
-        filas = [esc.correr_replica(*a) for a in args]
-    else:
-        with ProcessPoolExecutor(max_workers=procesos) as ex:
-            filas = list(ex.map(esc.correr_replica, *zip(*args, strict=True), chunksize=max(1, r // (4 * procesos))))
+    # Siempre en procesos hijos, también con 1: misma configuración de hilos de BLAS con 1 y con N (comun.procesos).
+    filas = procs.mapear(esc.correr_replica, *zip(*args, strict=True), procesos=procesos, chunksize=r // (4 * procesos))
     return pd.DataFrame(filas).sort_values("replica").reset_index(drop=True)
 
 
@@ -257,8 +253,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--directorio-datos", type=Path)
     a = ap.parse_args(argv)
-    for v in VARIABLES_HILOS:  # un hilo de BLAS por proceso; los procesos hijos heredan el entorno
-        os.environ[v] = "1"
     try:
         ruta = ejecutar(a.directorio_datos, a.procesos, a.replicas, a.solo, a.salida)
     except GateFallido as exc:

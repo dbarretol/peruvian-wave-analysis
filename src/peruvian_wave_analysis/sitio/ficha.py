@@ -22,8 +22,8 @@ import xarray as xr
 from shapely.geometry import shape
 
 from .. import __version__, manifiesto, rutas
-from ..comun import etapa, orquestador
-from ..comun.errores import GateFallido
+from ..comun import etapa, huella, orquestador
+from ..comun.errores import ErrorGate, GateFallido, HashDistinto, InsumoFaltante
 from . import batimetria, costa, ficha_md, serie, waverys
 from . import exposicion as ex
 from . import observaciones as ob
@@ -454,8 +454,11 @@ def _escribir_md(carpeta: Path, raiz_raw: Path, ficha_nodo: dict, gate: dict | N
 
 
 def regenerar_md(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> Path:
-    """Rehace solo ``ficha_sitio.md`` desde las salidas ya publicadas, sin recalcular, y vuelve a publicar la ficha
-    con los mismos insumos (verificados de nuevo por hash)."""
+    """Rehace solo ``ficha_sitio.md`` desde las salidas ya publicadas, sin recalcular, y vuelve a publicar la ficha.
+
+    Solo si el código y los insumos son los mismos que produjeron la ficha publicada: si no, el manifiesto nuevo
+    atribuiría las tablas a un código o a unos insumos que no las produjeron. Se comprueba **antes** de abrir el
+    staging, así que un rechazo no borra la ficha publicada; en ese caso hay que correr la ficha completa."""
 
     raiz = Path(rutas.directorio_datos(raiz_datos))
     final = raiz / "processed" / "F01-sitio-y-fuentes" / "mapa-sitio-final" / nombre
@@ -464,12 +467,22 @@ def regenerar_md(nombre: str = "marcona-200m", raiz_datos: str | None = None) ->
     man = etapa.exigir_publicada(destino)
     leido = serie.leer_gate(raiz, nombre)
     raices = orquestador.rutas_codigo(ETAPA)
+    actual = huella.huella_codigo(raices)
+    if man.get("huella_version") != huella.VERSION or man.get("huella_codigo") != actual:
+        raise ErrorGate(
+            "El código cambió desde que se publicó la ficha: --solo-md no puede reutilizar sus tablas. "
+            "Corre la ficha completa (ficha-sitio)."
+        )
+    insumos = {k: raiz / v["ruta"] for k, v in man["insumos"].items()}
+    try:
+        etapa.exigir_insumos(insumos, {k: v["sha256"] for k, v in man["insumos"].items()})
+    except (InsumoFaltante, HashDistinto) as exc:
+        raise ErrorGate(f"Un insumo cambió desde que se publicó la ficha ({exc}). Corre la ficha completa.") from exc
     with etapa.staging_protegido(destino, raices) as t:
         for rel in man["salidas"]:
             if rel != "ficha_sitio.md":
                 shutil.copy2(destino / rel, t / rel)
         _escribir_md(t, rutas.raw(raiz), ficha_nodo, leido[1] if leido else None)
-        insumos = {k: raiz / v["ruta"] for k, v in man["insumos"].items()}
         etapa.publicar(t, destino, etapa.Gate(True, man["gate"]["criterios"]), raices, insumos, raiz, None)
     return destino / "ficha_sitio.md"
 
@@ -488,7 +501,11 @@ def main(argv=None) -> int:
     p.add_argument("--solo-md", action="store_true", help="Rehace solo ficha_sitio.md desde las salidas publicadas.")
     a = p.parse_args(argv)
     if a.solo_md:
-        print(regenerar_md(a.nombre, a.datos))
+        try:
+            print(regenerar_md(a.nombre, a.datos))
+        except ErrorGate as exc:
+            print(f"NO SE PUEDE REGENERAR: {exc}", file=sys.stderr)
+            return 1
         return 0
     try:
         r = generar(a.nombre, a.datos)

@@ -47,6 +47,9 @@ class Estratificacion:
     def validar(self) -> None:
         if not 1 <= self.mes_inicio <= 12:
             raise ValueError(f"Mes de inicio fuera de 1..12: {self.mes_inicio}")
+        vacios = [nombre for nombre, ms in self.meses if not ms]
+        if vacios:
+            raise ValueError(f"Estratos sin meses: {vacios}")
         todos = [m for _, ms in self.meses for m in ms]
         if sorted(todos) != list(range(1, 13)):
             raise ValueError("Cada mes debe pertenecer a un solo estrato y deben estar los 12")

@@ -89,10 +89,12 @@ class IC:
 
 
 def ic_percentil(
-    replicas, punto: float, nivel: float = 0.95, no_regular: bool = False, estratos_independientes: bool = False
+    replicas, punto: float, *, no_regular: bool, nivel: float = 0.95, estratos_independientes: bool = False
 ) -> IC:
-    """IC percentil. ``contiene_punto`` falso es un síntoma que la fase debe reportar; ``no_regular`` se pasa desde
-    el ajuste (ξ̂ ≤ −0.5 o frontera)."""
+    """IC percentil. ``contiene_punto`` falso es un síntoma que la fase debe reportar.
+
+    ``no_regular`` es obligatorio (contrato §3.7): para un estadístico de un ajuste GPD se pasa
+    ``AjusteGPD.no_regular`` (ξ̂ ≤ −0.5 o frontera); para otro estadístico (una media, una tasa), ``False``."""
     r = np.asarray(replicas, dtype=float).ravel()
     ok = r[np.isfinite(r)]
     a = (1.0 - nivel) / 2.0

@@ -327,11 +327,12 @@ def perfil_rl_multiestrato(
     if not all(a.valido for a in ajustes):
         raise ValueError("El perfil requiere ajustes válidos en todos los estratos")
     lam = [nj / ej for nj, ej in zip(n, E, strict=True)]
-    rl = nivel_retorno_multiestrato(
+    nivel_rl = nivel_retorno_multiestrato(
         u, [EstratoRetorno(lj, a.xi, a.sigma) for lj, a in zip(lam, ajustes, strict=True)], T
     )
-    if not np.isfinite(rl):
-        raise ValueError("El RL_T con varios estratos no tiene solución sobre el umbral")
+    if not nivel_rl.existe:
+        raise ValueError(f"El RL_T con varios estratos no tiene solución sobre el umbral ({nivel_rl.causa})")
+    rl = nivel_rl.valor
     z_hat = rl - u
     m = _Multi(xs, n, E, T)
     th_hat = m.a_theta([(a.xi, a.sigma, lj) for a, lj in zip(ajustes, lam, strict=True)])
@@ -360,7 +361,20 @@ def perfil_rl_multiestrato(
 
     v_hat = ell(z_hat)
     if not np.isfinite(v_hat):
-        raise RuntimeError("Perfil con varios estratos sin convergencia en el RL puntual")
+        # El máximo restringido no converge ni en el RL puntual: los dos límites son desconocidos (§3.3: nunca un
+        # número inventado). Quien cuente cobertura los trata como no cobertura.
+        return PerfilRL(
+            punto=rl,
+            lo=np.nan,
+            hi=np.nan,
+            causa_lo=SIN_CONVERGENCIA,
+            causa_hi=SIN_CONVERGENCIA,
+            nivel=nivel,
+            loglik_max=l_hat,
+            tasa_por_anio=float(sum(lam)),
+            n_rescates=estado["rescates"],
+            n_sin_resolver=estado["sin_resolver"],
+        )
     hi, c_hi = _limite(deficit, z_hat, q, FACTOR_TOPE * z_hat)
     estado["th"] = th_hat
     lo, c_lo = _limite(deficit, z_hat, q, z_hat * 1e-6)

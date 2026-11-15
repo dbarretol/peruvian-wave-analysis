@@ -193,7 +193,10 @@ def exigir_publicada(salida: Path) -> dict[str, Any]:
 def staging_protegido(
     salida: Path, raices_codigo: Sequence[Path], base_codigo: Path = huella.DIR_PROYECTO
 ) -> Iterator[Path]:
-    """Abre el staging; si algo falla antes de publicar, borra la salida publicada y relanza.
+    """Abre el staging; si algo falla antes de publicar (excepción o interrupción), borra la salida publicada y relanza.
+
+    Un cierre forzado del proceso o un corte de luz no pasan por aquí: dejan el staging suelto y la salida anterior;
+    la defensa en ese caso es el orquestador (la salida anterior queda desactualizada si el código cambió).
 
     ``publicar`` consume el staging (lo renombra o lo borra): si sigue existiendo al salir con error, el fallo
     ocurrió antes de publicar.
@@ -201,7 +204,8 @@ def staging_protegido(
     st = abrir_staging(salida, raices_codigo, base_codigo)
     try:
         yield st
-    except Exception as exc:
+    except BaseException as exc:  # también Ctrl+C: la salida anterior no sobrevive a una corrida interrumpida
+        _HUELLAS_AL_ABRIR.pop(st.resolve(), None)
         if st.exists():
             fallar(st, salida, [f"{type(exc).__name__}: {exc}"], raices_codigo, base_codigo=base_codigo)
         raise
