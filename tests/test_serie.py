@@ -1,4 +1,5 @@
 """Serie de WAVERYS (contrato de la F1 §3.5 y gate §4.2) con datos sintéticos y sin red."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -15,24 +16,50 @@ TIERRA = {(-14.6, -75.6), (-14.6, -75.4), (-14.8, -75.4), (-14.8, -75.6)}  # sin
 
 
 def _cobertura(inicio="2019-11-01T00:00:00Z", fin="2021-02-28T21:00:00Z", variables=None):
-    return serie.Cobertura(serie.DATASET, "202411", inicio, fin, 3.0, sorted(variables or serie.VARIABLES_ADR_0016),
-                           "2026-11-14T00:00:00Z")
+    return serie.Cobertura(
+        serie.DATASET, "202411", inicio, fin, 3.0, sorted(variables or serie.VARIABLES_ADR_0016), "2026-11-14T00:00:00Z"
+    )
 
 
 def _describe_falso(cob):
     def _f(dataset_id):
         t0 = pd.Timestamp(cob.inicio).value // 10**6
         t1 = pd.Timestamp(cob.fin).value // 10**6
-        variables = [{"short_name": v, "coordinates": [{"coordinate_id": "time", "minimum_value": t0,
-                                                         "maximum_value": t1, "step": 10800000.0}]}
-                     for v in cob.variables]
-        return {"products": [{"datasets": [{"dataset_id": dataset_id, "versions": [
-            {"label": "202411", "parts": [{"services": [{"service_name": "arco-time-series", "variables": variables}]}]}]}]}]}
+        variables = [
+            {
+                "short_name": v,
+                "coordinates": [
+                    {"coordinate_id": "time", "minimum_value": t0, "maximum_value": t1, "step": 10800000.0}
+                ],
+            }
+            for v in cob.variables
+        ]
+        return {
+            "products": [
+                {
+                    "datasets": [
+                        {
+                            "dataset_id": dataset_id,
+                            "versions": [
+                                {
+                                    "label": "202411",
+                                    "parts": [
+                                        {"services": [{"service_name": "arco-time-series", "variables": variables}]}
+                                    ],
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+
     return _f
 
 
 def _subset_falso(llamadas, faltante_en=None, duplicar=False, sin_sw2=True):
     """Escribe un NetCDF con el formato de copernicusmarine para el rango pedido."""
+
     def _f(**p):
         llamadas.append(p)
         t = pd.date_range(p["start_datetime"], p["end_datetime"], freq="3h")
@@ -50,6 +77,7 @@ def _subset_falso(llamadas, faltante_en=None, duplicar=False, sin_sw2=True):
             datos[v] = (("time", "latitude", "longitude"), a.astype("float32"))
         ds = xr.Dataset(datos, coords={"time": t, "latitude": LATS, "longitude": LONS})
         ds.to_netcdf(f"{p['output_directory']}/{p['output_filename']}")
+
     return _f
 
 
@@ -85,7 +113,9 @@ def test_descarga_por_anio_con_version_y_reanudacion(tmp_path, monkeypatch):
     cob = _cobertura()
     cfg, raiz_raw, rutas, llamadas = _descargar_todo(tmp_path, monkeypatch, cob)
     assert [r.name.split("_")[2] for r in rutas] == ["2019", "2020", "2021"]
-    assert llamadas[0]["start_datetime"] == "2019-11-01T00:00:00" and llamadas[-1]["end_datetime"] == "2021-02-28T21:00:00"
+    assert (
+        llamadas[0]["start_datetime"] == "2019-11-01T00:00:00" and llamadas[-1]["end_datetime"] == "2021-02-28T21:00:00"
+    )
     assert all(p["dataset_version"] == "202411" and p["coordinates_selection_method"] == "outside" for p in llamadas)
     entrada = manifiesto.verificar(raiz_raw, rutas[1])
     assert entrada["version_dataset"] == "202411" and entrada["catalogo"]["fin"] == cob.fin
@@ -100,8 +130,9 @@ def test_gate_cumple_y_no_falla_por_la_segunda_particion(tmp_path, monkeypatch, 
     cob = _cobertura()
     cfg, raiz_raw, rutas, _ = _descargar_todo(tmp_path, monkeypatch, cob)
     inf = serie.verificar(rutas, cob, cfg, raiz_raw, mascara)
-    assert inf["cumple"] and inf["pasos"] == inf["pasos_esperados"] == len(pd.date_range(
-        "2019-11-01", "2021-02-28T21:00", freq="3h"))
+    assert inf["cumple"] and inf["pasos"] == inf["pasos_esperados"] == len(
+        pd.date_range("2019-11-01", "2021-02-28T21:00", freq="3h")
+    )
     assert inf["fraccion_sin_dato_en_el_nodo"]["VHM0_SW2"] == pytest.approx(0.5, abs=0.01)
     assert inf["celdas_con_dato"] == 25 - len(TIERRA)
 
@@ -195,3 +226,60 @@ def test_cobertura_distinta_entre_anios_falla(tmp_path, monkeypatch):
     manifiesto._escribir(raiz_raw, entradas)
     with pytest.raises(serie.ErrorSerie, match="coberturas distintas"):
         serie.cobertura_de_manifiesto(rutas, raiz_raw)
+
+
+# --- Etapa publicada del gate de la serie (F2: publicación común, sin red) ---------------------------
+
+
+def _raiz_con_serie(tmp_path, monkeypatch, **kw):
+    cob = _cobertura()
+    raiz = tmp_path
+    cfg, raiz_raw, rutas, _ = _descargar_todo(tmp_path, monkeypatch, cob, **kw)
+    malla = raiz_raw / "waverys" / "malla" / "malla.nc"
+    malla.parent.mkdir(parents=True)
+    malla.write_bytes(b"malla sintetica")
+    return raiz, cfg, raiz_raw, rutas, malla
+
+
+def test_gate_publicado_sin_red(tmp_path, monkeypatch, mascara):
+    from peruvian_wave_analysis.comun import etapa
+
+    raiz, cfg, raiz_raw, rutas, malla = _raiz_con_serie(tmp_path, monkeypatch)
+    monkeypatch.setattr(serie, "_describir", lambda *_: pytest.fail("el gate no debe consultar el catálogo"))
+    salida = serie.publicar_gate(raiz, "sitio", cfg, malla, mascara)
+    man = etapa.exigir_publicada(salida)
+    assert set(man["salidas"]) == {"serie_gate.json"}
+    assert man["insumos"]["malla"]["ruta"] == "raw/waverys/malla/malla.nc"
+    assert {r.name for r in rutas} <= set(man["insumos"])
+    ruta, inf = serie.leer_gate(raiz, "sitio")
+    assert inf["cumple"] and "catalogo_consulta_de_hoy" not in inf
+    assert inf["malla_referencia"] == "raw/waverys/malla/malla.nc"
+    assert inf["catalogo"]["fin"] == "2021-02-28T21:00:00Z"
+    # determinista: volver a publicar da los mismos bytes
+    b1 = (salida / etapa.MANIFIESTO).read_bytes()
+    serie.publicar_gate(raiz, "sitio", cfg, malla, mascara)
+    assert (salida / etapa.MANIFIESTO).read_bytes() == b1
+
+
+def test_gate_publicado_falla_y_borra_el_anterior(tmp_path, monkeypatch, mascara):
+    from peruvian_wave_analysis.comun import etapa
+    from peruvian_wave_analysis.comun.errores import GateFallido
+
+    raiz, cfg, raiz_raw, rutas, malla = _raiz_con_serie(tmp_path, monkeypatch)
+    serie.publicar_gate(raiz, "sitio", cfg, malla, mascara)
+    otra = mascara.copy()
+    otra[0, 0] = not bool(otra[0, 0])
+    with pytest.raises(GateFallido):
+        serie.publicar_gate(raiz, "sitio", cfg, malla, otra)
+    assert (serie.ruta_gate(raiz, "sitio") / etapa.GATE_FALLIDO).exists()
+    assert serie.leer_gate(raiz, "sitio") is None
+
+
+def test_gate_publicado_exige_todos_los_anios(tmp_path, monkeypatch, mascara):
+    from peruvian_wave_analysis.comun import etapa
+
+    raiz, cfg, raiz_raw, rutas, malla = _raiz_con_serie(tmp_path, monkeypatch)
+    rutas[1].unlink()
+    with pytest.raises(serie.ErrorSerie, match="Faltan años"):
+        serie.publicar_gate(raiz, "sitio", cfg, malla, mascara)
+    assert (serie.ruta_gate(raiz, "sitio") / etapa.GATE_FALLIDO).exists()

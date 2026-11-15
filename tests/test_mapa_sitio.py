@@ -14,6 +14,7 @@ KM_POR_GRADO_LON = 111.195 * np.cos(np.radians(LAT0))
 
 # --- Configuración -------------------------------------------------------------------------
 
+
 def test_config_por_defecto():
     c = ConfigMapa(nombre="x", latitud=-15, longitud=-75)
     assert c.isobatas == [200, 100, 50]
@@ -22,18 +23,21 @@ def test_config_por_defecto():
     assert c.recuadro == (-76, -74, -16, -14)
 
 
-@pytest.mark.parametrize("kw", [
-    {"nombre": "Con Mayúsculas"},
-    {"isobatas": []},
-    {"isobatas": [100, 100]},
-    {"isobata_principal": 500},
-    {"semiancho_grados": 0},
-    {"batimetria": {"fuente": "archivo"}},
-    {"waverys": {"fuente": "otra"}},
-    {"resguardo_km": -1},
-    {"n_candidatos": 0},
-    {"min_vecinas": 9},
-])
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"nombre": "Con Mayúsculas"},
+        {"isobatas": []},
+        {"isobatas": [100, 100]},
+        {"isobata_principal": 500},
+        {"semiancho_grados": 0},
+        {"batimetria": {"fuente": "archivo"}},
+        {"waverys": {"fuente": "otra"}},
+        {"resguardo_km": -1},
+        {"n_candidatos": 0},
+        {"min_vecinas": 9},
+    ],
+)
 def test_config_invalida(kw):
     base = {"nombre": "x", "latitud": -15, "longitud": -75} | kw
     with pytest.raises(ValueError):
@@ -46,6 +50,7 @@ def test_isobatas_negativas_se_toman_como_profundidad():
 
 
 # --- Distancias e isolíneas --------------------------------------------------------------------
+
 
 def test_proyeccion_un_grado():
     xy = candidatos.proyectar([LON0 + 1, LON0], [LAT0, LAT0 + 1], LON0, LAT0)
@@ -67,6 +72,7 @@ def test_sin_lineas_da_nan():
 
 
 # --- Tabla de candidatos -------------------------------------------------------------------
+
 
 @pytest.fixture
 def tabla(cfg_sintetica):
@@ -127,8 +133,9 @@ def test_min_vecinas_opcional(cfg_sintetica):
     """Con min_vecinas = 8 vuelve el criterio estricto: el nodo de −75.2 queda descartado."""
     cfg_sintetica.min_vecinas = 8
     raiz = cfg_sintetica.directorio_datos
-    df, _ = candidatos.tabla(cfg_sintetica, batimetria.obtener(cfg_sintetica, raiz).elevacion,
-                             waverys.obtener(cfg_sintetica, raiz))
+    df, _ = candidatos.tabla(
+        cfg_sintetica, batimetria.obtener(cfg_sintetica, raiz).elevacion, waverys.obtener(cfg_sintetica, raiz)
+    )
     f = _fila(df, LAT0, -75.2)
     assert not f["cumple_criterios"] and f["motivo_descarte"] == "3: menos de 8 vecinas con dato"
     assert df.iloc[0]["lon"] == pytest.approx(-75.4)
@@ -145,6 +152,7 @@ def test_isobata_ausente_avisa(cfg_sintetica):
 
 
 # --- Extremo a extremo ---------------------------------------------------------------------
+
 
 def test_generar_mapa_escribe_salidas(cfg_sintetica):
     r = generar_mapa(cfg_sintetica)
@@ -198,8 +206,10 @@ def test_max_tierra_fuera_de_rango():
 
 # --- Puntos de referencia y malla dibujada ---------------------------------------------------
 
+
 def test_grados_sexagesimales():
     from peruvian_wave_analysis.sitio.config import a_grados
+
     assert a_grados("15°23′20″S") == pytest.approx(-(15 + 23 / 60 + 20 / 3600))
     assert a_grados("75°04'15\"O") == pytest.approx(-(75 + 4 / 60 + 15 / 3600))
     assert a_grados("75°04′15″W") == a_grados("75°04′15″O")
@@ -211,6 +221,7 @@ def test_grados_sexagesimales():
 
 def test_puntos_en_config_y_mapa(cfg_sintetica):
     from peruvian_wave_analysis.sitio.mapa import _dms
+
     cfg_sintetica.puntos = [{"nombre": "Parque eólico (aprox.)", "latitud": "15°23′20″S", "longitud": "75°04′15″O"}]
     cfg_sintetica.__post_init__()
     p = cfg_sintetica.puntos[0]
@@ -225,18 +236,26 @@ def test_puntos_en_config_y_mapa(cfg_sintetica):
 
 def test_no_se_dibujan_bordes_de_celdas_solo_de_tierra(cfg_sintetica):
     from peruvian_wave_analysis.sitio.mapa import _bordes_de_celda
+
     r = generar_mapa(cfg_sintetica, guardar=False)
     elev, malla = r.batimetria.elevacion, r.malla
     lados = _bordes_de_celda(malla, elev)
     h = malla.paso / 2
-    fracs = {(round(float(la), 4), round(float(lo), 4)): candidatos._estadisticas_celda(elev, float(la), float(lo), malla.paso)[2]
-             for la in malla.lat for lo in malla.lon}
+    fracs = {
+        (round(float(la), 4), round(float(lo), 4)): candidatos._estadisticas_celda(
+            elev, float(la), float(lo), malla.paso
+        )[2]
+        for la in malla.lat
+        for lo in malla.lon
+    }
     tierra = [c for c, f in fracs.items() if f >= 1]
     assert tierra and any(f < 1 for f in fracs.values())  # el caso sintético tiene de ambas
     centros = {(round((a[1] + b[1]) / 2, 4), round((a[0] + b[0]) / 2, 4)) for a, b in lados}
     for la, lo in tierra:  # ningún lado de una celda solo de tierra que no comparta con una celda con agua
-        vecinas_con_agua = [fracs.get((round(la + dy, 4), round(lo + dx, 4)), 1) < 1
-                            for dy, dx in ((0, 2 * h), (0, -2 * h), (2 * h, 0), (-2 * h, 0))]
+        vecinas_con_agua = [
+            fracs.get((round(la + dy, 4), round(lo + dx, 4)), 1) < 1
+            for dy, dx in ((0, 2 * h), (0, -2 * h), (2 * h, 0), (-2 * h, 0))
+        ]
         lados_celda = [(la, round(lo + h, 4)), (la, round(lo - h, 4)), (round(la + h, 4), lo), (round(la - h, 4), lo)]
         for lado, compartido in zip(lados_celda, vecinas_con_agua):
             assert (tuple(round(v, 4) for v in lado) in centros) == compartido
@@ -244,10 +263,12 @@ def test_no_se_dibujan_bordes_de_celdas_solo_de_tierra(cfg_sintetica):
 
 def test_punto_etiqueta_y_desplazamiento():
     from peruvian_wave_analysis.sitio.config import PuntoReferencia
+
     p = PuntoReferencia(nombre="S.E. Larga 220 kV (R.M. x)", latitud=-15.4, longitud=-75.1)
     assert p.etiqueta == p.nombre and p.marcador == "D" and p.desplazamiento == [7.0, -3.0]
-    q = PuntoReferencia(nombre="S.E. Larga", latitud=-15.4, longitud=-75.1, etiqueta="S.E.", marcador="p",
-                        desplazamiento=[-5, 4])
+    q = PuntoReferencia(
+        nombre="S.E. Larga", latitud=-15.4, longitud=-75.1, etiqueta="S.E.", marcador="p", desplazamiento=[-5, 4]
+    )
     assert q.etiqueta == "S.E." and q.desplazamiento == [-5.0, 4.0]
     with pytest.raises(ValueError):
         PuntoReferencia(nombre="x", latitud=-15.4, longitud=-75.1, desplazamiento=[1])

@@ -1,4 +1,5 @@
 """Piezas de la ficha del sitio que no necesitan red ni datos reales."""
+
 from __future__ import annotations
 
 import json
@@ -58,13 +59,24 @@ def test_profundidad_vectorizada_y_nan_fuera(tmp_path):
 # --- Gate de la ficha (F01-K-01, F01-K-02) ---
 import pandas as pd  # noqa: E402
 
-GATE_SERIE = {"cumple": True, "catalogo": {"dataset_id": "ds", "version": "202411", "inicio": "1980-01-01T00:00:00Z",
-                                           "fin": "2026-08-31T21:00:00Z", "paso_h": 3.0, "consulta_utc": "2026-11-15T04:35:53Z"}}
+GATE_SERIE = {
+    "cumple": True,
+    "catalogo": {
+        "dataset_id": "ds",
+        "version": "202411",
+        "inicio": "1980-01-01T00:00:00Z",
+        "fin": "2026-08-31T21:00:00Z",
+        "paso_h": 3.0,
+        "consulta_utc": "2026-11-15T04:35:53Z",
+    },
+}
 SECTORES = pd.DataFrame({"sector": range(16), "clase": ["abierto"] * 16})
 
 
 def _crono(gate=GATE_SERIE):
-    return pd.DataFrame(ficha.CRONOLOGIA + ficha.filas_catalogo(gate), columns=["fecha", "tipo", "descripcion", "referencia"])
+    return pd.DataFrame(
+        ficha.CRONOLOGIA + ficha.filas_catalogo(gate), columns=["fecha", "tipo", "descripcion", "referencia"]
+    )
 
 
 def _res(filas, prof_archivo=0):
@@ -73,19 +85,26 @@ def _res(filas, prof_archivo=0):
     return {"principal": {"mediciones": m, "prof_archivo_200km": prof_archivo}}
 
 
-BUENAS = [("HY-2", "2015-01-01", "no asimilada", True), ("GEOSAT", "1987-01-01", "no asimilada", True),
-          ("JASON-2", "2012-01-01", "asimilada", False), ("SWOT", "2024-01-01", "no verificable", False)]
+BUENAS = [
+    ("HY-2", "2015-01-01", "no asimilada", True),
+    ("GEOSAT", "1987-01-01", "no asimilada", True),
+    ("JASON-2", "2012-01-01", "asimilada", False),
+    ("SWOT", "2024-01-01", "no verificable", False),
+]
 
 
 def test_gate_cumple_con_datos_correctos():
     assert ficha.gate_ficha(_res(BUENAS), _crono(), SECTORES, GATE_SERIE, "g.nc") == []
 
 
-@pytest.mark.parametrize("fila", [
-    ("JASON-2", "2012-01-01", "asimilada", True),          # asimilada marcada como útil
-    ("SWOT", "2024-01-01", "no verificable", True),         # no verificable marcada como útil
-    ("SARAL", "2014-01-01", "no asimilada", True),          # útil sin ser de 1980–1992 ni no asimilada según el QUID
-])
+@pytest.mark.parametrize(
+    "fila",
+    [
+        ("JASON-2", "2012-01-01", "asimilada", True),  # asimilada marcada como útil
+        ("SWOT", "2024-01-01", "no verificable", True),  # no verificable marcada como útil
+        ("SARAL", "2014-01-01", "no asimilada", True),  # útil sin ser de 1980–1992 ni no asimilada según el QUID
+    ],
+)
 def test_gate_falla_con_util_indebido(fila):
     fallas = ficha.gate_ficha(_res(BUENAS + [fila]), _crono(), SECTORES, GATE_SERIE, "g.nc")
     assert any("útiles para el sesgo" in f for f in fallas)

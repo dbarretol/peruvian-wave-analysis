@@ -1,4 +1,5 @@
 """Estratos, declustering, tasa, reescalado y bootstrap: pruebas de respuesta conocida (contrato de la F2, §5.1)."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -12,6 +13,7 @@ from peruvian_wave_analysis.extremos.retorno import EstratoRetorno
 
 
 # --- Estratos -----------------------------------------------------------------------------------
+
 
 def test_estrato_que_cruza_el_anio():
     est = Estratificacion.desde({"dic-feb": [12, 1, 2], "resto": list(range(3, 12))}, mes_inicio=12)
@@ -34,6 +36,7 @@ def test_estratos_invalidos():
 
 
 # --- Declustering -------------------------------------------------------------------------------
+
 
 def _serie_decluster():
     v = np.full(45, 0.5)
@@ -72,13 +75,24 @@ def test_decluster_borde_de_la_serie_y_rejilla_incompleta():
 
 # --- Tasa y retorno de extremo a extremo -----------------------------------------------------------
 
+
 def test_tasa_y_retorno_extremo_a_extremo():
     est = Estratificacion.desde({"a": [12, 1, 2], "b": list(range(3, 12))}, mes_inicio=12)  # 3 y 9 meses
     t = pd.date_range("2000-12-01", "2002-11-30 21:00", freq="3h")
     validos = np.ones(t.size, bool)
     validos[(t >= "2001-03-01") & (t < "2001-04-01")] = False  # hueco solo en el estrato b
-    eventos = pd.DatetimeIndex(["2000-12-20", "2001-01-10", "2002-02-01",  # a: 3
-                                "2001-05-01", "2001-08-01", "2002-04-01", "2002-06-01", "2002-10-01"])  # b: 5
+    eventos = pd.DatetimeIndex(
+        [
+            "2000-12-20",
+            "2001-01-10",
+            "2002-02-01",  # a: 3
+            "2001-05-01",
+            "2001-08-01",
+            "2002-04-01",
+            "2002-06-01",
+            "2002-10-01",
+        ]
+    )  # b: 5
     tabla = tasa.contar_eventos(eventos, tasa.anios_con_dato(t, validos, 3.0, est), est)
     r = tasa.tasas(tabla, est)
     ventana_b = (275) * 24.0  # mar–nov
@@ -106,6 +120,7 @@ def test_ic_garwood_tabulado():
 
 # --- Reescalado ---------------------------------------------------------------------------------
 
+
 def test_reescalado_proceso_puntual_exacto():
     rejilla = pd.date_range("2000-01-01", periods=20, freq="3h")
     ini = rejilla[[2, 8, 15]]
@@ -125,8 +140,9 @@ def test_prueba_poisson_tope_de_replicas():
     rejilla = pd.date_range("2000-01-01", periods=400, freq="3h")
     ini = rejilla[[10, 80, 150, 220, 290, 360]]  # 6 tormentas: las réplicas casi nunca tienen 6 inicios
     with pytest.raises(ValueError, match="réplicas"):
-        reescalado.prueba_poisson(rejilla, np.ones(400, bool), ini, ini, ["x"] * 400, 6.0, 3.0,
-                                  semillas.generador("prueba", "tope"))
+        reescalado.prueba_poisson(
+            rejilla, np.ones(400, bool), ini, ini, ["x"] * 400, 6.0, 3.0, semillas.generador("prueba", "tope")
+        )
 
 
 def test_prueba_poisson_reproducible_y_ad_decide():
@@ -134,18 +150,22 @@ def test_prueba_poisson_reproducible_y_ad_decide():
     rejilla = pd.date_range("2000-01-01", periods=8 * 365 * 4, freq="3h")
     validos = np.ones(rejilla.size, bool)
     estr = np.where(rejilla.month <= 6, "s1", "s2")
-    sim = reescalado.simular_nula(validos, (estr == "s2").astype(int), np.array([0.01, 0.004]), [np.array([0, 2, 4])] * 2,
-                                  4, 3.0, rng)
-    a = reescalado.prueba_poisson(rejilla, validos, rejilla[sim[0]], rejilla[sim[1]], estr, 12.0, 3.0,
-                                  semillas.generador("prueba", "p"))
-    b = reescalado.prueba_poisson(rejilla, validos, rejilla[sim[0]], rejilla[sim[1]], estr, 12.0, 3.0,
-                                  semillas.generador("prueba", "p"))
+    sim = reescalado.simular_nula(
+        validos, (estr == "s2").astype(int), np.array([0.01, 0.004]), [np.array([0, 2, 4])] * 2, 4, 3.0, rng
+    )
+    a = reescalado.prueba_poisson(
+        rejilla, validos, rejilla[sim[0]], rejilla[sim[1]], estr, 12.0, 3.0, semillas.generador("prueba", "p")
+    )
+    b = reescalado.prueba_poisson(
+        rejilla, validos, rejilla[sim[0]], rejilla[sim[1]], estr, 12.0, 3.0, semillas.generador("prueba", "p")
+    )
     assert a == b and a.B == 99 and 0 < a.p_ad <= 1 and a.rechaza == (a.p_ad <= 0.05)
     k = round(a.p_ad * 100) - 1
     assert a.p_ad == pytest.approx((1 + k) / 100)
 
 
 # --- Bootstrap ----------------------------------------------------------------------------------
+
 
 def _serie_bloques():
     est = Estratificacion.desde({"dic-feb": [12, 1, 2], "resto": list(range(3, 12))}, mes_inicio=12)
@@ -179,8 +199,9 @@ def test_bootstrap_por_estrato_exige_declaracion():
     por_estrato = bootstrap.bloques_por_estrato(s, est)
     with pytest.raises(ValueError, match="independientes"):
         bootstrap.bootstrap_bloques(por_estrato, lambda l: 0.0, 5, np.random.default_rng(0))
-    r = bootstrap.bootstrap_bloques(por_estrato, lambda l: float(len(l)), 5, np.random.default_rng(0),
-                                    estratos_independientes=True)
+    r = bootstrap.bootstrap_bloques(
+        por_estrato, lambda l: float(len(l)), 5, np.random.default_rng(0), estratos_independientes=True
+    )
     assert (r == 6).all()
 
 

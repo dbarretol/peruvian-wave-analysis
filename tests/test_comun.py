@@ -1,4 +1,5 @@
 """Infraestructura común: JSON estricto, huella, publicación con gate, orquestador y semillas."""
+
 from __future__ import annotations
 
 import json
@@ -13,11 +14,30 @@ from peruvian_wave_analysis.comun.errores import GateFallido, HashDistinto, Insu
 
 # --- JSON estricto -----------------------------------------------------------------------------
 
+
 def test_json_no_finitos_numpy_y_path():
-    texto = json_estricto.dumps({"a": float("nan"), "b": float("inf"), "c": -np.inf, "d": np.float64(1.5),
-                                 "e": np.int64(3), "f": np.array([1.0, np.nan]), "g": Path("x/y"), "h": (1, 2)})
-    assert json.loads(texto) == {"a": None, "b": None, "c": None, "d": 1.5, "e": 3, "f": [1.0, None],
-                                 "g": "x/y", "h": [1, 2]}
+    texto = json_estricto.dumps(
+        {
+            "a": float("nan"),
+            "b": float("inf"),
+            "c": -np.inf,
+            "d": np.float64(1.5),
+            "e": np.int64(3),
+            "f": np.array([1.0, np.nan]),
+            "g": Path("x/y"),
+            "h": (1, 2),
+        }
+    )
+    assert json.loads(texto) == {
+        "a": None,
+        "b": None,
+        "c": None,
+        "d": 1.5,
+        "e": 3,
+        "f": [1.0, None],
+        "g": "x/y",
+        "h": [1, 2],
+    }
 
 
 def test_json_tipo_raro_es_error():
@@ -75,11 +95,13 @@ def test_huella_no_depende_de_la_ruta_absoluta(tmp_path):
     for sub in ("uno", "dos"):
         (tmp_path / sub / "codigo").mkdir(parents=True)
         (tmp_path / sub / "codigo" / "m.py").write_text(BASE_PY, encoding="utf-8")
-    assert (huella.huella_codigo([tmp_path / "uno" / "codigo"], base=tmp_path / "uno")
-            == huella.huella_codigo([tmp_path / "dos" / "codigo"], base=tmp_path / "dos"))
+    assert huella.huella_codigo([tmp_path / "uno" / "codigo"], base=tmp_path / "uno") == huella.huella_codigo(
+        [tmp_path / "dos" / "codigo"], base=tmp_path / "dos"
+    )
 
 
 # --- Etapa --------------------------------------------------------------------------------------
+
 
 @pytest.fixture
 def entorno(tmp_path):
@@ -99,8 +121,16 @@ def _publicar(datos, insumo, codigo, salida, aprobado=True, contenido="1\n", sem
         (st / "resultado.txt").write_text(contenido, encoding="utf-8")
         (st / "sub").mkdir()
         (st / "sub" / "b.json").write_text("{}\n", encoding="utf-8")
-        return etapa.publicar(st, salida, etapa.Gate(aprobado, {"criterio": 1.0}, [] if aprobado else ["no"]),
-                              codigo, {"serie": insumo}, datos, semilla, base_codigo=codigo[0].parent)
+        return etapa.publicar(
+            st,
+            salida,
+            etapa.Gate(aprobado, {"criterio": 1.0}, [] if aprobado else ["no"]),
+            codigo,
+            {"serie": insumo},
+            datos,
+            semilla,
+            base_codigo=codigo[0].parent,
+        )
 
 
 def test_publicar_y_leer(entorno):
@@ -187,6 +217,7 @@ def test_tipo_no_serializable_no_toca_la_salida(entorno):
 
 # --- Orquestador --------------------------------------------------------------------------------
 
+
 @pytest.fixture
 def proyecto(tmp_path):
     """Paquete mínimo con dos etapas: «a» lee un insumo crudo y «b» lee la salida de «a»."""
@@ -198,14 +229,18 @@ def proyecto(tmp_path):
     (paquete / "suelto.py").write_text("Z = 1\n", encoding="utf-8")
     (paquete / "etapas" / "__init__.py").write_text("", encoding="utf-8")
     (paquete / "etapas" / "a.py").write_text("from ..comunes import K\n", encoding="utf-8")
-    (paquete / "etapas" / "b.py").write_text("def f():\n    from peruvian_wave_analysis import comunes\n", encoding="utf-8")
+    (paquete / "etapas" / "b.py").write_text(
+        "def f():\n    from peruvian_wave_analysis import comunes\n", encoding="utf-8"
+    )
     (raiz / "uv.lock").write_text("version = 1\n", encoding="utf-8")
     datos = tmp_path / "WAVE-DATA"
     (datos / "raw").mkdir(parents=True)
     crudo = datos / "raw" / "x.csv"
     crudo.write_text("1\n", encoding="utf-8")
-    ets = [orquestador.Etapa("a", paquete / "etapas" / "a.py", datos / "processed" / "a"),
-           orquestador.Etapa("b", paquete / "etapas" / "b.py", datos / "processed" / "b")]
+    ets = [
+        orquestador.Etapa("a", paquete / "etapas" / "a.py", datos / "processed" / "a"),
+        orquestador.Etapa("b", paquete / "etapas" / "b.py", datos / "processed" / "b"),
+    ]
     return raiz, paquete, datos, crudo, ets
 
 
@@ -269,6 +304,7 @@ def test_estados_por_codigo_insumo_y_dependencia(proyecto):
 def test_dependencia_desconocida_y_ciclo(proyecto):
     raiz, paquete, datos, crudo, (a, b) = proyecto
     from dataclasses import replace
+
     with pytest.raises(ValueError, match="desconocida"):
         orquestador.orden_topologico([replace(a, depende_de=("z",))])
     with pytest.raises(ValueError, match="ciclo"):
@@ -276,6 +312,7 @@ def test_dependencia_desconocida_y_ciclo(proyecto):
 
 
 # --- Semillas -----------------------------------------------------------------------------------
+
 
 def test_semillas_congeladas_y_por_nombre():
     # Valores congelados el 2026-11-15: si cambian, cambian todas las salidas con muestreo.

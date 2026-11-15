@@ -1,4 +1,5 @@
 """Estilo de figuras de análisis (contrato de la F2, §3.10)."""
+
 from __future__ import annotations
 
 import numpy as np

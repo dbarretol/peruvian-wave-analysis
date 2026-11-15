@@ -4,6 +4,7 @@ Batimetría plana inclinada: elevación = 1000·(lon + 75) m. La costa está en 
 la isóbata de 50 m en −75.05, la de 100 m en −75.1 y la de 200 m en −75.2.
 Malla tipo WAVERYS de 0.2°: nodos con lon ≥ −75.0 sin dato (tierra).
 """
+
 from __future__ import annotations
 
 import matplotlib
@@ -28,7 +29,9 @@ def datos_sinteticos(tmp_path):
     lat = np.round(np.arange(-16.8, -13.99, 0.005), 4)
     elev = 1000.0 * (lon[None, :] + 75.0) * np.ones((lat.size, 1))
     ruta_bat = entrada / "batimetria.nc"
-    xr.Dataset({"elevation": (("lat", "lon"), elev.astype("float32"))}, coords={"lat": lat, "lon": lon}).to_netcdf(ruta_bat)
+    xr.Dataset({"elevation": (("lat", "lon"), elev.astype("float32"))}, coords={"lat": lat, "lon": lon}).to_netcdf(
+        ruta_bat
+    )
 
     glat = np.round(np.arange(-16.6, -14.19, 0.2), 4)
     glon = np.round(np.arange(-76.8, -74.39, 0.2), 4)
@@ -60,8 +63,11 @@ def cfg_sintetica(datos_sinteticos):
 
 
 def _caja(o, e, s, n, **props):
-    return {"type": "Feature", "properties": props,
-            "geometry": {"type": "Polygon", "coordinates": [[[o, s], [e, s], [e, n], [o, n], [o, s]]]}}
+    return {
+        "type": "Feature",
+        "properties": props,
+        "geometry": {"type": "Polygon", "coordinates": [[[o, s], [e, s], [e, n], [o, n], [o, s]]]},
+    }
 
 
 # Zonas sintéticas (nodos de la malla cada 0.2°; celdas de ±0.1°):
@@ -77,16 +83,32 @@ ZONAS_SINTETICAS = {
         _caja(-77.0, -74.0, -14.65, -14.3, anp_nomb="Reserva Sintética", anp_cate="Reserva Nacional"),
     ],
     "SERV_OTRAS_FUENTES/MapServer/36": [
-        {"type": "Feature", "properties": {"nombre": "Pozo Sintético"},
-         "geometry": {"type": "Point", "coordinates": [-75.4, -14.75]}},
+        {
+            "type": "Feature",
+            "properties": {"nombre": "Pozo Sintético"},
+            "geometry": {"type": "Point", "coordinates": [-75.4, -14.75]},
+        },
     ],
     "SERV_OTRAS_FUENTES/MapServer/37": [
-        _caja(-76.6, -76.4, -16.4, -16.2, NOMB_LOTE="Z-99", CIA="Sintética", DEC_SUPREM="001-2020-EM", TIPO_CONTR="LICENCIA"),
+        _caja(
+            -76.6,
+            -76.4,
+            -16.4,
+            -16.2,
+            NOMB_LOTE="Z-99",
+            CIA="Sintética",
+            DEC_SUPREM="001-2020-EM",
+            TIPO_CONTR="LICENCIA",
+        ),
         _caja(-76.6, -76.4, -15.0, -14.8, NOMB_LOTE="LXX", CIA="Sintética", DEC_SUPREM=None, TIPO_CONTR=None),
     ],
     "peru_sernanp_0213/MapServer/0": [
-        _caja(-75.45, -75.35, -15.895, -15.85, anp_nomb="Reserva Sintética", tz_nomb="Protección Estricta", tz_cod="PE"),
-        _caja(-77.0, -74.0, -14.65, -14.3, anp_nomb="Reserva Sintética", tz_nomb="Aprovechamiento Directo", tz_cod="AD"),
+        _caja(
+            -75.45, -75.35, -15.895, -15.85, anp_nomb="Reserva Sintética", tz_nomb="Protección Estricta", tz_cod="PE"
+        ),
+        _caja(
+            -77.0, -74.0, -14.65, -14.3, anp_nomb="Reserva Sintética", tz_nomb="Aprovechamiento Directo", tz_cod="AD"
+        ),
     ],
 }
 
@@ -111,5 +133,6 @@ def sin_red(monkeypatch):
         raise AssertionError("acceso a la red en una prueba")
 
     import requests
+
     monkeypatch.setattr(requests, "get", _prohibido)
     monkeypatch.setattr(requests.Session, "request", _prohibido)

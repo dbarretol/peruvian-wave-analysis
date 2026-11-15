@@ -1,4 +1,5 @@
 """GPD, niveles de retorno y perfiles: pruebas de respuesta conocida (contrato de la F2, §5.1)."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -27,6 +28,7 @@ def _ll_vec(x, xi, sigma):
 
 
 # --- GPD ----------------------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("xi", [-0.9, -0.3, 0.0, 0.3])
 def test_loglik_igual_a_scipy(xi):
@@ -126,6 +128,7 @@ def test_no_regular():
 
 # --- Retorno ------------------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("xi", [-0.3, 0.0, 0.2])
 def test_retorno_un_estrato_igual_a_multiestrato(xi):
     for T in (1.0, 10.0, 100.0):
@@ -150,6 +153,7 @@ def test_retorno_bajo_el_umbral_y_probabilidad():
 
 # --- Perfiles -----------------------------------------------------------------------------------
 
+
 def _sigma_max_rejilla(x, xi):
     """max_σ ℓ por rejilla densa en log σ (independiente del optimizador acotado del código)."""
     xmax = x.max()
@@ -157,9 +161,12 @@ def _sigma_max_rejilla(x, xi):
     s = np.exp(np.linspace(lo, np.log(x.mean()) + 4, 20001))
     ll = _ll_vec(x, np.full_like(s, xi), s)
     i = int(np.argmax(ll))
-    r = optimize.minimize_scalar(lambda ls: -_ll_vec(x, xi, np.exp(ls)),
-                                 bounds=(np.log(s[max(i - 1, 0)]), np.log(s[min(i + 1, s.size - 1)])), method="bounded",
-                                 options={"xatol": 1e-12})
+    r = optimize.minimize_scalar(
+        lambda ls: -_ll_vec(x, xi, np.exp(ls)),
+        bounds=(np.log(s[max(i - 1, 0)]), np.log(s[min(i + 1, s.size - 1)])),
+        method="bounded",
+        options={"xatol": 1e-12},
+    )
     return max(ll[i], -float(r.fun))
 
 
@@ -266,6 +273,7 @@ def _perfil_multi_fuerza_bruta(xs, n, E, T, z, ajustes):
     """Dos estratos: la σ de un estrato se despeja de la restricción y se maximiza sin restricción en los otros cinco
     parámetros con Powell desde varios inicios (formulación distinta del SLSQP del código). Se prueban los dos
     despejes, porque en la cola un estrato acotado puede tener S(z) = 0 y entonces solo el otro puede despejarse."""
+
     def neg_factory(libre, despejado):
         xl, xd = xs[libre], xs[despejado]
 
@@ -280,9 +288,11 @@ def _perfil_multi_fuerza_bruta(xs, n, E, T, z, ajustes):
             s_d = _sigma_de_p(z, xi_d, p_d)
             if s_d <= 0:
                 return 1e300
-            v = (perfil.loglik_estrato(xl, n[libre], E[libre], xi_l, s_l, lam_l)
-                 + perfil.loglik_estrato(xd, n[despejado], E[despejado], xi_d, s_d, lam_d))
+            v = perfil.loglik_estrato(xl, n[libre], E[libre], xi_l, s_l, lam_l) + perfil.loglik_estrato(
+                xd, n[despejado], E[despejado], xi_d, s_d, lam_d
+            )
             return -v if np.isfinite(v) else 1e300
+
         return neg
 
     mejor = np.inf
@@ -291,9 +301,16 @@ def _perfil_multi_fuerza_bruta(xs, n, E, T, z, ajustes):
         neg = neg_factory(libre, despejado)
         for d in (0.0, -0.15, 0.15):
             for f in (0.0, -0.3, 0.3):
-                th0 = [al.xi + d, np.log(al.sigma), np.log(n[libre] / E[libre]) + f, ad.xi - d,
-                       np.log(n[despejado] / E[despejado]) - f]
-                r = optimize.minimize(neg, th0, method="Powell", options={"xtol": 1e-10, "ftol": 1e-13, "maxfev": 40000})
+                th0 = [
+                    al.xi + d,
+                    np.log(al.sigma),
+                    np.log(n[libre] / E[libre]) + f,
+                    ad.xi - d,
+                    np.log(n[despejado] / E[despejado]) - f,
+                ]
+                r = optimize.minimize(
+                    neg, th0, method="Powell", options={"xtol": 1e-10, "ftol": 1e-13, "maxfev": 40000}
+                )
                 mejor = min(mejor, float(r.fun))
     return -mejor
 
@@ -305,15 +322,18 @@ def test_perfil_rl_multiestrato_dos_estratos_frente_a_fuerza_bruta():
     a1, a2 = gpd.ajustar_gpd(x1), gpd.ajustar_gpd(x2)
     ic = perfil.perfil_rl_multiestrato([x1, x2], n, E, T, u, [a1, a2])
     assert ic.causa_lo is None and ic.causa_hi is None
-    l_hat = perfil.loglik_estrato(x1, n[0], E[0], a1.xi, a1.sigma, n[0] / E[0]) + \
-        perfil.loglik_estrato(x2, n[1], E[1], a2.xi, a2.sigma, n[1] / E[1])
+    l_hat = perfil.loglik_estrato(x1, n[0], E[0], a1.xi, a1.sigma, n[0] / E[0]) + perfil.loglik_estrato(
+        x2, n[1], E[1], a2.xi, a2.sigma, n[1] / E[1]
+    )
     q = stats.chi2.ppf(0.95, 1)
     for lim in (ic.lo, ic.hi):
         d = 2 * (l_hat - _perfil_multi_fuerza_bruta([x1, x2], n, E, T, lim - u, [a1, a2]))
         assert abs(d - q) < 1e-3  # en el límite del código el déficit independiente vale χ²₁
         # el déficit cambia más de 0.02 al mover el límite un 1e-3 relativo: la tolerancia equivale a < 1e-3 en el RL
-        d2 = 2 * (l_hat - _perfil_multi_fuerza_bruta([x1, x2], n, E, T, lim * (1.001 if lim > ic.punto else 0.999) - u,
-                                                      [a1, a2]))
+        d2 = 2 * (
+            l_hat
+            - _perfil_multi_fuerza_bruta([x1, x2], n, E, T, lim * (1.001 if lim > ic.punto else 0.999) - u, [a1, a2])
+        )
         assert d2 - d > 0.02
 
 
