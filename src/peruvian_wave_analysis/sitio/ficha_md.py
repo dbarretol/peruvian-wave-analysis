@@ -231,7 +231,11 @@ def componer(d: Path, ficha_nodo: dict, gate_serie: dict | None, deptho_m: float
         ("Zonas de exclusión que tocan el nodo", n.get("zonas_exclusion") or "ninguna"),
         ("Distancia a la zona de exclusión más cercana", f"{_f(n.get('dist_exclusion_km'))} km"),
         ("Zonas de colisión (se declaran, no excluyen)", n.get("zonas_colision") or "ninguna"),
-        ("Capas no evaluadas (ADR-0017)", ", ".join(ficha_nodo.get("no_evaluado", [])) or "ninguna"),
+        # ADR-0017: la franja de 5 millas no aplica; no se lista como «no evaluada» aunque ficha_nodo.json la traiga.
+        ("Franja de 5 millas (ADR-0017)", f"no aplica: el nodo está a {_f(r['dist_costa_gebco_km'] / 1.852)} millas "
+                                          "de la costa (DS 002-2025-PRODUCE, artículo 63.1)"),
+        ("Capas no evaluadas (ADR-0017)", ", ".join(c for c in ficha_nodo.get("no_evaluado", [])
+                                                     if "5 millas" not in c) or "ninguna"),
     ], columns=["Campo", "Valor"])))
 
     # 9. Limitaciones
@@ -241,7 +245,8 @@ def componer(d: Path, ficha_nodo: dict, gate_serie: dict | None, deptho_m: float
       "del modelo puede exceder el que corresponde a 194 m en ≈ 3 % (Tp = 18 s) a ≈ 5 % (Tp = 20 s). La F3 informa la "
       "fracción de estados sobre el P99 con Tp ≥ 16 s y ≥ 18 s y la razón media Ks(194 m)/Ks(420 m).\n")
     a("2. **Capas no evaluadas (ADR-0017):** la franja de 5 millas no aplica (DS 002-2025-PRODUCE, artículo 63.1: «las "
-      "primeras cinco millas marinas adyacentes a la costa»; el nodo está a 12.5 millas). Las demás capas sin evaluar son "
+      f"primeras cinco millas marinas adyacentes a la costa»; el nodo está a {_f(r['dist_costa_gebco_km'] / 1.852)} "
+      "millas). Las demás capas sin evaluar son "
       "un límite del estudio, no un descarte.\n")
     a("3. **Un solo reanálisis (ADR-0018):** sin reanálisis de contraste.\n")
     a("4. **Validación de la cola solo regional:** sin cobertura útil en el sitio (§5); el sesgo de la fuente entra como "

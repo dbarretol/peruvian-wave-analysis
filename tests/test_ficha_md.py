@@ -74,3 +74,11 @@ def test_redaccion_de_la_revision(carpeta):
 
 def test_rango_c06_sigue_la_regla():
     assert ficha_md.C06_D == min((x[2] for x in ficha_md.C06_LECTURA), key=lambda v: -abs(v))
+
+
+def test_franja_de_5_millas_dice_no_aplica_en_todas_partes(carpeta):
+    """Revisión de control del 2026-11-15: la §8 no debe listarla como «no evaluada» (ADR-0017)."""
+    md = ficha_md.componer(carpeta, FICHA_NODO, None, 420.0, "0.1.0")
+    fila = next(l for l in md.splitlines() if l.startswith("| Capas no evaluadas"))
+    assert "5 millas" not in fila and "zonas militares" in fila
+    assert "| Franja de 5 millas (ADR-0017) | no aplica: el nodo está a 12.5 millas" in md
