@@ -1,0 +1,59 @@
+# Corrida publicada del sitio de la tesis: frente a Marcona (Ica), isóbata de 200 m.
+# Nodo elegido (ADR-0007): -15.0, -75.8. Respaldo: -14.8, -76.0.
+#   uv run mapa-sitio --config config/marcona-200m.yaml
+#   uv run mapa-sitio-final --exploratorio <WAVE-DATA>/interim/F01-sitio-y-fuentes/mapa-sitio/marcona-200m/metadatos.json \
+#       --gebco <WAVE-DATA>/raw/batimetria/gebco/gebco_2026_n-14.1_s-16.7_w-76.6_e-74.0.nc --nodo-lat -15.0 --nodo-lon -75.8
+
+nombre: marcona-200m             # minúsculas; se usa en la carpeta de salida
+latitud: -15.40                  # grados, negativa al sur
+longitud: -75.30                 # grados, negativa al oeste
+isobatas: [200, 100, 50]         # m; la primera es la principal salvo que se indique otra
+isobata_principal: 200
+semiancho_grados: 1.0            # recuadro de ±1° alrededor de la referencia
+n_candidatos: 5                  # ADR-0013 fija 3 por defecto; aquí 5 a pedido del usuario (2026-11-14)
+resguardo_km: 1.0                # ADR-0013
+min_vecinas: 0                   # ADR-0014: las vecinas no descartan (0 a 8)
+max_tierra: 1.0                  # ADR-0014: tierra en la celda no descarta (0 a 1)
+puntos:                          # solo se dibujan; no intervienen en los criterios
+  # nombre: va en la leyenda | etiqueta: texto corto en el mapa | desplazamiento: de la etiqueta, en puntos [x, y]
+  - nombre: Parque eólico Tres Hermanas (aprox.)
+    etiqueta: P.E. Tres Hermanas
+    latitud: 15°23′20″S          # grados decimales o sexagesimales (O = oeste)
+    longitud: 75°04′15″O
+    desplazamiento: [7, 4]
+  - nombre: Parque eólico Punta Lomitas
+    etiqueta: P.E. Punta Lomitas
+    latitud: 14°39′06.1″S
+    longitud: 75°54′10.7″O
+  # Subestaciones: WGS84, convertidas desde UTM 18S. Fuentes en fuentes-de-datos.md del proyecto:
+  # Marcona II = centroide del predio 1 de la R.M. 396-2026-MINEM/DM; Hub Poroma = predio de la R.M. 288-2026-MINEM/DM.
+  - nombre: S.E. Marcona 220 kV (sin verificar)
+    etiqueta: S.E. Marcona
+    latitud: -15.4053
+    longitud: -75.1050
+    marcador: p
+    desplazamiento: [7, -5]
+  - nombre: S.E. Marcona II 138 kV
+    etiqueta: S.E. Marcona II
+    latitud: -15.2034
+    longitud: -75.1794
+    marcador: p
+  - nombre: S.E. Hub Poroma 500 kV
+    etiqueta: S.E. Hub Poroma
+    latitud: -15.0448
+    longitud: -75.0515
+    marcador: p
+# directorio_datos: C:/WORKSPACES/TESIS-M5-WAVE/WAVE-DATA   # o variable de entorno WAVE_DATA_DIR
+
+batimetria:
+  fuente: gmrt                   # gmrt (descarga) | archivo (NetCDF local, p. ej. recorte de GEBCO)
+  resolucion_gmrt: med           # low | med | high | max
+  # archivo: C:/ruta/gebco_2025_recorte.nc
+  # variable: elevation
+
+waverys:
+  fuente: copernicus             # copernicus (descarga; requiere `copernicusmarine login`) | archivo
+  dataset_id: cmems_mod_glo_wav_my_0.2deg_PT3H-i
+  fecha: "2020-07-15T12:00:00"   # un paso de tiempo basta para leer la malla y la máscara
+  variable: VHM0
+  # archivo: C:/ruta/waverys_recorte.nc

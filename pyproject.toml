@@ -12,8 +12,10 @@ dependencies = [
     "matplotlib>=3.9",
     "contourpy>=1.2",
     "scipy>=1.13",
+    "shapely>=2.0",
     "pyyaml>=6.0",
     "requests>=2.32",
+    "truststore>=0.10",
     "copernicusmarine>=2.0",
 ]
 
@@ -26,6 +28,8 @@ dev = [
 
 [project.scripts]
 mapa-sitio = "peruvian_wave_analysis.sitio.cli:main"
+mapa-sitio-final = "peruvian_wave_analysis.sitio.cli:main_final"
+registrar-gebco = "peruvian_wave_analysis.sitio.cli:main_registrar_gebco"
 
 [build-system]
 requires = ["hatchling"]
