@@ -203,6 +203,7 @@ def test_grados_sexagesimales():
     assert a_grados("15°23′20″S") == pytest.approx(-(15 + 23 / 60 + 20 / 3600))
     assert a_grados("75°04'15\"O") == pytest.approx(-(75 + 4 / 60 + 15 / 3600))
     assert a_grados("75°04′15″W") == a_grados("75°04′15″O")
+    assert a_grados("-14° 39' 6.1\" S") == pytest.approx(-(14 + 39 / 60 + 6.1 / 3600))
     assert a_grados("12°N") == 12 and a_grados(-15.5) == -15.5 and a_grados("-15.5") == -15.5
     with pytest.raises(ValueError):
         a_grados("15 grados sur")
@@ -239,3 +240,14 @@ def test_no_se_dibujan_bordes_de_celdas_solo_de_tierra(cfg_sintetica):
         lados_celda = [(la, round(lo + h, 4)), (la, round(lo - h, 4)), (round(la + h, 4), lo), (round(la - h, 4), lo)]
         for lado, compartido in zip(lados_celda, vecinas_con_agua):
             assert (tuple(round(v, 4) for v in lado) in centros) == compartido
+
+
+def test_punto_etiqueta_y_desplazamiento():
+    from peruvian_wave_analysis.sitio.config import PuntoReferencia
+    p = PuntoReferencia(nombre="S.E. Larga 220 kV (R.M. x)", latitud=-15.4, longitud=-75.1)
+    assert p.etiqueta == p.nombre and p.marcador == "D" and p.desplazamiento == [7.0, -3.0]
+    q = PuntoReferencia(nombre="S.E. Larga", latitud=-15.4, longitud=-75.1, etiqueta="S.E.", marcador="p",
+                        desplazamiento=[-5, 4])
+    assert q.etiqueta == "S.E." and q.desplazamiento == [-5.0, 4.0]
+    with pytest.raises(ValueError):
+        PuntoReferencia(nombre="x", latitud=-15.4, longitud=-75.1, desplazamiento=[1])

@@ -83,7 +83,7 @@ r.tabla.head()
 | `min_vecinas` | `0` | Mínimo de vecinas con dato para ser candidato (0 = no descarta). |
 | `max_tierra` | `1.0` | Fracción de tierra tolerada en la celda (1 = no descarta). |
 | `zonas` | `true` | `false` omite las zonas (el mapa lo declara). |
-| `puntos` | `[]` | Puntos que solo se dibujan (nombre, latitud, longitud), en grados decimales o sexagesimales (`15°23′20″S`, `75°04′15″O`). No intervienen en los criterios. En la línea de comandos: `--punto NOMBRE LAT LON`, repetible. |
+| `puntos` | `[]` | Puntos que solo se dibujan (nombre, latitud, longitud), en grados decimales o sexagesimales (`15°23′20″S`, `75°04′15″O`). No intervienen en los criterios. Opcionales: `etiqueta` (texto corto en el mapa; la leyenda lleva el nombre), `marcador` (símbolo de matplotlib, por defecto `D`) y `desplazamiento` de la etiqueta en puntos (`[7, -3]`). En la línea de comandos: `--punto NOMBRE LAT LON`, repetible. |
 | `batimetria.fuente` | `gmrt` | `gmrt` (descarga) o `archivo` (NetCDF local). |
 | `batimetria.resolucion_gmrt` | `med` | `low`, `med`, `high` o `max`. |
 | `waverys.fuente` | `copernicus` | `copernicus` (descarga) o `archivo`. |

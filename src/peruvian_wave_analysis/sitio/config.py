@@ -30,13 +30,16 @@ class ConfigWaverys:
 
 
 _SEXAGESIMAL = re.compile(
-    r"^\s*(\d+(?:\.\d+)?)\s*°\s*(?:(\d+(?:\.\d+)?)\s*['′]\s*)?(?:(\d+(?:\.\d+)?)\s*(?:[\"″]|'')\s*)?([NSEOW])\s*$",
+    r"^\s*-?\s*(\d+(?:\.\d+)?)\s*°\s*(?:(\d+(?:\.\d+)?)\s*['′]\s*)?(?:(\d+(?:\.\d+)?)\s*(?:[\"″]|'')\s*)?([NSEOW])\s*$",
     re.IGNORECASE,
 )
 
 
 def a_grados(valor: float | str) -> float:
-    """Grados decimales desde un número o un texto sexagesimal como 15°23′20″S o 75°04'15\"O (O = W)."""
+    """Grados decimales desde un número o un texto sexagesimal como 15°23′20″S o 75°04'15\"O (O = W).
+
+    El hemisferio manda: «-14° 39' 6.1\" S» se lee como 14°39′6.1″ sur (el signo sobra).
+    """
     if not isinstance(valor, str):
         return float(valor)
     m = _SEXAGESIMAL.match(valor)
@@ -53,10 +56,18 @@ class PuntoReferencia:
     nombre: str
     latitud: float | str
     longitud: float | str
+    marcador: str = "D"  # símbolo de matplotlib: "D" rombo, "p" pentágono, "s" cuadrado, "^" triángulo…
+    etiqueta: str | None = None  # texto corto sobre el mapa; None: el nombre (la leyenda siempre lleva el nombre)
+    desplazamiento: list[float] = field(default_factory=lambda: [7.0, -3.0])  # de la etiqueta, en puntos (x, y)
 
     def __post_init__(self) -> None:
         self.latitud = a_grados(self.latitud)
         self.longitud = a_grados(self.longitud)
+        if self.etiqueta is None:
+            self.etiqueta = self.nombre
+        self.desplazamiento = [float(v) for v in self.desplazamiento]
+        if len(self.desplazamiento) != 2:
+            raise ValueError(f"Punto «{self.nombre}»: desplazamiento debe ser [x, y].")
         if not -90 < self.latitud < 90 or not -180 <= self.longitud <= 180:
             raise ValueError(f"Punto de referencia «{self.nombre}» fuera de rango.")
 

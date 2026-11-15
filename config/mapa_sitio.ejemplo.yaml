@@ -12,9 +12,34 @@ resguardo_km: 1.0                # ADR-0013
 min_vecinas: 0                   # ADR-0014: las vecinas no descartan (0 a 8)
 max_tierra: 1.0                  # ADR-0014: tierra en la celda no descarta (0 a 1)
 puntos:                          # solo se dibujan; no intervienen en los criterios
+  # nombre: va en la leyenda | etiqueta: texto corto en el mapa | desplazamiento: de la etiqueta, en puntos [x, y]
   - nombre: Parque eólico Tres Hermanas (aprox.)
+    etiqueta: P.E. Tres Hermanas
     latitud: 15°23′20″S          # grados decimales o sexagesimales (O = oeste)
     longitud: 75°04′15″O
+    desplazamiento: [7, 4]
+  - nombre: Parque eólico Punta Lomitas
+    etiqueta: P.E. Punta Lomitas
+    latitud: 14°39′06.1″S
+    longitud: 75°54′10.7″O
+  # Subestaciones: WGS84, convertidas desde UTM 18S. Fuentes en fuentes-de-datos.md del proyecto:
+  # Marcona II = centroide del predio 1 de la R.M. 396-2026-MINEM/DM; Hub Poroma = predio de la R.M. 288-2026-MINEM/DM.
+  - nombre: S.E. Marcona 220 kV (sin verificar)
+    etiqueta: S.E. Marcona
+    latitud: -15.4053
+    longitud: -75.1050
+    marcador: p
+    desplazamiento: [7, -5]
+  - nombre: S.E. Marcona II 138 kV
+    etiqueta: S.E. Marcona II
+    latitud: -15.2034
+    longitud: -75.1794
+    marcador: p
+  - nombre: S.E. Hub Poroma 500 kV
+    etiqueta: S.E. Hub Poroma
+    latitud: -15.0448
+    longitud: -75.0515
+    marcador: p
 # directorio_datos: C:/WORKSPACES/TESIS-M5-WAVE/WAVE-DATA   # o variable de entorno WAVE_DATA_DIR
 
 batimetria:

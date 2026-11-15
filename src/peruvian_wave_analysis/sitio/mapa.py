@@ -283,11 +283,13 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
     manejadores.append(Line2D([], [], color=estilo.TINTA, marker="*", ls="", ms=12, mec="white",
                               label=f"Referencia ({_fmt_lat(cfg.latitud)}, {_fmt_lon(cfg.longitud)})"))
     for p in cfg.puntos:
-        ax.scatter([p.longitud], [p.latitud], s=70, marker="D", c=estilo.TINTA_SECUNDARIA, edgecolors="white",
+        ax.scatter([p.longitud], [p.latitud], s=70, marker=p.marcador, c=estilo.TINTA_SECUNDARIA, edgecolors="white",
                    linewidths=1.2, zorder=9)
-        ax.annotate(p.nombre, (p.longitud, p.latitud), xytext=(7, -3), textcoords="offset points", fontsize=7.5,
-                    color=estilo.TINTA, path_effects=_HALO, zorder=9, va="top")
-        manejadores.append(Line2D([], [], color=estilo.TINTA_SECUNDARIA, marker="D", ls="", ms=7, mec="white",
+        dx, dy = p.desplazamiento
+        ax.annotate(p.etiqueta, (p.longitud, p.latitud), xytext=(dx, dy), textcoords="offset points", fontsize=7.5,
+                    color=estilo.TINTA, path_effects=_HALO, zorder=9, ha="left" if dx >= 0 else "right",
+                    va="top" if dy < 0 else "bottom")
+        manejadores.append(Line2D([], [], color=estilo.TINTA_SECUNDARIA, marker=p.marcador, ls="", ms=7, mec="white",
                                   label=f"{p.nombre} ({_dms(p.latitud, 'NS')}, {_dms(p.longitud, 'EO')})"))
 
     _barra_de_escala(ax, cfg)
@@ -329,8 +331,10 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
                "la elección final es visual."]
     if aviso:
         lineas += ["", aviso]
-    ax.text(1.02, 0.0, "\n".join(lineas), transform=ax.transAxes, ha="left", va="bottom", fontsize=7,
-            color=estilo.TINTA_SECUNDARIA, linespacing=1.35)
+    # Debajo de la leyenda, sea cual sea su alto (bbox_inches="tight" al guardar incluye todo).
+    notas = ax.annotate("\n".join(lineas), xy=(0, 0), xycoords=leyenda, xytext=(0, -10), textcoords="offset points",
+                        ha="left", va="top", fontsize=7, color=estilo.TINTA_SECUNDARIA, linespacing=1.35)
+    notas.set_in_layout(False)  # que el diseño no reserve espacio bajo el mapa por estas notas
     return fig
 
 
