@@ -8,6 +8,7 @@ from scipy import optimize, stats
 
 from peruvian_wave_analysis.extremos import gpd, perfil, retorno
 from peruvian_wave_analysis.extremos.retorno import EstratoRetorno
+from peruvian_wave_analysis.verificacion import escenarios as esc
 
 
 def _simular(xi, sigma, n, semilla):
@@ -132,22 +133,28 @@ def test_no_regular():
 @pytest.mark.parametrize("xi", [-0.3, 0.0, 0.2])
 def test_retorno_un_estrato_igual_a_multiestrato(xi):
     for T in (1.0, 10.0, 100.0):
-        a = retorno.nivel_retorno(2.0, xi, 0.8, 12.0, T)
-        b = retorno.nivel_retorno_multiestrato(2.0, [EstratoRetorno(12.0, xi, 0.8)], T)
+        a = retorno.nivel_retorno(2.0, xi, 0.8, 12.0, T).valor
+        b = retorno.nivel_retorno_multiestrato(2.0, [EstratoRetorno(12.0, xi, 0.8)], T).valor
         assert abs(a - b) < 1e-9
         assert abs(retorno.tasa_de_excedencia(a, 2.0, [EstratoRetorno(12.0, xi, 0.8)]) - 1 / T) < 1e-12
 
 
 def test_retorno_dos_estratos_iguales_es_tasa_doble():
     e = EstratoRetorno(5.0, -0.1, 0.7)
-    a = retorno.nivel_retorno_multiestrato(1.0, [e, e], 50.0)
-    b = retorno.nivel_retorno(1.0, -0.1, 0.7, 10.0, 50.0)
+    a = retorno.nivel_retorno_multiestrato(1.0, [e, e], 50.0).valor
+    b = retorno.nivel_retorno(1.0, -0.1, 0.7, 10.0, 50.0).valor
     assert abs(a - b) < 1e-9
 
 
 def test_retorno_bajo_el_umbral_y_probabilidad():
-    assert np.isnan(retorno.nivel_retorno(1.0, 0.0, 1.0, 0.5, 1.0))
-    assert np.isnan(retorno.nivel_retorno_multiestrato(1.0, [EstratoRetorno(0.5, 0.0, 1.0)], 1.0))
+    for r in (
+        retorno.nivel_retorno(1.0, 0.0, 1.0, 0.5, 1.0),
+        retorno.nivel_retorno_multiestrato(1.0, [EstratoRetorno(0.5, 0.0, 1.0)], 1.0),
+    ):
+        assert np.isnan(r.valor) and r.causa == retorno.BAJO_EL_UMBRAL and not r.existe
+    r = retorno.nivel_retorno_multiestrato(1.0, [], 100.0)
+    assert np.isnan(r.valor) and r.causa == retorno.SIN_ESTRATOS
+    assert retorno.nivel_retorno(1.0, 0.0, 1.0, 10.0, 100.0).existe
     assert abs(retorno.probabilidad_en_n_anios(100, 50) - (1 - np.exp(-0.5))) < 1e-15
 
 
@@ -241,7 +248,7 @@ def test_perfil_rl_un_estrato_frente_a_fuerza_bruta():
     a = gpd.ajustar_gpd(x)
     ic = perfil.perfil_rl(x, n, E, T, u, a)
     lam_hat = n / E
-    assert abs(ic.punto - retorno.nivel_retorno(u, a.xi, a.sigma, lam_hat, T)) < 1e-9
+    assert abs(ic.punto - retorno.nivel_retorno(u, a.xi, a.sigma, lam_hat, T).valor) < 1e-9
     assert abs(ic.delta_loglik_en_punto) < 1e-6 and ic.deficit_min > -1e-6
     l_hat = perfil.loglik_estrato(x, n, E, a.xi, a.sigma, lam_hat)
     q = stats.chi2.ppf(0.95, 1)
@@ -344,3 +351,79 @@ def test_perfil_rl_limite_superior_abierto_por_tope():
     a = gpd.ajustar_gpd(x)
     ic = perfil.perfil_rl(x, x.size, 40.0, 100.0, 1.0, a)
     assert np.isnan(ic.hi) and ic.causa_hi == "tope"
+
+
+def test_retorno_sin_cota():
+    # ξ = 3 y una tasa enorme: la raíz queda más allá de u + 1e6
+    r = retorno.nivel_retorno_multiestrato(0.0, [EstratoRetorno(1e6, 3.0, 1.0)], 1e6)
+    assert np.isnan(r.valor) and r.causa == retorno.SIN_COTA
+
+
+# --- Funciones públicas sin prueba propia en la primera pasada (F02-K-01) -----------------------
+
+
+def test_sigma_dado_xi_exponencial_y_frontera():
+    x = _simular(0.0, 1.7, 200, 31)
+    s, ll = gpd.sigma_dado_xi(x, 0.0)
+    m = x.mean()  # con ξ = 0 (exponencial) el máximo es σ = media, ℓ = −n·ln(media) − n
+    assert abs(s - m) < 1e-7 * m and abs(ll - (-x.size * np.log(m) - x.size)) < 1e-8
+    s1, ll1 = gpd.sigma_dado_xi(x, -1.0)  # en la frontera ξ = −1, σ = máx x
+    assert s1 == x.max() and abs(ll1 - gpd.loglik(x, -1.0, x.max())) < 1e-12
+
+
+@pytest.mark.parametrize("xi", [-0.4, 0.25])
+def test_sigma_dado_xi_frente_a_rejilla(xi):
+    x = _simular(-0.1, 1.0, 150, 8)
+    assert abs(gpd.sigma_dado_xi(x, xi)[1] - _sigma_max_rejilla(x, xi)) < 1e-7
+
+
+def test_perfil_loglik_xi():
+    x = _simular(0.1, 1.0, 120, 12)
+    a = gpd.ajustar_gpd(x)
+    lp = gpd.perfil_loglik_xi(x, [a.xi, 0.0, -0.3])
+    assert abs(lp[0] - a.loglik) < 1e-6  # en ξ̂ el perfil es el máximo global
+    assert abs(lp[1] - (-x.size * np.log(x.mean()) - x.size)) < 1e-8
+    assert abs(lp[2] - _sigma_max_rejilla(x, -0.3)) < 1e-7
+    assert np.all(lp <= a.loglik + 1e-9)
+
+
+def _sigma_libre_fuerza_bruta(x, s):
+    """max_ξ ℓ(ξ, σ) con σ fijo, por rejilla densa en ξ y refinamiento (independiente del código)."""
+    lo = max(-1.0, -s / x.max())
+    xis = np.linspace(lo + 1e-9, 1.5, 30001)
+    ll = _ll_vec(x, xis, np.full_like(xis, s))
+    i = int(np.argmax(ll))
+    r = optimize.minimize_scalar(
+        lambda xi: -_ll_vec(x, xi, s),
+        bounds=(xis[max(i - 1, 0)], xis[min(i + 1, xis.size - 1)]),
+        method="bounded",
+        options={"xatol": 1e-12},
+    )
+    return max(ll[i], -float(r.fun))
+
+
+def test_perfil_sigma_frente_a_fuerza_bruta():
+    x = _simular(0.1, 1.0, 200, 17)
+    a = gpd.ajustar_gpd(x)
+    ic = perfil.perfil_sigma(x, a)
+    q = stats.chi2.ppf(0.95, 1)
+
+    def deficit(s):
+        return 2 * (a.loglik - _sigma_libre_fuerza_bruta(x, s)) - q
+
+    lo = optimize.brentq(deficit, a.sigma / 3, a.sigma, xtol=1e-9)
+    hi = optimize.brentq(deficit, a.sigma, a.sigma * 3, xtol=1e-9)
+    assert abs(ic.lo - lo) < 1e-3 * a.sigma and abs(ic.hi - hi) < 1e-3 * a.sigma
+    assert ic.causa_lo is None and ic.causa_hi is None and ic.lo < a.sigma < ic.hi
+
+
+def test_perfil_multiestrato_sin_convergencia_en_el_punto(monkeypatch):
+    """F02-K-02: si el máximo restringido no converge en el RL puntual, los dos límites quedan abiertos con causa
+    ``sin_convergencia`` (sin excepción), y el conteo de cobertura los toma como no cobertura."""
+    xs = [_simular(-0.1, 1.0, 120, 3), _simular(0.0, 0.7, 80, 4)]
+    ajustes = [gpd.ajustar_gpd(x) for x in xs]
+    monkeypatch.setattr(perfil._Multi, "maximo", lambda self, z, inicios: (-np.inf, None, False))
+    r = perfil.perfil_rl_multiestrato(xs, [x.size for x in xs], [40.0, 40.0], 100.0, 0.0, ajustes)
+    assert np.isnan(r.lo) and np.isnan(r.hi) and np.isfinite(r.punto)
+    assert r.causa_lo == r.causa_hi == perfil.SIN_CONVERGENCIA and r.n_sin_resolver == 1
+    assert esc._cubre(r.punto, r.lo, r.hi, r.causa_lo, r.causa_hi) == (False, False)

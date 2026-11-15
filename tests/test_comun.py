@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from peruvian_wave_analysis.comun import etapa, huella, json_estricto, orquestador, semillas
+from peruvian_wave_analysis.comun import etapa, huella, json_estricto, orquestador, procesos, semillas
 from peruvian_wave_analysis.comun.errores import GateFallido, HashDistinto, InsumoFaltante
 
 # --- JSON estricto -----------------------------------------------------------------------------
@@ -367,3 +368,38 @@ def test_semillas_congeladas_y_por_nombre():
     assert semillas.semilla("a", "b") != semillas.semilla("ab")
     assert semillas.semilla("verificacion", "A1") == 644026550
     np.testing.assert_allclose(semillas.generador("prueba").random(2), [0.60125765, 0.44234809], atol=1e-8)
+
+
+# --- F02-K-03 y F02-K-05 ------------------------------------------------------------------------
+
+
+def test_interrupcion_borra_la_salida_y_la_huella_registrada(entorno):
+    datos, insumo, codigo, salida = entorno
+    _publicar(datos, insumo, codigo, salida)
+    with pytest.raises(KeyboardInterrupt):
+        with etapa.staging_protegido(salida, codigo, base_codigo=codigo[0].parent) as st:
+            (st / "parcial.txt").write_text("x", encoding="utf-8")
+            raise KeyboardInterrupt
+    assert sorted(p.name for p in salida.iterdir()) == [etapa.GATE_FALLIDO]
+    assert "KeyboardInterrupt" in json_estricto.leer(salida / etapa.GATE_FALLIDO)["motivos"][0]
+    # la huella registrada al abrir no sobrevive: un staging hecho a mano en la misma ruta no se puede publicar
+    st = etapa.ruta_staging(salida)
+    st.mkdir(parents=True)
+    (st / "r.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="huella del código al empezar"):
+        etapa.publicar(
+            st, salida, etapa.Gate(True, {}), codigo, {"serie": insumo}, datos, None, base_codigo=codigo[0].parent
+        )
+
+
+def test_mapear_en_hijos_con_un_hilo_y_en_orden():
+    antes = {v: os.environ.get(v) for v in procesos.VARIABLES_HILOS}
+    for n in (1, 2):
+        r = procesos.mapear(procesos.entorno_del_proceso, range(6), procesos=n, chunksize=2)
+        assert len(r) == 6
+        assert all(e["pid"] != os.getpid() for e in r)  # también con 1 proceso: siempre en hijos
+        assert all(e[v] == "1" for e in r for v in procesos.VARIABLES_HILOS)
+    assert procesos.mapear(abs, [-3, 2, -1], procesos=2) == [3, 2, 1]  # orden de entrada
+    assert {v: os.environ.get(v) for v in procesos.VARIABLES_HILOS} == antes  # el entorno del padre se restaura
+    with pytest.raises(ValueError):
+        procesos.mapear(abs, [1], procesos=0)

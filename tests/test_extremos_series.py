@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import integrate
 
 from peruvian_wave_analysis.comun import semillas
 from peruvian_wave_analysis.extremos import bootstrap, decluster, reescalado, retorno, tasa
@@ -28,6 +29,8 @@ def test_estrato_que_cruza_el_anio():
 def test_estratos_invalidos():
     with pytest.raises(ValueError, match="12"):
         Estratificacion.desde({"a": [1, 2], "b": [3]})
+    with pytest.raises(ValueError, match="sin meses"):  # F02-K-08
+        Estratificacion.desde({"a": [], "b": list(range(1, 13))})
     with pytest.raises(ValueError, match="consecutivos"):
         Estratificacion.desde({"a": [1, 3], "b": [2] + list(range(4, 13))})
     assert Estratificacion.mensual().nombres[0] == "01"
@@ -103,7 +106,7 @@ def test_tasa_y_retorno_extremo_a_extremo():
     # ξ = 0 y la misma σ en ambos estratos: z = σ·ln(T·Σλ) en forma cerrada
     sigma, u, T = 0.5, 2.0, 100.0
     lam = r["tasa_por_anio"].to_numpy()
-    rl = retorno.nivel_retorno_multiestrato(u, [EstratoRetorno(float(l_), 0.0, sigma) for l_ in lam], T)
+    rl = retorno.nivel_retorno_multiestrato(u, [EstratoRetorno(float(l_), 0.0, sigma) for l_ in lam], T).valor
     assert abs(rl - (u + sigma * np.log(T * lam.sum()))) < 1e-6
     with pytest.raises(ValueError, match="fuera"):
         tasa.contar_eventos(pd.DatetimeIndex(["2005-01-01"]), tabla, est)
@@ -209,6 +212,35 @@ def test_bootstrap_por_estrato_exige_declaracion():
 
 
 def test_ic_percentil():
-    ic = bootstrap.ic_percentil(np.r_[np.arange(1, 101, dtype=float), np.nan], 50.0)
-    assert ic.n_validas == 100 and ic.n_no_finitas == 1 and ic.contiene_punto
-    assert not bootstrap.ic_percentil(np.arange(10.0), 20.0).contiene_punto
+    ic = bootstrap.ic_percentil(np.r_[np.arange(1, 101, dtype=float), np.nan], 50.0, no_regular=False)
+    assert ic.n_validas == 100 and ic.n_no_finitas == 1 and ic.contiene_punto and not ic.no_regular
+    assert not bootstrap.ic_percentil(np.arange(10.0), 20.0, no_regular=False).contiene_punto
+    assert bootstrap.ic_percentil(np.arange(10.0), 5.0, no_regular=True).no_regular
+    with pytest.raises(TypeError):  # F02-K-07: obligatorio y por nombre
+        bootstrap.ic_percentil(np.arange(10.0), 5.0)
+
+
+# --- Estadísticos del reescalado (F02-K-01) -----------------------------------------------------
+
+
+def test_estadistico_ad_valor_a_mano_y_por_integral():
+    # n = 1 con F(z) = 1/2: A² = −1 − [ln ½ + ln ½] = 2·ln 2 − 1
+    assert abs(reescalado.estadistico_ad([np.log(2.0)]) - (2 * np.log(2.0) - 1)) < 1e-12
+    # Muestra cualquiera: A² = n ∫ (F_n − u)² / [u(1 − u)] du, integrado por tramos entre los u_(i)
+    z = np.random.default_rng(5).exponential(1.3, 25)
+    u = np.sort(-np.expm1(-z))
+    n = u.size
+    bordes = np.r_[0.0, u, 1.0]
+    total = sum(
+        integrate.quad(lambda t, k=k: (k / n - t) ** 2 / (t * (1 - t)), bordes[k], bordes[k + 1], epsabs=1e-13)[0]
+        for k in range(n + 1)
+    )
+    assert abs(reescalado.estadistico_ad(z) - n * total) < 1e-8
+
+
+def test_estadistico_ks_frente_a_formula():
+    z = np.random.default_rng(6).exponential(0.8, 40)
+    F = np.sort(-np.expm1(-z))
+    i = np.arange(1, F.size + 1)
+    d = max(np.max(i / F.size - F), np.max(F - (i - 1) / F.size))
+    assert abs(reescalado.estadistico_ks(z) - d) < 1e-14

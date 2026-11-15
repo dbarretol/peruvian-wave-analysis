@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from peruvian_wave_analysis.comun import etapa, huella, orquestador
+from peruvian_wave_analysis.comun.errores import ErrorGate
 from peruvian_wave_analysis.sitio import ficha
 
 
@@ -133,3 +135,37 @@ def test_cronologia_sin_catalogo_dice_no_disponible():
 def test_gate_falla_con_sector_sin_clase():
     malos = SECTORES.assign(clase=["abierto"] * 15 + [None])
     assert any("16 sectores" in f for f in ficha.gate_ficha(_res(BUENAS), _crono(), malos, GATE_SERIE, "g.nc"))
+
+
+def _ficha_publicada(datos, destino, raices, insumo, base):
+    with etapa.staging_protegido(destino, raices, base_codigo=base) as st:
+        (st / "tabla.csv").write_text("a\n1\n", encoding="utf-8")
+        etapa.publicar(st, destino, etapa.Gate(True, {}), raices, {"i": insumo}, datos, None, base_codigo=base)
+    return (destino / etapa.MANIFIESTO).read_bytes()
+
+
+def test_solo_md_rechaza_codigo_o_insumo_cambiado_sin_borrar_la_ficha(tmp_path):
+    """F02-K-04: --solo-md no reutiliza tablas de otro código o de otros insumos, y el rechazo no borra la ficha."""
+    datos = tmp_path / "WAVE-DATA"
+    final = datos / "processed" / "F01-sitio-y-fuentes" / "mapa-sitio-final" / "x"
+    final.mkdir(parents=True)
+    (final / "ficha_nodo.json").write_text(json.dumps({"nodo_elegido": {"lat": -15.0, "lon": -75.8}}), "utf-8")
+    insumo = datos / "raw" / "i.txt"
+    insumo.parent.mkdir(parents=True)
+    insumo.write_text("1\n", encoding="utf-8")
+    destino = datos / "processed" / "F01-sitio-y-fuentes" / "ficha-sitio" / "x"
+
+    otro = tmp_path / "otro"  # publicada por otro código: huella distinta de la actual
+    otro.mkdir()
+    (otro / "m.py").write_text("X = 1\n", encoding="utf-8")
+    antes = _ficha_publicada(datos, destino, [otro], insumo, tmp_path)
+    with pytest.raises(ErrorGate, match="código cambió"):
+        ficha.regenerar_md("x", str(datos))
+    assert (destino / etapa.MANIFIESTO).read_bytes() == antes
+
+    raices = orquestador.rutas_codigo(ficha.ETAPA)  # publicada por el código actual, pero el insumo cambia
+    antes = _ficha_publicada(datos, destino, raices, insumo, huella.DIR_PROYECTO)
+    insumo.write_text("2\n", encoding="utf-8")
+    with pytest.raises(ErrorGate, match="insumo cambió"):
+        ficha.regenerar_md("x", str(datos))
+    assert (destino / etapa.MANIFIESTO).read_bytes() == antes
