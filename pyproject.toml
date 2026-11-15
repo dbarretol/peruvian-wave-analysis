@@ -17,6 +17,7 @@ dependencies = [
     "requests>=2.32",
     "truststore>=0.10",
     "copernicusmarine>=2.0",
+    "pyarrow>=26.0.1",
 ]
 
 [dependency-groups]
