@@ -134,3 +134,53 @@ def main_final(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def main_serie(argv=None) -> int:
+    """Serie de WAVERYS del bloque de 5 × 5 (ADR-0016): catálogo, descarga por año con reanudación y gate."""
+    import json
+    import time
+    from pathlib import Path
+
+    import xarray as xr
+
+    from .. import rutas
+    from . import serie, waverys
+
+    p = argparse.ArgumentParser(prog="serie-waverys", description="Descarga la serie de WAVERYS por año y pasa el gate (ADR-0016).")
+    p.add_argument("--anio", type=int, nargs="+", help="Solo estos años (prueba). Sin --anio: el registro completo y el gate.")
+    p.add_argument("--nombre", default="marcona-200m", help="Nombre del sitio para el informe del gate.")
+    p.add_argument("--datos", help="Raíz de WAVE-DATA (si no, WAVE_DATA_DIR).")
+    a = p.parse_args(argv)
+    raiz = Path(rutas.directorio_datos(a.datos))
+    raiz_raw = rutas.raw(raiz)
+    cfg = serie.ConfigSerie()
+    cob = serie.consultar_catalogo(cfg)
+    print(f"Catálogo: {cob.dataset_id} v{cob.version}, {cob.inicio} → {cob.fin}, {len(cob.variables)} variables.")
+    pedidos = a.anio or serie.anios(cob)
+    archivos = []
+    for anio in pedidos:
+        t0 = time.time()
+        ruta, entrada = serie.descargar_anio(anio, cfg, cob, raiz_raw)
+        archivos.append(ruta)
+        print(f"{anio}: {ruta.name}  {entrada['bytes'] / 1e6:.2f} MB  {time.time() - t0:.1f} s")
+    destino = raiz / "processed" / "F01-sitio-y-fuentes" / "ficha-sitio" / a.nombre / "serie_gate.json"
+    if a.anio:
+        print("Prueba por años: no se evalúa el gate del registro completo.")
+        return 0
+    malla = next(iter(sorted((raiz_raw / "waverys" / "malla").glob("*.nc"))))
+    lat, lon, valido = waverys.leer_malla(malla, "VHM0", (cfg.oeste, cfg.este, cfg.sur, cfg.norte))
+    mascara = xr.DataArray(valido, coords={"lat": lat, "lon": lon}, dims=("lat", "lon"))
+    try:
+        informe = serie.verificar(archivos, cob, cfg, raiz_raw, mascara)
+    except serie.ErrorSerie as exc:
+        if destino.exists():
+            destino.unlink()  # un gate fallido invalida el informe publicado anterior
+        print(f"GATE FALLIDO: {exc}", file=sys.stderr)
+        return 1
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    informe["catalogo"] = cob.__dict__
+    informe["malla_referencia"] = str(malla)
+    destino.write_text(json.dumps(informe, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    print(f"Gate de la serie: CUMPLE. Informe en {destino}")
+    return 0
