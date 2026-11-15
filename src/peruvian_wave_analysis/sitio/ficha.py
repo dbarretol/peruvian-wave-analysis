@@ -27,6 +27,8 @@ RADIO_CICLONES_KM = 1000.0
 QUID = "CMEMS-GLO-QUID-001-032 v1.5 (31/05/2024)"
 PUM = "CMEMS-GLO-PUM-001-032 v1.6 (02/2026)"
 CRONOLOGIA = [
+    ("1980-01-01", "resolución", "Malla de 1/5° (0.2°), salidas cada 3 h", f"{QUID} §I"),
+    ("1980-01-01", "física", "MFWAM (Météo-France) con el código ECWAM-IFS-42R2 y la disipación ST4 (Ardhuin et al., 2010)", f"{QUID} §II"),
     ("1980-01-01", "inicio del registro", "Serie extendida hacia atrás; 1980–1992 sin asimilación y sin corrientes (configuración V1.2)", f"{QUID} §VI.4"),
     ("1980-01-01", "forzamiento", "Vientos y hielo de ERA5, cada 3 h, en todo el período", f"{QUID} §II"),
     ("1980-01-01", "batimetría del modelo", "ETOPO2 (NOAA), 2′", f"{QUID} §II"),
@@ -38,6 +40,55 @@ CRONOLOGIA = [
     ("2023-04-01", "tramo interino", "Producción interina mensual (M−4 en el QUID; M−2 en el PUM 1.6)", f"{QUID} §VI.3.2; {PUM}"),
     ("2025-05-30", "fusión de datasets", "El dataset multianual y el interino se fusionan en cmems_mod_glo_wav_my_0.2deg_PT3H-i", f"{PUM}, historial (v1.5)"),
 ]
+
+
+# Tipos que exige el contrato §3.6 en la cronología (F01-K-01).
+TIPOS_CRONOLOGIA = ["resolución", "física", "forzamiento", "corrientes", "batimetría del modelo", "asimilación",
+                    "tramo interino", "período", "fecha de corte", "versión"]
+
+
+def filas_catalogo(gate: dict | None) -> list[tuple[str, str, str, str]]:
+    """Período, fecha de corte y versión, leídos del catálogo anotado en el gate de la serie (F01-K-01)."""
+    if not gate or "catalogo" not in gate:
+        causa = "no disponible: falta serie_gate.json con el catálogo (correr `serie-waverys`)"
+        return [("", t, causa, "no disponible") for t in ("período", "fecha de corte", "versión")]
+    c = gate["catalogo"]
+    ref = f"Catálogo de Copernicus Marine (`copernicusmarine describe`), consulta {c.get('consulta_utc', 'sin hora')}"
+    return [
+        (c["inicio"][:10], "período", f"Cobertura del dataset {c['dataset_id']}: {c['inicio']} a {c['fin']}, paso de {c.get('paso_h', 3):g} h", ref),
+        (c["fin"][:10], "fecha de corte", f"Último paso disponible el día de la descarga: {c['fin']}", ref),
+        (c["fin"][:10], "versión", f"Versión del dataset {c['version']}, fijada en cada pedido (ADR-0016)", ref),
+    ]
+
+
+def gate_ficha(resultados: dict, crono: pd.DataFrame, sectores: pd.DataFrame, gate_serie: dict | None,
+               nombre_gebco: str) -> list[str]:
+    """Criterios del gate de la F1 (contrato §4) que dependen de la ficha. Devuelve las fallas (F01-K-02)."""
+    fallas = []
+    if not gate_serie or not gate_serie.get("cumple"):
+        fallas.append("falta el informe de gate de la serie o no cumple (correr `serie-waverys`)")
+    for etiqueta, r in resultados.items():
+        m = r["mediciones"]
+        if len(m):
+            util = m[m["util_para_sesgo"].astype(bool)]
+            # Comprobación independiente de ob.asimilacion: útil solo si es de 1980–1992 o el QUID declara la misión
+            # como no asimilada (contrato §3.4); nunca «asimilada» ni «no verificable».
+            permitido = (util["tiempo"] < ob.INICIO_ASIMILACION) | util["mision"].isin(list(ob.NO_ASIMILADAS_QUID))
+            if (~permitido).any() or util["asimilacion"].isin(["asimilada", "no verificable"]).any():
+                malas = sorted(util.loc[~permitido, "mision"].unique())
+                fallas.append(f"{etiqueta}: mediciones asimiladas o no verificables marcadas como útiles para el sesgo ({', '.join(malas)})")
+        if r["prof_archivo_200km"]:
+            fallas.append(f"{etiqueta}: {r['prof_archivo_200km']} mediciones a 200 km o menos sin profundidad de GEBCO "
+                          f"(el recorte {nombre_gebco} no cubre la región; contrato §3.4)")
+    faltan = [t for t in TIPOS_CRONOLOGIA if t not in set(crono["tipo"])]
+    if faltan:
+        fallas.append(f"cronología sin las filas de §3.6: {', '.join(faltan)}")
+    ref = crono["referencia"].fillna("").astype(str).str.strip()
+    if (ref == "").any():
+        fallas.append("cronología con filas sin referencia ni «no disponible»")
+    if len(sectores) != 16 or not sectores["clase"].isin(["abierto", "parcial", "cerrado"]).all():
+        fallas.append("exposición: no hay 16 sectores con clase abierto, parcial o cerrado")
+    return fallas
 
 
 def _bajar(url: str) -> bytes:
@@ -200,31 +251,19 @@ def generar(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> dict
               for reg in resultados["principal"]["cobertura"]["regimen"]}
     _avance("ciclones (IBTrACS)")
     ciclones = _ciclones(raiz_raw, lat0, lon0)
-    crono = pd.DataFrame(CRONOLOGIA, columns=["fecha", "tipo", "descripcion", "referencia"])
+    gate = json.loads(gate_serie.read_text(encoding="utf-8")) if gate_serie.exists() else None
+    crono = pd.DataFrame(CRONOLOGIA + filas_catalogo(gate), columns=["fecha", "tipo", "descripcion", "referencia"])
     asim = pd.DataFrame([{"mision": m, "inicio": a, "fin": b or "presente", "referencia": f"{QUID}, tabla 3"}
                          for m, (a, b) in ob.ASIMILADAS_QUID.items()])
 
     # Gate de la F1 (§4).
-    fallas = []
-    if not gate_serie.exists() or not json.loads(gate_serie.read_text(encoding="utf-8")).get("cumple"):
-        fallas.append("falta el informe de gate de la serie o no cumple (correr `serie-waverys`)")
-    for etiqueta in resultados:
-        r = resultados[etiqueta]["resumen"]
-        if len(r) and (r["util_para_sesgo"] & (r["asimilacion"] != "no asimilada")).any():
-            fallas.append(f"{etiqueta}: una observación asimilada o no verificable quedó como útil para el sesgo")
-    for etiqueta, r in resultados.items():
-        if r["prof_archivo_200km"]:
-            fallas.append(f"{etiqueta}: {r['prof_archivo_200km']} mediciones a 200 km o menos sin profundidad de GEBCO "
-                          f"(el recorte {gebco.name} no cubre la región; contrato §3.4)")
-    if crono["referencia"].isna().any():
-        fallas.append("cronología sin referencia")
-    if expo.sectores["clase"].isna().any():
-        fallas.append("sector sin clase")
+    fallas = gate_ficha(resultados, crono, expo.sectores, gate, gebco.name)
 
     # Publicación (staging + MANIFEST.json).
     with tempfile.TemporaryDirectory() as tmp:
         t = Path(tmp)
-        expo.rayos.to_csv(t / "exposicion_rayos.csv", index=False, float_format="%.3f")
+        expo.rayos.merge(expo.sectores[["sector", "clase"]], on="sector", how="left").to_csv(
+            t / "exposicion_rayos.csv", index=False, float_format="%.3f")  # F01-K-07: clase del sector en cada rayo
         expo.sectores.to_csv(t / "exposicion.csv", index=False, float_format="%.3f")
         obst.to_csv(t / "obstaculos.csv", index=False, float_format="%.4f")
         pd.concat([r["resumen"].assign(nodo=k) for k, r in resultados.items()]).to_csv(

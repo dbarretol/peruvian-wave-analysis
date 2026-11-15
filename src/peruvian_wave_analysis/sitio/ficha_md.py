@@ -91,10 +91,13 @@ def componer(d: Path, ficha_nodo: dict, gate_serie: dict | None, deptho_m: float
     })
     a(_tabla(t))
     ab = sect.loc[sect["clase"] == "abierto", "nombre_sector"].tolist()
+    sin_cuenca = sect.loc[(sect["clase"] == "abierto") & ~sect["abierto_oceano_austral"] & ~sect["abierto_pacifico_norte"],
+                          "nombre_sector"].tolist()
     a(f"\n**Abiertos:** {', '.join(ab)}. **Al Océano Austral:** "
       f"{', '.join(sect.loc[sect['abierto_oceano_austral'], 'nombre_sector'])}. **Al Pacífico Norte:** "
-      f"{', '.join(sect.loc[sect['abierto_pacifico_norte'], 'nombre_sector'])}. Un sector abierto que no llega a ninguna "
-      "cuenca (p. ej. OSO) es geometría: su gran círculo no baja de unos 27° S ni cruza el ecuador.\n")
+      f"{', '.join(sect.loc[sect['abierto_pacifico_norte'], 'nombre_sector'])}."
+      + (f" Abiertos sin alcance de cuenca: {', '.join(sin_cuenca)}; es geometría: su gran círculo no llega a −40° ni "
+         "cruza el ecuador hasta 10° N sin tocar tierra." if sin_cuenca else "") + "\n")
     a("«—» en la máscara del modelo: el rayo sale de la malla descargada sin tocar una celda sin dato.\n")
 
     # 3. Obstáculos
@@ -102,7 +105,7 @@ def componer(d: Path, ficha_nodo: dict, gate_serie: dict | None, deptho_m: float
     if len(obst):
         a(_tabla(pd.DataFrame({
             "Lat": obst["lat"].map(lambda v: f"{v:.3f}"), "Lon": obst["lon"].map(lambda v: f"{v:.3f}"),
-            "Área (km²)": obst["area_km2"].map(lambda v: f"{v:.2f}"), "Distancia (km)": obst["dist_min_km"].map(lambda v: f"{v:.1f}"),
+            "Área (km²)": obst["area_km2"].map(lambda v: _f(v, 2)), "Distancia (km)": obst["dist_min_km"].map(lambda v: f"{v:.1f}"),
             "Rumbo (°)": obst["rumbo"].map(lambda v: f"{v:.0f}"), "Clase del sector": obst["clase_sector"],
             "Tierra en el modelo": obst["tierra_en_modelo"].map({True: "sí", False: "no"})})))
         a("\nNinguno está en un sector abierto: no hacen sombra a las direcciones abiertas.\n" if
@@ -174,8 +177,10 @@ def componer(d: Path, ficha_nodo: dict, gate_serie: dict | None, deptho_m: float
     if nv:
         a(f"\nMisiones «no verificables» (no figuran en el QUID; se tratan como asimiladas): {', '.join(nv)}.\n")
     a(f"\n**Regla del respaldo:** " + "; ".join(f"{k}: {v}" for k, v in r["regla_respaldo_por_regimen"].items()) + ".\n")
-    a(f"\nTeselas sin archivo en AODN: {len(r.get('teselas_inexistentes', []))}. El código solo las marca así ante un "
-      "404; dos de GFO en mar abierto (014S-283E, 015S-283E) se confirmaron el 2026-11-15 en el catálogo THREDDS, que no las lista.\n")
+    inex = r.get("teselas_inexistentes", [])
+    a(f"\nTeselas sin archivo en AODN: {len(inex)}. El código solo las marca así ante un 404 (cualquier otro error detiene la corrida)."
+      + (" Las de GFO en mar abierto (014S-283E, 015S-283E) se confirmaron además el 2026-11-15 en el catálogo THREDDS, que no las lista."
+         if {"GFO/014S-283E", "GFO/015S-283E"} <= set(inex) else "") + "\n")
     a("\n**Sensibilidad, posterior a ver los conteos** (revisión de control del 2026-11-15; no es la regla del contrato): "
       "los tramos de misiones de la tabla 3 fuera de su período de asimilación (SARAL antes de 2016-03, GFO después de "
       "2006-08, CFOSAT antes de 2020-02) cuentan como no asimilados.\n\n")
@@ -214,7 +219,8 @@ def componer(d: Path, ficha_nodo: dict, gate_serie: dict | None, deptho_m: float
           f"{gate_serie['inicio']} a {gate_serie['fin']}, {gate_serie['pasos']} pasos de 3 h de {gate_serie['pasos_esperados']} "
           f"esperados, {gate_serie['duplicados']} duplicados, {gate_serie['faltantes']} faltantes, {gate_serie['archivos']} "
           f"archivos anuales, {gate_serie['celdas_con_dato']} de {gate_serie['celdas']} celdas del 5 × 5 con dato, "
-          f"{len(c.get('variables', []))} variables sin faltantes en el nodo. Gate de la serie: "
+          f"{sum(1 for v in gate_serie.get('fraccion_sin_dato_en_el_nodo', {}).values() if v == 0)} de "
+          f"{len(gate_serie.get('fraccion_sin_dato_en_el_nodo', {}))} variables sin faltantes en el nodo. Gate de la serie: "
           f"{'cumple' if gate_serie.get('cumple') else 'NO cumple'}.\n")
     else:
         a("\n**Serie:** no disponible (falta `serie_gate.json`).\n")
