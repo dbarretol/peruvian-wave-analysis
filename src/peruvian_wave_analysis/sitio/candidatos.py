@@ -3,10 +3,10 @@
 Distancias en una proyección local equirrectangular centrada en la coordenada de
 referencia: con recuadros de pocos grados el error es menor al 1 %.
 
-Criterios (analysis/04 §5.2 y ADR-0010), en orden:
+Criterios (ADR-0013, que reemplaza a ADR-0010), en orden:
 1. nodo válido de WAVERYS con celda sin ningún píxel de tierra;
 2. celda fuera de toda zona de exclusión ampliada en ``resguardo_km``;
-3. ocho vecinas válidas;
+3. vecinas: solo descartan si se fija ``min_vecinas`` > 0 (por defecto no descartan; se informan);
 4. colisiones de uso: se declaran, no descartan;
 5. orden por distancia a la isóbata principal; desempate por distancia a la referencia.
 Se numeran como candidatos hasta ``n_candidatos`` nodos.
@@ -151,7 +151,7 @@ def tabla(
 
     principal = f"dist_iso_{cfg.isobata_principal:g}m_km"
     df["zonas_evaluadas"] = zonas is not None
-    df["motivo_descarte"] = [_motivo(f) for f in df.itertuples()]
+    df["motivo_descarte"] = [_motivo(f, cfg.min_vecinas) for f in df.itertuples()]
     df["cumple_criterios"] = df["motivo_descarte"] == ""
     df = df.sort_values(
         ["cumple_criterios", principal, "dist_referencia_km"], ascending=[False, True, True], na_position="last"
@@ -162,14 +162,14 @@ def tabla(
     return df, lineas
 
 
-def _motivo(f) -> str:
-    """Primer criterio que el nodo no cumple, en el orden de ADR-0010; vacío si cumple todos."""
+def _motivo(f, min_vecinas: int = 0) -> str:
+    """Primer criterio que el nodo no cumple, en el orden de ADR-0013; vacío si cumple todos."""
     if not f.valido:
         return "1: nodo sin dato (tierra en WAVERYS)"
     if not f.frac_tierra_celda == 0:
         return "1: celda con tierra"
     if f.excluido_por_zona:
         return "2: zona de exclusión (con resguardo)"
-    if f.vecinas_validas < 8 or f.vecinas_presentes < 8:
-        return "3: vecinas sin dato"
+    if f.vecinas_validas < min_vecinas:
+        return f"3: menos de {min_vecinas} vecinas con dato"
     return ""

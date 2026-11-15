@@ -48,8 +48,9 @@ def main(argv=None) -> int:
     p.add_argument("--isobatas", type=float, nargs="+", help="Profundidades de las isóbatas (m). Por defecto 200 100 50.")
     p.add_argument("--isobata-principal", type=float, help="Isóbata con la que se ordenan los candidatos.")
     p.add_argument("--semiancho", type=float, help="Semiancho del recuadro (°). Por defecto 1.")
-    p.add_argument("--n-candidatos", type=int, help="Candidatos numerados (ADR-0010: 3).")
-    p.add_argument("--resguardo-km", type=float, help="Resguardo alrededor de las zonas de exclusión (ADR-0010: 1 km).")
+    p.add_argument("--n-candidatos", type=int, help="Candidatos numerados (ADR-0013: 3).")
+    p.add_argument("--resguardo-km", type=float, help="Resguardo alrededor de las zonas de exclusión (ADR-0013: 1 km).")
+    p.add_argument("--min-vecinas", type=int, help="Mínimo de vecinas con dato (0 a 8). ADR-0013: 0, no descartan.")
     p.add_argument("--sin-zonas", action="store_true", help="No descarga zonas (el mapa lo declara).")
     p.add_argument("--datos", help="Raíz de WAVE-DATA (si no, variable de entorno WAVE_DATA_DIR).")
     p.add_argument("--mostrar", action="store_true", help="Abre la figura en una ventana además de guardarla.")
@@ -59,7 +60,8 @@ def main(argv=None) -> int:
     for clave, valor in {
         "nombre": a.nombre, "latitud": a.lat, "longitud": a.lon, "isobatas": a.isobatas,
         "isobata_principal": a.isobata_principal, "semiancho_grados": a.semiancho,
-        "n_candidatos": a.n_candidatos, "resguardo_km": a.resguardo_km, "directorio_datos": a.datos,
+        "n_candidatos": a.n_candidatos, "resguardo_km": a.resguardo_km, "min_vecinas": a.min_vecinas,
+        "directorio_datos": a.datos,
     }.items():
         if valor is not None:
             base[clave] = valor

@@ -242,7 +242,7 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
         ax.scatter(solo_vecinas["lon"], solo_vecinas["lat"], s=70, marker="s", facecolors="none",
                    edgecolors=estilo.TINTA_SECUNDARIA, linewidths=1.2, zorder=7)
         manejadores.append(Line2D([], [], marker="s", mfc="none", mec=estilo.TINTA_SECUNDARIA, mew=1.2, ls="", ms=8,
-                                  label=f"Descartado solo por vecinas sin dato ({len(solo_vecinas)})"))
+                                  label=f"Descartado por vecinas (< {cfg.min_vecinas}) ({len(solo_vecinas)})"))
 
     # Candidatos numerados (mismo número que en candidatos.csv).
     top = tabla[tabla["candidato"].notna()]
@@ -291,8 +291,9 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
     else:
         no_eval = ["todas las zonas"]
     lineas += ["", "No evaluado:"] + [f"  {x}" for x in no_eval]
-    lineas += ["", "Criterios (ADR-0010): nodo con dato,", "celda sin tierra, fuera de exclusión",
-               f"+{cfg.resguardo_km:g} km, 8 vecinas con dato;",
+    vecinas = f", ≥ {cfg.min_vecinas} vecinas con dato" if cfg.min_vecinas else ""
+    lineas += ["", "Criterios (ADR-0013): nodo con dato,", "celda sin tierra, fuera de exclusión",
+               f"+{cfg.resguardo_km:g} km{vecinas};",
                f"orden por distancia a la isóbata de {cfg.isobata_principal:g} m."]
     if aviso:
         lineas += ["", aviso]

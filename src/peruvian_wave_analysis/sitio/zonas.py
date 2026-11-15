@@ -1,4 +1,4 @@
-"""Zonas de exclusión y de colisión de usos (analysis/04 §3.3; ADR-0010 y ADR-0012).
+"""Zonas de exclusión y de colisión de usos (analysis/04 §3.3; ADR-0012 y ADR-0013).
 
 Cada capa se pide a su servicio ArcGIS REST con el recuadro del sitio, paginando, en GeoJSON.
 El archivo se guarda en ``raw/zonas/`` con la fecha de acceso en el nombre y se registra en
