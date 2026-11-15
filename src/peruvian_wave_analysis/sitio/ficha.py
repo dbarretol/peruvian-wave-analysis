@@ -72,6 +72,67 @@ def _gebco(ruta: Path) -> xr.DataArray:
         return batimetria.normalizar(ds, None, (-180, 180, -90, 90)).load()
 
 
+def _recuadro_observaciones(nodos) -> tuple[float, float, float, float]:
+    """(oeste, este, sur, norte) que cubre el círculo de clase «región» de todos los nodos."""
+    o, e, s, n = [], [], [], []
+    for la, lo in nodos:
+        dla = ob.RADIO_REGION_KM / 111.195
+        dlo = ob.RADIO_REGION_KM / (111.195 * np.cos(np.radians(la)))
+        o.append(lo - dlo)
+        e.append(lo + dlo)
+        s.append(la - dla)
+        n.append(la + dla)
+    return min(o), max(e), min(s), max(n)
+
+
+def _elegir_gebco(carpeta: Path, recuadro) -> Path:
+    """El recorte de GEBCO más pequeño que cubre ``recuadro``; si ninguno lo cubre, el mayor (el gate lo señala)."""
+    candidatos = []
+    for r in sorted(carpeta.glob("*.nc")):
+        with xr.open_dataset(r) as ds:
+            e = batimetria.normalizar(ds, None, (-180, 180, -90, 90))
+            lo, la = e["lon"].values, e["lat"].values
+        cubre = lo.min() <= recuadro[0] and lo.max() >= recuadro[1] and la.min() <= recuadro[2] and la.max() >= recuadro[3]
+        area = float(np.ptp(lo) * np.ptp(la))
+        candidatos.append((not cubre, area if cubre else -area, r.name, r))
+    return min(candidatos)[3]
+
+
+def _profundidad(elev: xr.DataArray):
+    """Profundidad positiva (m) de GEBCO en arreglos de puntos; NaN fuera del recorte."""
+    lat_min, lat_max = float(elev["lat"].min()), float(elev["lat"].max())
+    lon_min, lon_max = float(elev["lon"].min()), float(elev["lon"].max())
+
+    def prof(la, lo):
+        la, lo = np.atleast_1d(np.asarray(la, float)), np.atleast_1d(np.asarray(lo, float))
+        dentro = (la >= lat_min) & (la <= lat_max) & (lo >= lon_min) & (lo <= lon_max)
+        out = np.full(la.shape, np.nan)
+        if dentro.any():
+            v = elev.sel(lat=xr.DataArray(la[dentro]), lon=xr.DataArray(lo[dentro]), method="nearest")
+            out[dentro] = -np.asarray(v.values, float)
+        return out
+    return prof
+
+
+def _json_limpio(x):
+    """NaN e infinitos a null, para que el JSON sea válido (revisión de control del 2026-11-15)."""
+    if isinstance(x, dict):
+        return {k: _json_limpio(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_json_limpio(v) for v in x]
+    if isinstance(x, (bool, np.bool_)):
+        return bool(x)
+    if isinstance(x, (np.integer,)):
+        return int(x)
+    if isinstance(x, (float, np.floating)):
+        return float(x) if np.isfinite(x) else None
+    return x
+
+
+def _avance(msg: str) -> None:
+    print(f"[ficha] {msg}", flush=True)
+
+
 def _ciclones(raiz_raw: Path, lat0: float, lon0: float) -> dict:
     destino = raiz_raw / "ciclones" / "ibtracs" / "ibtracs.SP.list.v04r01.csv"
     if destino.exists():
@@ -96,12 +157,15 @@ def generar(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> dict
     final = raiz / "processed" / "F01-sitio-y-fuentes" / "mapa-sitio-final" / nombre
     ficha_nodo = json.loads((final / "ficha_nodo.json").read_text(encoding="utf-8"))
     lat0, lon0 = float(ficha_nodo["nodo_elegido"]["lat"]), float(ficha_nodo["nodo_elegido"]["lon"])
-    gebco = next(iter(sorted((raiz_raw / "batimetria" / "gebco").glob("*.nc"))))
+    recuadro_obs = _recuadro_observaciones([(lat0, lon0), RESPALDO])
+    gebco = _elegir_gebco(raiz_raw / "batimetria" / "gebco", recuadro_obs)
+    _avance(f"GEBCO: {gebco.name}")
     malla = next(iter(sorted((raiz_raw / "waverys" / "malla").glob("*.nc"))))
     destino = raiz / "processed" / "F01-sitio-y-fuentes" / "ficha-sitio" / nombre
     gate_serie = destino / "serie_gate.json"
 
     # Exposición y obstáculos (§3.1, §3.2).
+    _avance("exposición y obstáculos")
     rutas_ne = costa.obtener_natural_earth(raiz_raw)
     tierra = costa.leer_tierra(rutas_ne)
     es_tierra_m, ext_m = _mascara_modelo(malla)
@@ -111,15 +175,13 @@ def generar(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> dict
     obst = ex.obstaculos(elev, islas_ne, lat0, lon0, expo.sectores, es_tierra_m)
 
     # Observaciones (§3.4) para el nodo y el respaldo.
+    _avance("observaciones: descarga o verificación de teselas")
     rutas_alt, faltan = ob.descargar(raiz_raw, lat0, lon0)
     rutas_alt2, faltan2 = ob.descargar(raiz_raw, *RESPALDO)
     todas = sorted(set(rutas_alt) | set(rutas_alt2))
     med = ob.leer(todas)
-
-    def prof(la, lo):
-        if not (elev["lat"].min() <= la <= elev["lat"].max() and elev["lon"].min() <= lo <= elev["lon"].max()):
-            return np.nan
-        return float(-elev.sel(lat=la, lon=lo, method="nearest"))
+    _avance(f"observaciones: {len(med)} mediciones válidas leídas")
+    prof = _profundidad(elev)
 
     resultados = {}
     for etiqueta, (la, lo) in {"principal": (lat0, lon0), "respaldo": RESPALDO}.items():
@@ -127,10 +189,16 @@ def generar(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> dict
         cst = ob.Costa.desde_tierra(tierra, la, lo)
         d = ob.clasificar(med, la, lo, cst, prof, expo_n.sectores)
         res = ob.resumen(d)
+        res_s = ob.resumen(d, "asimilacion_periodo")
+        cerca = d["dist_nodo_km"] <= ob.RADIO_REGION_KM
         resultados[etiqueta] = {"mediciones": d, "resumen": res, "cobertura": ob.cobertura(res),
+                                "resumen_sens": res_s, "cobertura_sens": ob.cobertura(res_s),
+                                "prof_archivo_200km": int((cerca & (d["fuente_prof"] != "GEBCO_2026")).sum()),
                                 "dist_costa_ne_km": d.attrs["dist_costa_nodo_km"]}
+        _avance(f"observaciones: {etiqueta} clasificado")
     reglas = {reg: ob.regla_respaldo(resultados["principal"]["cobertura"], resultados["respaldo"]["cobertura"], reg)
               for reg in resultados["principal"]["cobertura"]["regimen"]}
+    _avance("ciclones (IBTrACS)")
     ciclones = _ciclones(raiz_raw, lat0, lon0)
     crono = pd.DataFrame(CRONOLOGIA, columns=["fecha", "tipo", "descripcion", "referencia"])
     asim = pd.DataFrame([{"mision": m, "inicio": a, "fin": b or "presente", "referencia": f"{QUID}, tabla 3"}
@@ -144,6 +212,10 @@ def generar(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> dict
         r = resultados[etiqueta]["resumen"]
         if len(r) and (r["util_para_sesgo"] & (r["asimilacion"] != "no asimilada")).any():
             fallas.append(f"{etiqueta}: una observación asimilada o no verificable quedó como útil para el sesgo")
+    for etiqueta, r in resultados.items():
+        if r["prof_archivo_200km"]:
+            fallas.append(f"{etiqueta}: {r['prof_archivo_200km']} mediciones a 200 km o menos sin profundidad de GEBCO "
+                          f"(el recorte {gebco.name} no cubre la región; contrato §3.4)")
     if crono["referencia"].isna().any():
         fallas.append("cronología sin referencia")
     if expo.sectores["clase"].isna().any():
@@ -159,6 +231,12 @@ def generar(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> dict
             t / "observaciones.csv", index=False)
         pd.concat([r["cobertura"].assign(nodo=k) for k, r in resultados.items()]).to_csv(
             t / "cobertura_observaciones.csv", index=False, float_format="%.2f")
+        rotulo = ("SENSIBILIDAD posterior a ver los conteos (revisión de control 2026-11-15): los tramos de misiones "
+                  "de la tabla 3 fuera de su período de asimilación cuentan como no asimilados. No es la regla del contrato.")
+        pd.concat([r["resumen_sens"].assign(nodo=k) for k, r in resultados.items()]).assign(rotulo=rotulo).to_csv(
+            t / "observaciones_sensibilidad_periodo.csv", index=False)
+        pd.concat([r["cobertura_sens"].assign(nodo=k) for k, r in resultados.items()]).assign(rotulo=rotulo).to_csv(
+            t / "cobertura_sensibilidad_periodo.csv", index=False, float_format="%.2f")
         crono.to_csv(t / "cronologia_waverys.csv", index=False)
         asim.to_csv(t / "misiones_asimiladas_waverys.csv", index=False)
         resumen = {
@@ -166,12 +244,14 @@ def generar(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> dict
             "dist_costa_natural_earth_km": {k: r["dist_costa_ne_km"] for k, r in resultados.items()},
             "dist_costa_gebco_km": ficha_nodo["nodo_elegido"]["dist_costa_km"],
             "prof_nodo_gebco_m": ficha_nodo["nodo_elegido"]["prof_nodo_m"],
+            "gebco_observaciones": {"archivo": gebco.name, "recuadro_requerido_oesn": list(recuadro_obs),
+                                    "mediciones_200km_sin_gebco": {k: r["prof_archivo_200km"] for k, r in resultados.items()}},
             "sectores": expo.sectores.to_dict("records"),
             "obstaculos": int(len(obst)), "teselas_inexistentes": sorted(set(faltan) | set(faltan2)),
             "regla_respaldo_por_regimen": reglas, "ciclones_tropicales": ciclones,
             "gate": {"cumple": not fallas, "fallas": fallas}, "version_codigo": __version__,
         }
-        (t / "resumen_ficha.json").write_text(json.dumps(resumen, ensure_ascii=False, indent=2, default=str) + "\n",
+        (t / "resumen_ficha.json").write_text(json.dumps(_json_limpio(resumen), ensure_ascii=False, indent=2, default=str, allow_nan=False) + "\n",
                                              encoding="utf-8")
         destino.mkdir(parents=True, exist_ok=True)
         for p in t.iterdir():

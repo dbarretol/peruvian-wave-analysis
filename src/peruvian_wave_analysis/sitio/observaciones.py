@@ -8,6 +8,10 @@ Independencia respecto de WAVERYS (QUID 1.5, tabla 3 y §VI.4):
 - **asimilada:** misión y período en la tabla 3, o período desde 1993 con la misión en esa lista;
 - **no asimilada:** período 1980–1992 (sin asimilación), o el QUID declara que no se asimila (HY-2A);
 - **no verificable:** la misión no figura en el QUID; por precaución se trata como asimilada.
+
+Sensibilidad (rotulada «posterior a ver los conteos», revisión de control del 2026-11-15): ``asimilacion_por_periodo``
+trata como no asimilado el tramo de una misión de la tabla 3 que cae fuera de su período de asimilación
+(p. ej. SARAL antes de 2016-03, GFO después de 2006-08, CFOSAT antes de 2020-02). No cambia la regla del contrato.
 """
 from __future__ import annotations
 
@@ -130,6 +134,15 @@ def asimilacion(mision: str, t: pd.Timestamp) -> str:
     return "no verificable"
 
 
+def asimilacion_por_periodo(mision: str, t: pd.Timestamp) -> str:
+    """Sensibilidad: asimilada solo dentro del período de la tabla 3 del QUID (ver docstring del módulo)."""
+    if mision in ASIMILADAS_QUID and t >= INICIO_ASIMILACION:
+        a, b = ASIMILADAS_QUID[mision]
+        dentro = pd.Timestamp(a) <= t and (b is None or t <= pd.Timestamp(b))
+        return "asimilada" if dentro else "no asimilada"
+    return asimilacion(mision, t)
+
+
 def regimen(t: pd.Timestamp) -> str:
     return "1980-1992 (sin asimilación ni corrientes)" if t < INICIO_ASIMILACION else "desde 1993 (asimilado)"
 
@@ -159,12 +172,14 @@ class Costa:
 
 
 def clasificar(df: pd.DataFrame, lat0: float, lon0: float, costa: Costa, prof_gebco, sectores: pd.DataFrame) -> pd.DataFrame:
-    """Clase de cada medición (sitio, región o cuenca), independencia y régimen. ``prof_gebco(lat, lon)`` devuelve
-    la profundidad positiva en m o NaN fuera del recorte; en ese caso se usa la profundidad del archivo."""
+    """Clase de cada medición (sitio, región o cuenca), independencia y régimen. ``prof_gebco(lat, lon)`` recibe
+    arreglos y devuelve la profundidad positiva en m (o NaN fuera del recorte; ahí se usa la del archivo, que solo
+    se admite a más de 200 km del nodo: lo verifica el gate de la ficha)."""
     d = df.copy()
     d["dist_nodo_km"] = distancia_km(lat0, lon0, d["lat"], d["lon"])
     d["dist_costa_km"] = costa.distancia_km(d["lat"], d["lon"])
-    pg = np.array([prof_gebco(a, b) for a, b in zip(d["lat"], d["lon"])], float) if len(d) else np.array([])
+    la, lo = d["lat"].to_numpy(float), d["lon"].to_numpy(float)
+    pg = np.broadcast_to(np.asarray(prof_gebco(la, lo), float), la.shape).copy() if len(d) else np.array([])
     d["prof_m"] = np.where(np.isfinite(pg), pg, -d["prof_archivo_m"].astype(float))
     d["fuente_prof"] = np.where(np.isfinite(pg), "GEBCO_2026", "archivo (SRTM30+)")
     clase_sector = sectores.set_index("sector")["clase"]
@@ -177,6 +192,7 @@ def clasificar(df: pd.DataFrame, lat0: float, lon0: float, costa: Costa, prof_ge
     region = ~sitio & (d["dist_nodo_km"] <= RADIO_REGION_KM) & (d["dist_costa_km"] >= COSTA_MIN_REGION_KM) & hondo & expuesto
     d["clase"] = np.select([sitio, region], ["sitio", "región"], "cuenca")
     d["asimilacion"] = [asimilacion(m, t) for m, t in zip(d["mision"], d["tiempo"])]
+    d["asimilacion_periodo"] = [asimilacion_por_periodo(m, t) for m, t in zip(d["mision"], d["tiempo"])]
     d["regimen"] = [regimen(t) for t in d["tiempo"]]
     d["util_para_sesgo"] = d["asimilacion"] == "no asimilada"
     nuevo = d.groupby("mision")["tiempo"].diff().dt.total_seconds().fillna(np.inf) > CORTE_PASADA_S
@@ -185,10 +201,11 @@ def clasificar(df: pd.DataFrame, lat0: float, lon0: float, costa: Costa, prof_ge
     return d
 
 
-def resumen(d: pd.DataFrame) -> pd.DataFrame:
-    """Una fila por misión, régimen e independencia: período, pasadas y mediciones por clase."""
+def resumen(d: pd.DataFrame, columna: str = "asimilacion") -> pd.DataFrame:
+    """Una fila por misión, régimen e independencia: período, pasadas y mediciones por clase. ``columna`` elige
+    la regla de independencia: la del contrato (``asimilacion``) o la sensibilidad (``asimilacion_periodo``)."""
     filas = []
-    for (m, reg, asim), g in d.groupby(["mision", "regimen", "asimilacion"]):
+    for (m, reg, asim), g in d.groupby(["mision", "regimen", columna]):
         fila = {"mision": m, "regimen": reg, "asimilacion": asim, "util_para_sesgo": asim == "no asimilada",
                 "inicio": g["tiempo"].min(), "fin": g["tiempo"].max()}
         for c in ("sitio", "región", "cuenca"):
