@@ -50,6 +50,7 @@ class ResultadoMapa:
     zonas: zonas_mod.Zonas | None
     salidas: dict[str, Path] = field(default_factory=dict)
     recuadro_gebco: tuple[float, float, float, float] | None = None
+    figura_detalle: matplotlib.figure.Figure | None = None  # solo el mapa definitivo
 
 
 def _fmt_lon(v, _pos=None) -> str:
@@ -117,13 +118,15 @@ def _nombre_corto(z) -> str:
     return n if len(n) <= 32 else n[:31] + "…"
 
 
-def _dibujar_zonas(ax, zonas: zonas_mod.Zonas, cfg: ConfigMapa) -> list:
+def _dibujar_zonas(ax, zonas: zonas_mod.Zonas, cfg: ConfigMapa, evitar=None) -> list:
     """Color por familia (verde SERNANP, pardo hidrocarburos); exclusión opaca con borde rojo; nombres sobre las zonas."""
     from shapely.geometry import box as caja
 
     o, e, s, n = cfg.recuadro
     m = 0.12 * (e - o)  # las etiquetas se colocan lejos del borde para que no se salgan del marco
     vista = caja(o + m, s + 0.04 * (n - s), e - m, n - 0.04 * (n - s))
+    if evitar is not None:  # zona donde no se colocan nombres (p. ej. alrededor del nodo elegido)
+        vista = vista.difference(evitar)
     manejadores, etiquetados = [], set()
     for familia, titulo in zonas_mod.FAMILIAS.items():
         st = estilo.ESTILO_FAMILIA[familia]
@@ -265,15 +268,18 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
         manejadores.append(Line2D([], [], marker="s", mfc="none", mec=estilo.TINTA_SECUNDARIA, mew=1.2, ls="", ms=8,
                                   label=f"Descartado por vecinas (< {cfg.min_vecinas}) ({len(solo_vecinas)})"))
 
-    # Candidatos numerados (mismo número que en candidatos.csv).
-    top = tabla[tabla["candidato"].notna()]
-    ax.scatter(top["lon"], top["lat"], s=90, facecolors="none", edgecolors=estilo.TINTA, linewidths=1.6, zorder=7)
-    for _, f in top.iterrows():
-        ax.annotate(str(int(f["candidato"])), (f["lon"], f["lat"]), xytext=(5, 5), textcoords="offset points",
-                    fontsize=9, fontweight="bold", color=estilo.TINTA, path_effects=_HALO, zorder=8)
-    manejadores.append(Line2D([], [], color=estilo.TINTA, marker="o", mfc="none", ls="", ms=9, mew=1.6,
-                              label=f"Candidato n.º (fila de la tabla): {len(top)} de hasta {cfg.n_candidatos}"))
+    # Candidatos numerados (mismo número que en candidatos.csv). El mapa definitivo ya no tiene candidatos.
+    if modo == "exploratorio":
+        top = tabla[tabla["candidato"].notna()]
+        ax.scatter(top["lon"], top["lat"], s=90, facecolors="none", edgecolors=estilo.TINTA, linewidths=1.6, zorder=7)
+        for _, f in top.iterrows():
+            ax.annotate(str(int(f["candidato"])), (f["lon"], f["lat"]), xytext=(5, 5), textcoords="offset points",
+                        fontsize=9, fontweight="bold", color=estilo.TINTA, path_effects=_HALO, zorder=8)
+        manejadores.append(Line2D([], [], color=estilo.TINTA, marker="o", mfc="none", ls="", ms=9, mew=1.6,
+                                  label=f"Candidato n.º (fila de la tabla): {len(top)} de hasta {cfg.n_candidatos}"))
     if nodo_elegido is not None:
+        ax.annotate("Nodo elegido", (nodo_elegido[1], nodo_elegido[0]), xytext=(12, 10), textcoords="offset points",
+                    fontsize=8.5, fontweight="bold", color=estilo.TINTA, path_effects=_HALO, zorder=8)
         ax.scatter([nodo_elegido[1]], [nodo_elegido[0]], s=420, facecolors="none", edgecolors=estilo.TINTA,
                    linewidths=2.6, zorder=8)
         manejadores.append(Line2D([], [], color=estilo.TINTA, marker="o", mfc="none", ls="", ms=15, mew=2.6,
@@ -326,9 +332,14 @@ def dibujar(cfg: ConfigMapa, bat: batimetria.Batimetria, malla: waverys.Malla, t
         extra += f", ≤ {100 * cfg.max_tierra:g} % de tierra"
     if cfg.min_vecinas:
         extra += f", ≥ {cfg.min_vecinas} vecinas"
-    lineas += ["", "Criterios (ADR-0014): nodo con dato y", f"fuera de exclusión +{cfg.resguardo_km:g} km{extra}.",
-               f"Numeración por distancia a la isóbata de {cfg.isobata_principal:g} m;",
-               "la elección final es visual."]
+    if modo == "exploratorio":
+        lineas += ["", "Criterios (ADR-0014): nodo con dato y", f"fuera de exclusión +{cfg.resguardo_km:g} km{extra}.",
+                   f"Numeración por distancia a la isóbata de {cfg.isobata_principal:g} m;",
+                   "la elección final es visual."]
+    else:
+        lineas += ["", "Nodo elegido (ADR-0007). Cumple con esta", "batimetría: tiene dato y su celda queda",
+                   f"fuera de exclusión +{cfg.resguardo_km:g} km (ADR-0014).", "Detalle de su celda y sus vecinas:",
+                   "detalle_nodo.png."]
     if aviso:
         lineas += ["", aviso]
     # Debajo de la leyenda, sea cual sea su alto (bbox_inches="tight" al guardar incluye todo).

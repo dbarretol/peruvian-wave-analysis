@@ -5,8 +5,10 @@ registrado. Verifica el hash de cada insumo, recalcula la tabla con GEBCO y exig
 elegido cumpla los criterios de ADR-0014 (gate: nodo con dato y fuera de exclusión). Si el gate falla, borra la salida publicada
 anterior y termina con error.
 
-Salida en ``WAVE-DATA/processed/F01-sitio-y-fuentes/mapa-sitio-final/<nombre>/``: ``mapa.png``,
-``candidatos.csv``, ``ficha_nodo.json`` y ``MANIFEST.json``.
+Salida en ``WAVE-DATA/processed/F01-sitio-y-fuentes/mapa-sitio-final/<nombre>/``: ``mapa.png`` (contexto
+regional, solo el nodo elegido), ``detalle_nodo.png`` (su celda y las ocho vecinas, batimetría a resolución
+completa), ``nodos.csv`` (todos los nodos con GEBCO, sin numeración de candidatos), ``ficha_nodo.json``
+(nodo y vecindario de 3 × 3) y ``MANIFEST.json``.
 """
 from __future__ import annotations
 
@@ -17,13 +19,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import xarray as xr
 
 from .. import __version__, manifiesto, rutas
 from . import batimetria, candidatos, waverys, zonas as zonas_mod
 from .config import ConfigMapa
 from .gebco import FUENTE_GEBCO
+from .detalle import dibujar_detalle
 from .mapa import FASE, ResultadoMapa, dibujar
 
 TOL_COBERTURA = 0.01  # grados
@@ -126,17 +128,21 @@ def generar_mapa_final(cf: ConfigFinal) -> ResultadoMapa:
             shutil.rmtree(destino)
         raise
 
+    # Ya hay un nodo elegido: el definitivo no numera candidatos (ni en el mapa ni en la tabla).
+    tabla = tabla.drop(columns=["candidato"])
+    fila = fila.drop(labels=["candidato"])
     fig = dibujar(cfg, bat, malla, tabla, zonas, modo="definitivo", nodo_elegido=(float(fila["lat"]), float(fila["lon"])))
+    nodo = {k: (v.item() if hasattr(v, "item") else v) for k, v in fila.items()}
+    fig_detalle, vecinas = dibujar_detalle(cfg, bat, malla, zonas, nodo)
     res = ResultadoMapa(figura=fig, tabla=tabla, batimetria=bat, malla=malla, zonas=zonas)
 
     ficha = {
-        "nodo_elegido": {k: (v.item() if hasattr(v, "item") else v) for k, v in fila.drop(labels=["candidato"]).items()},
-        "numero_de_candidato_con_gebco": None if pd.isna(fila["candidato"]) else int(fila["candidato"]),
-        "alternativas": tabla.loc[tabla["candidato"].notna() & ~(np.isclose(tabla["lat"], fila["lat"]) & np.isclose(tabla["lon"], fila["lon"])),
-                                  ["candidato", "lat", "lon", "zonas_colision"]].astype({"candidato": int}).to_dict("records"),
-        "criterios": {"resguardo_km": cfg.resguardo_km, "n_candidatos": cfg.n_candidatos,
-                      "isobata_principal_m": cfg.isobata_principal, "min_vecinas": cfg.min_vecinas,
-                      "max_tierra": cfg.max_tierra, "adr": ["ADR-0011", "ADR-0012", "ADR-0014"]},
+        "nodo_elegido": nodo,
+        "decision": "ADR-0007",
+        "vecindario_3x3": vecinas,  # de norte a sur y de oeste a este; incluye el nodo elegido
+        "criterios": {"resguardo_km": cfg.resguardo_km, "isobata_principal_m": cfg.isobata_principal,
+                      "min_vecinas": cfg.min_vecinas, "max_tierra": cfg.max_tierra,
+                      "adr": ["ADR-0007", "ADR-0011", "ADR-0012", "ADR-0014"]},
         "no_evaluado": zonas.no_evaluadas + list(zonas_mod.NO_CUBIERTAS),
         "corrida_exploratoria": str(Path(cf.exploratorio)),
     }
@@ -145,10 +151,13 @@ def generar_mapa_final(cf: ConfigFinal) -> ResultadoMapa:
 
     with tempfile.TemporaryDirectory() as tmp:  # staging
         t = Path(tmp)
-        fig.savefig(t / "mapa.png", facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15, metadata={"Software": None})
-        tabla.to_csv(t / "candidatos.csv", index=False, float_format="%.4f", encoding="utf-8")
+        for f, nombre in ((fig, "mapa.png"), (fig_detalle, "detalle_nodo.png")):
+            f.savefig(t / nombre, facecolor=f.get_facecolor(), bbox_inches="tight", pad_inches=0.15, metadata={"Software": None})
+        tabla.to_csv(t / "nodos.csv", index=False, float_format="%.4f", encoding="utf-8")
         (t / "ficha_nodo.json").write_text(json.dumps(ficha, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
-        _publicar(destino, {"mapa": t / "mapa.png", "tabla": t / "candidatos.csv", "ficha": t / "ficha_nodo.json"}, insumos)
-    res.salidas = {"mapa": destino / "mapa.png", "tabla": destino / "candidatos.csv",
+        _publicar(destino, {"mapa": t / "mapa.png", "detalle": t / "detalle_nodo.png", "tabla": t / "nodos.csv",
+                            "ficha": t / "ficha_nodo.json"}, insumos)
+    res.salidas = {"mapa": destino / "mapa.png", "detalle": destino / "detalle_nodo.png", "tabla": destino / "nodos.csv",
                    "ficha": destino / "ficha_nodo.json", "manifiesto": destino / "MANIFEST.json"}
+    res.figura_detalle = fig_detalle
     return res
