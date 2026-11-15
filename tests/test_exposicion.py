@@ -89,3 +89,16 @@ def test_obstaculos_dentro_y_fuera_de_50_km_y_bajo_la_resolucion():
     diminuta = box(-75.901, -15.101, -75.900, -15.100)
     df2 = ex.obstaculos(_gebco([]), [diminuta], LAT0, LON0, sect)
     assert list(df2["origen"]) == ["Natural Earth (islas menores)"]
+
+
+def test_error_si_el_rayo_sale_del_insumo_en_el_tramo_de_cuenca():
+    """F01-K-05: la extensión cubre los 1000 km pero no el alcance de cuenca."""
+    with pytest.raises(ex.ErrorExposicion, match="cuenca"):
+        ex.calcular(_prep(CONTINENTE), LAT0, LON0, extension=(-87.0, -64.0, -25.0, -5.0))
+
+
+@pytest.mark.parametrize("rumbo,sector", [(0.0, 0), (11.2499, 0), (11.25, 1), (33.75, 2), (348.75, 0),
+                                          (348.7499, 15), (359.99, 0), (191.25, 9), (213.75, 10)])
+def test_sector_de_semiabierto_y_simetrico(rumbo, sector):
+    """F01-K-06: intervalos [c − 11.25°, c + 11.25°), sin redondeo a par."""
+    assert int(ex.sector_de(rumbo)) == sector

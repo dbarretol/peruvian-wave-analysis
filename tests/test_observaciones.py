@@ -155,3 +155,40 @@ def test_leer_usa_la_banda_que_trae_el_archivo(tmp_path):
     df = ob.leer([archivo("HY-2", "KU"), archivo("SARAL", "KA")])
     assert len(df) == 4 and set(df["banda"]) == {"KU", "KA"}  # la bandera 2 se descarta
     assert df["lon"].iloc[0] == pytest.approx(-75.8)
+
+
+# --- Bordes de las clases (F01-K-05) ---
+KX = 111.195 * np.cos(np.radians(LAT0))  # km por grado de longitud en la proyección local de Costa
+
+
+def test_borde_de_25_km(sectores, costa):
+    d = ob.clasificar(_df([("HY-2", "2015-01-01", _punto(270, 24.9)), ("HY-2", "2015-01-02", _punto(270, 25.1))]),
+                      LAT0, LON0, costa, _prof, sectores)
+    assert list(d["clase"]) == ["sitio", "región"]
+
+
+def test_borde_de_profundidad_100_m(sectores, costa):
+    p = _punto(270, 10)
+    d100 = ob.clasificar(_df([("HY-2", "2015-01-01", p)]), LAT0, LON0, costa, lambda la, lo: 100.0, sectores)
+    d101 = ob.clasificar(_df([("HY-2", "2015-01-01", p)]), LAT0, LON0, costa, lambda la, lo: 100.5, sectores)
+    assert d100.loc[0, "clase"] == "cuenca" and d101.loc[0, "clase"] == "sitio"
+
+
+def test_borde_de_la_distancia_del_nodo_a_la_costa(sectores, costa):
+    """Al norte (sector abierto), a la misma longitud que el nodo: igual distancia a la costa → «sitio»;
+    un poco hacia la costa → ya no es «sitio»."""
+    la = float(ex.destino(LAT0, LON0, 0.0, 10.0)[0])
+    d = ob.clasificar(_df([("HY-2", "2015-01-01", (la, LON0)), ("HY-2", "2015-01-02", (la, LON0 + 0.01))]),
+                      LAT0, LON0, costa, _prof, sectores)
+    assert d.loc[0, "dist_costa_km"] == pytest.approx(d.attrs["dist_costa_nodo_km"], abs=1e-9)
+    assert list(d["clase"]) == ["sitio", "región"]
+
+
+def test_borde_de_10_km_de_la_costa_en_region(sectores, costa):
+    """Hacia el S (abierto), a 150 km: a 10.1 km de la costa es «región»; a 9.9 km, «cuenca»."""
+    la = LAT0 - 150 / 111.195
+    filas = [("HY-2", "2015-01-01", (la, -75.5 - 10.1 / KX)), ("HY-2", "2015-01-02", (la, -75.5 - 9.9 / KX))]
+    d = ob.clasificar(_df(filas), LAT0, LON0, costa, _prof, sectores)
+    assert d["dist_costa_km"].round(1).tolist() == [10.1, 9.9]
+    assert set(d["clase_sector"]) <= {"abierto", "parcial"}
+    assert list(d["clase"]) == ["región", "cuenca"]

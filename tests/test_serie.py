@@ -145,3 +145,53 @@ def test_gate_falla_con_version_distinta_entre_anios(tmp_path, monkeypatch, masc
     manifiesto._escribir(raiz_raw, entradas)
     with pytest.raises(serie.ErrorSerie, match="versiones"):
         serie.verificar(rutas, cob, cfg, raiz_raw, mascara)
+
+
+def test_gate_falla_con_mascara_distinta_al_reves(tmp_path, monkeypatch, mascara):
+    """F01-K-04: celda sin dato donde la máscara dice mar."""
+    cob = _cobertura()
+    cfg, raiz_raw, rutas, _ = _descargar_todo(tmp_path, monkeypatch, cob)
+    otra = mascara.copy()
+    otra.loc[dict(lat=-14.6, lon=-75.6)] = True
+    with pytest.raises(serie.ErrorSerie, match="máscara"):
+        serie.verificar(rutas, cob, cfg, raiz_raw, otra)
+
+
+def test_reanudacion_detecta_archivo_alterado(tmp_path, monkeypatch):
+    """F01-K-04: un año ya descargado cuyo hash no coincide no se reutiliza en silencio."""
+    cob = _cobertura()
+    cfg, raiz_raw, rutas, _ = _descargar_todo(tmp_path, monkeypatch, cob)
+    with open(rutas[1], "ab") as f:
+        f.write(b"\0")
+    with pytest.raises(manifiesto.ErrorManifiesto, match="hash"):
+        serie.descargar_anio(2020, cfg, cob, raiz_raw)
+
+
+def test_cobertura_del_manifiesto_y_correspondencia(tmp_path, monkeypatch, mascara):
+    """F01-K-03: el gate usa el catálogo del día de la descarga y su informe se ata a los hashes."""
+    cob = _cobertura()
+    cfg, raiz_raw, rutas, _ = _descargar_todo(tmp_path, monkeypatch, cob)
+    c = serie.cobertura_de_manifiesto(rutas, raiz_raw)
+    assert (c.inicio, c.fin, c.version) == (cob.inicio, cob.fin, cob.version)
+    inf = serie.verificar(rutas, c, cfg, raiz_raw, mascara)
+    assert len(inf["archivos_sha256"]) == 3 and serie.corresponde(inf, raiz_raw) == []
+    # El catálogo de hoy creció (M−2): el gate con la cobertura anotada sigue cumpliendo.
+    assert serie.verificar(rutas, serie.cobertura_de_manifiesto(rutas, raiz_raw), cfg, raiz_raw, mascara)["cumple"]
+    # Un archivo cambiado después del gate rompe la correspondencia.
+    entradas = manifiesto.leer(raiz_raw)
+    clave = next(k for k in entradas if k.endswith(rutas[0].name))
+    entradas[clave]["sha256"] = "0" * 64
+    manifiesto._escribir(raiz_raw, entradas)
+    assert any("hash cambió" in f for f in serie.corresponde(inf, raiz_raw))
+    assert serie.corresponde({}, raiz_raw)
+
+
+def test_cobertura_distinta_entre_anios_falla(tmp_path, monkeypatch):
+    cob = _cobertura()
+    cfg, raiz_raw, rutas, _ = _descargar_todo(tmp_path, monkeypatch, cob)
+    entradas = manifiesto.leer(raiz_raw)
+    clave = next(k for k in entradas if k.endswith(rutas[2].name))
+    entradas[clave]["catalogo"]["fin"] = "2021-04-30T21:00:00Z"
+    manifiesto._escribir(raiz_raw, entradas)
+    with pytest.raises(serie.ErrorSerie, match="coberturas distintas"):
+        serie.cobertura_de_manifiesto(rutas, raiz_raw)
