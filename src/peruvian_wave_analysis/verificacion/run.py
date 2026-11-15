@@ -166,7 +166,9 @@ def _figura(resultados: list[dict], ruta: Path) -> None:
 def ejecutar(
     raiz_datos: Path, procesos: int, r: int = R, solo: list[str] | None = None, salida: Path | None = None
 ) -> Path:
-    canonica = r == R and solo is None and salida is None
+    # Canónica = todos los escenarios con R = 400 (con regla de repetición). La carpeta de salida no cuenta: la
+    # comprobación de determinismo (G4) corre la misma etapa en otra carpeta y debe dar el mismo manifiesto.
+    canonica = r == R and solo is None
     salida = Path(salida) if salida else rutas.directorio_datos(raiz_datos) / "processed" / FASE / "verificacion"
     lista = [e for e in esc.ESCENARIOS if solo is None or e.id in solo]
     raices = orquestador.rutas_codigo(ETAPA)
@@ -222,7 +224,9 @@ def main(argv: list[str] | None = None) -> int:
         "--replicas", type=int, default=R, help="solo para pruebas: con otro valor no es la corrida canónica"
     )
     ap.add_argument("--solo", nargs="*", help="solo estos escenarios (no canónica)")
-    ap.add_argument("--salida", type=Path, help="otra carpeta de salida (no canónica)")
+    ap.add_argument(
+        "--salida", type=Path, help="otra carpeta de salida (por ejemplo, para la comprobación de determinismo)"
+    )
     ap.add_argument("--directorio-datos", type=Path)
     a = ap.parse_args(argv)
     for v in VARIABLES_HILOS:  # un hilo de BLAS por proceso; los procesos hijos heredan el entorno

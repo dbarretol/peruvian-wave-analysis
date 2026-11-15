@@ -328,13 +328,15 @@ def test_perfil_rl_multiestrato_dos_estratos_frente_a_fuerza_bruta():
     q = stats.chi2.ppf(0.95, 1)
     for lim in (ic.lo, ic.hi):
         d = 2 * (l_hat - _perfil_multi_fuerza_bruta([x1, x2], n, E, T, lim - u, [a1, a2]))
-        assert abs(d - q) < 1e-3  # en el límite del código el déficit independiente vale χ²₁
-        # el déficit cambia más de 0.02 al mover el límite un 1e-3 relativo: la tolerancia equivale a < 1e-3 en el RL
+        # La fuerza bruta corta χ²₁ donde lo corta el código: el error relativo implícito en el límite, |d − χ²₁|
+        # dividido entre la pendiente del déficit (por unidad relativa del RL), debe ser < 1e-3 (contrato, §5.1).
         d2 = 2 * (
             l_hat
             - _perfil_multi_fuerza_bruta([x1, x2], n, E, T, lim * (1.001 if lim > ic.punto else 0.999) - u, [a1, a2])
         )
-        assert d2 - d > 0.02
+        pendiente = (d2 - d) / 1e-3
+        assert pendiente > 0
+        assert abs(d - q) / pendiente < 1e-3
 
 
 def test_perfil_rl_limite_superior_abierto_por_tope():
