@@ -79,6 +79,7 @@ r.tabla.head()
 | `semiancho_grados` | `1.0` | Semiancho del recuadro alrededor de la referencia. |
 | `n_candidatos` | `3` | Candidatos numerados como máximo. |
 | `resguardo_km` | `1.0` | Distancia de resguardo alrededor de las zonas de exclusión. |
+| `min_vecinas` | `0` | Mínimo de vecinas con dato para ser candidato (0 = no descarta). |
 | `zonas` | `true` | `false` omite las zonas (el mapa lo declara). |
 | `batimetria.fuente` | `gmrt` | `gmrt` (descarga) o `archivo` (NetCDF local). |
 | `batimetria.resolucion_gmrt` | `med` | `low`, `med`, `high` o `max`. |
@@ -87,13 +88,12 @@ r.tabla.head()
 
 ## Criterios de selección
 
-Un nodo es candidato si, en este orden:
+Un nodo es candidato si:
 
 1. tiene dato en WAVERYS y su celda de 0,2° no tiene ningún píxel de tierra;
-2. su celda no toca ninguna zona de exclusión ampliada en el resguardo;
-3. sus ocho vecinas tienen dato.
+2. su celda no toca ninguna zona de exclusión ampliada en el resguardo.
 
-Las zonas de colisión de usos no descartan: se listan por nombre. Los candidatos se ordenan por distancia a la isóbata principal.
+Las vecinas con dato se informan pero no descartan (salvo que se fije `min_vecinas`). Las zonas de colisión de usos tampoco descartan: se listan por nombre. Los candidatos se ordenan por distancia a la isóbata principal.
 
 | Zonas de exclusión | Zonas de colisión de usos |
 |---|---|
@@ -132,7 +132,7 @@ En `WAVE_DATA_DIR`:
 | `dist_referencia_km` | Distancia a la coordenada de referencia. |
 | `zonas_evaluadas` | Si se evaluaron las zonas. |
 | `motivo_descarte` | Primer criterio que el nodo no cumple; vacío si cumple todos. |
-| `cumple_criterios` | Cumple los tres criterios. |
+| `cumple_criterios` | Cumple los criterios. |
 
 ## Pruebas
 
