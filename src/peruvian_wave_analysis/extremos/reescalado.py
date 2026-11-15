@@ -20,6 +20,7 @@ re-estimación en cada réplica.
   más de 1.05·B generaciones es un error;
 - p = (1 + k)/(B + 1); rechazo ⇔ p ≤ 0.05 (con B = 99, k ≤ 4: tamaño 5 % para una nula simple).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -54,8 +55,15 @@ def _codigos(estratos) -> tuple[np.ndarray, tuple[str, ...]]:
     return np.array([idx[e] for e in etiquetas], dtype=int), nombres
 
 
-def _reescalar(validos: np.ndarray, codigo: np.ndarray, nombres, ini: np.ndarray, fin: np.ndarray,
-               celdas_muertas: int, paso_horas: float) -> Reescalado:
+def _reescalar(
+    validos: np.ndarray,
+    codigo: np.ndarray,
+    nombres,
+    ini: np.ndarray,
+    fin: np.ndarray,
+    celdas_muertas: int,
+    paso_horas: float,
+) -> Reescalado:
     n = len(validos)
     delta = np.zeros(n + 1, dtype=np.int64)
     np.add.at(delta, np.minimum(ini + 1, n), 1)
@@ -70,8 +78,9 @@ def _reescalar(validos: np.ndarray, codigo: np.ndarray, nombres, ini: np.ndarray
     return Reescalado(np.diff(acum[ini]), {s: float(inten[i]) for i, s in enumerate(nombres)})
 
 
-def intervalos_reescalados(rejilla, validos, inicios, fines, estratos, iet_horas: float,
-                           paso_horas: float = 3.0) -> Reescalado:
+def intervalos_reescalados(
+    rejilla, validos, inicios, fines, estratos, iet_horas: float, paso_horas: float = 3.0
+) -> Reescalado:
     """Intervalos reescalados entre inicios. ``inicios``/``fines`` = ``t_inicio``/``t_fin`` del declustering;
     ``estratos`` = etiqueta de cada celda de la rejilla."""
     rejilla = pd.DatetimeIndex(rejilla)
@@ -88,7 +97,9 @@ def intervalos_reescalados(rejilla, validos, inicios, fines, estratos, iet_horas
         raise ValueError("Hay inicios de tormenta en tiempo no válido")
     muertas = int(round(iet_horas / paso_horas))
     if np.any(ini[1:] <= fin[:-1] + muertas):
-        raise ValueError("Una tormenta empieza dentro de fin + IET de la anterior: el declustering no es coherente con el IET")
+        raise ValueError(
+            "Una tormenta empieza dentro de fin + IET de la anterior: el declustering no es coherente con el IET"
+        )
     return _reescalar(validos, codigo, nombres, ini, fin, muertas, paso_horas)
 
 
@@ -109,8 +120,15 @@ def _reservas_de_duracion(codigo_ini: np.ndarray, duraciones: np.ndarray, k: int
     return [duraciones[codigo_ini == j] if np.any(codigo_ini == j) else duraciones for j in range(k)]
 
 
-def simular_nula(validos: np.ndarray, codigo: np.ndarray, intensidad: np.ndarray, duraciones: list[np.ndarray],
-                 celdas_muertas: int, paso_horas: float, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+def simular_nula(
+    validos: np.ndarray,
+    codigo: np.ndarray,
+    intensidad: np.ndarray,
+    duraciones: list[np.ndarray],
+    celdas_muertas: int,
+    paso_horas: float,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray]:
     """Inicios Poisson por estrato en el tiempo en riesgo, con duración remuestreada del estrato del inicio."""
     lam = np.nan_to_num(intensidad)[codigo]
     candidatos = np.flatnonzero((rng.random(len(validos)) < lam * paso_horas) & validos)
@@ -139,8 +157,17 @@ class PruebaPoisson:
     generadas: int
 
 
-def prueba_poisson(rejilla, validos, inicios, fines, estratos, iet_horas: float, paso_horas: float,
-                   rng: np.random.Generator, B: int = B_POR_DEFECTO) -> PruebaPoisson:
+def prueba_poisson(
+    rejilla,
+    validos,
+    inicios,
+    fines,
+    estratos,
+    iet_horas: float,
+    paso_horas: float,
+    rng: np.random.Generator,
+    B: int = B_POR_DEFECTO,
+) -> PruebaPoisson:
     rejilla = pd.DatetimeIndex(rejilla)
     validos = np.asarray(validos, dtype=bool)
     res = intervalos_reescalados(rejilla, validos, inicios, fines, estratos, iet_horas, paso_horas)
@@ -166,4 +193,6 @@ def prueba_poisson(rejilla, validos, inicios, fines, estratos, iet_horas: float,
         k_ad += estadistico_ad(zb) >= ad0
         k_ks += estadistico_ks(zb) >= ks0
     p_ad = (1 + k_ad) / (B + 1)
-    return PruebaPoisson(ad0, p_ad, bool(p_ad <= ALFA + 1e-12), ks0, (1 + k_ks) / (B + 1), int(res.z.size), B, generadas)
+    return PruebaPoisson(
+        ad0, p_ad, bool(p_ad <= ALFA + 1e-12), ks0, (1 + k_ks) / (B + 1), int(res.z.size), B, generadas
+    )

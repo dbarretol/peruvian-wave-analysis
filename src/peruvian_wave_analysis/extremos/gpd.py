@@ -15,6 +15,7 @@ Reglas:
   IC de Wald en ese caso. La marca por intervalo (el IC de ξ incluye valores ≤ −0.5) la pone el perfil de ξ.
 - Arranques deterministas en orden: momentos, PWM y una rejilla de ξ.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -165,8 +166,13 @@ def ajustar_gpd(excesos, n_min: int = N_MIN) -> AjusteGPD:
     hacia_frontera = False
     for k, (nombre, xi0, s0) in enumerate(lista, start=1):
         xi0, s0 = _reparar(xi0, s0, xmax)
-        res = optimize.minimize(_negll, np.array([xi0, np.log(s0)]), args=(x,), method="Nelder-Mead",
-                                options={"xatol": 1e-9, "fatol": 1e-10, "maxiter": 4000, "maxfev": 8000})
+        res = optimize.minimize(
+            _negll,
+            np.array([xi0, np.log(s0)]),
+            args=(x,),
+            method="Nelder-Mead",
+            options={"xatol": 1e-9, "fatol": 1e-10, "maxiter": 4000, "maxfev": 8000},
+        )
         xi, sigma = float(res.x[0]), float(np.exp(res.x[1]))
         ll = loglik(x, xi, sigma)
         if xi <= XI_MIN + 1e-3:
@@ -179,8 +185,9 @@ def ajustar_gpd(excesos, n_min: int = N_MIN) -> AjusteGPD:
         if not np.isfinite(ll) or extremo <= xmax:
             causa = "fuera_de_soporte"
             continue
-        res2 = optimize.minimize(_negll, res.x, args=(x,), method="Nelder-Mead",
-                                 options={"xatol": 1e-10, "fatol": 1e-12, "maxiter": 4000})
+        res2 = optimize.minimize(
+            _negll, res.x, args=(x,), method="Nelder-Mead", options={"xatol": 1e-10, "fatol": 1e-12, "maxiter": 4000}
+        )
         if res2.success and res2.fun <= res.fun:
             xi, sigma = float(res2.x[0]), float(np.exp(res2.x[1]))
             ll = loglik(x, xi, sigma)

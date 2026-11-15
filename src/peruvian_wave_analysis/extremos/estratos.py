@@ -10,6 +10,7 @@ año de bloque. Reglas:
 - el año de bloque se nombra por el año calendario de su mes de enero: con inicio en diciembre, dic-1993 pertenece
   al año de bloque 1994.
 """
+
 from __future__ import annotations
 
 import calendar
@@ -59,8 +60,10 @@ class Estratificacion:
                 circular = sorted(((m - 1) % 12) for m in ms)
                 es_tramo = any(sorted((c - s) % 12 for c in circular) == list(range(len(ms))) for s in circular)
                 if es_tramo:
-                    raise ValueError(f"El estrato «{nombre}» queda partido entre dos años de bloque con inicio en el "
-                                     f"mes {self.mes_inicio}; elija otro mes de inicio")
+                    raise ValueError(
+                        f"El estrato «{nombre}» queda partido entre dos años de bloque con inicio en el "
+                        f"mes {self.mes_inicio}; elija otro mes de inicio"
+                    )
                 raise ValueError(f"El estrato «{nombre}» no es un tramo de meses consecutivos")
 
     def _tabla(self) -> np.ndarray:

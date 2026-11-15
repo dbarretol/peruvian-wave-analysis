@@ -21,6 +21,7 @@ con su causa, nunca como número:
 Con ξ̂ ≤ −0.5 la calibración χ²₁ no está garantizada (Smith, 1985); el perfil de ξ marca **no regular** cuando su
 IC incluye valores ≤ −0.5.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -125,8 +126,12 @@ def _perfil_z(x, n, E, T, z, log_lam_hat, inicios) -> tuple[float, float]:
 
     puntos = ([(mejor[1], mejor[2])] if np.isfinite(mejor[0]) else []) + [a for a in inicios if np.all(np.isfinite(a))]
     for a in puntos:
-        r = optimize.minimize(neg, np.array(a, float), method="Nelder-Mead",
-                              options={"xatol": 1e-11, "fatol": 1e-12, "maxiter": 4000, "maxfev": 8000})
+        r = optimize.minimize(
+            neg,
+            np.array(a, float),
+            method="Nelder-Mead",
+            options={"xatol": 1e-11, "fatol": 1e-12, "maxiter": 4000, "maxfev": 8000},
+        )
         if -r.fun > mejor[0]:
             mejor = (-float(r.fun), float(r.x[0]), float(r.x[1]))
         if neg(a) < 1e300 and -neg(a) > mejor[0]:
@@ -137,8 +142,9 @@ def _perfil_z(x, n, E, T, z, log_lam_hat, inicios) -> tuple[float, float]:
     return mejor[0], mejor[2]
 
 
-def _limite(deficit: Callable[[float], float], punto: float, q: float, tope: float,
-            n_pasos: int = 40) -> tuple[float, str | None]:
+def _limite(
+    deficit: Callable[[float], float], punto: float, q: float, tope: float, n_pasos: int = 40
+) -> tuple[float, str | None]:
     """Raíz de deficit(θ) = q entre el punto y el tope, en pasos geométricos desde el punto.
 
     (límite, None) si la alcanza; (NaN, BORDE) si el perfil deja de ser factible antes; (NaN, TOPE) si llega al
@@ -170,8 +176,9 @@ def _limite(deficit: Callable[[float], float], punto: float, q: float, tope: flo
     return np.nan, TOPE
 
 
-def perfil_rl(excesos, n: int, anios_con_dato: float, T: float, u: float, ajuste: AjusteGPD,
-              nivel: float = 0.95) -> PerfilRL:
+def perfil_rl(
+    excesos, n: int, anios_con_dato: float, T: float, u: float, ajuste: AjusteGPD, nivel: float = 0.95
+) -> PerfilRL:
     """IC por perfil del RL_T de un estrato (u + z) con λ libre. ``ajuste`` es el de ``ajustar_gpd`` sobre los
     mismos excesos; ``n`` el número de eventos; ``anios_con_dato`` los años de exposición (E)."""
     x = np.asarray(excesos, dtype=float)
@@ -200,9 +207,18 @@ def perfil_rl(excesos, n: int, anios_con_dato: float, T: float, u: float, ajuste
     v_hat, _ = _perfil_z(x, n, E, T, z_hat, float(np.log(lam_hat)), inicio)
     hi, c_hi = _limite(deficit, z_hat, q, FACTOR_TOPE * z_hat)
     lo, c_lo = _limite(deficit, z_hat, q, z_hat * 1e-6)
-    return PerfilRL(punto=u + z_hat, lo=u + lo, hi=u + hi, causa_lo=c_lo, causa_hi=c_hi, nivel=nivel,
-                    loglik_max=l_hat, tasa_por_anio=lam_hat, delta_loglik_en_punto=float(v_hat - l_hat),
-                    deficit_min=float(min([2.0 * (l_hat - v_hat), *evaluados])))
+    return PerfilRL(
+        punto=u + z_hat,
+        lo=u + lo,
+        hi=u + hi,
+        causa_lo=c_lo,
+        causa_hi=c_hi,
+        nivel=nivel,
+        loglik_max=l_hat,
+        tasa_por_anio=lam_hat,
+        delta_loglik_en_punto=float(v_hat - l_hat),
+        deficit_min=float(min([2.0 * (l_hat - v_hat), *evaluados])),
+    )
 
 
 # --- Varios estratos --------------------------------------------------------------------------------
@@ -232,8 +248,14 @@ class _Multi:
         return np.array(out, float)
 
     def de_theta(self, th):
-        return [(float(th[3 * j]), max(0.0, -float(th[3 * j])) * self.xm[j] + float(np.exp(th[3 * j + 1])),
-                 float(np.exp(th[3 * j + 2]))) for j in range(self.k)]
+        return [
+            (
+                float(th[3 * j]),
+                max(0.0, -float(th[3 * j])) * self.xm[j] + float(np.exp(th[3 * j + 1])),
+                float(np.exp(th[3 * j + 2])),
+            )
+            for j in range(self.k)
+        ]
 
     def loglik(self, th) -> float:
         tot = 0.0
@@ -245,16 +267,24 @@ class _Multi:
         return tot
 
     def restriccion(self, th, z: float) -> float:
-        return self.T * sum(lam * float(supervivencia(np.array([z]), xi, sig)[0]) for xi, sig, lam in self.de_theta(th)) - 1.0
+        return (
+            self.T * sum(lam * float(supervivencia(np.array([z]), xi, sig)[0]) for xi, sig, lam in self.de_theta(th))
+            - 1.0
+        )
 
     def _slsqp(self, z: float, th0: np.ndarray) -> tuple[float, np.ndarray | None]:
         def neg(th):
             v = self.loglik(th)
             return -v if np.isfinite(v) else 1e10
 
-        r = optimize.minimize(neg, th0, method="SLSQP", bounds=self.cotas,
-                              constraints=[{"type": "eq", "fun": lambda th: self.restriccion(th, z)}],
-                              options={"maxiter": 1000, "ftol": 1e-12})
+        r = optimize.minimize(
+            neg,
+            th0,
+            method="SLSQP",
+            bounds=self.cotas,
+            constraints=[{"type": "eq", "fun": lambda th: self.restriccion(th, z)}],
+            options={"maxiter": 1000, "ftol": 1e-12},
+        )
         v = self.loglik(r.x)
         return (v, r.x) if np.isfinite(v) and abs(self.restriccion(r.x, z)) < _TOL_RESTRICCION else (-np.inf, None)
 
@@ -277,8 +307,15 @@ class _Multi:
         return mejor[0], mejor[1], True
 
 
-def perfil_rl_multiestrato(excesos: Sequence, n: Sequence[int], anios_con_dato: Sequence[float], T: float, u: float,
-                           ajustes: Sequence[AjusteGPD], nivel: float = 0.95) -> PerfilRL:
+def perfil_rl_multiestrato(
+    excesos: Sequence,
+    n: Sequence[int],
+    anios_con_dato: Sequence[float],
+    T: float,
+    u: float,
+    ajustes: Sequence[AjusteGPD],
+    nivel: float = 0.95,
+) -> PerfilRL:
     """IC por perfil del RL_T con varios estratos y todas las λ_s libres. Un elemento por estrato en ``excesos``,
     ``n``, ``anios_con_dato`` y ``ajustes``; las tasas del ajuste son λ̂_s = n_s/E_s."""
     xs = [np.asarray(x, dtype=float) for x in excesos]
@@ -328,13 +365,24 @@ def perfil_rl_multiestrato(excesos: Sequence, n: Sequence[int], anios_con_dato: 
     # Dentro de las cotas la restricción siempre es alcanzable: un déficit infinito es un fallo del optimizador.
     c_hi = SIN_CONVERGENCIA if c_hi == BORDE else c_hi
     c_lo = SIN_CONVERGENCIA if c_lo == BORDE else c_lo
-    return PerfilRL(punto=rl, lo=u + lo, hi=u + hi, causa_lo=c_lo, causa_hi=c_hi, nivel=nivel, loglik_max=l_hat,
-                    tasa_por_anio=float(sum(lam)), delta_loglik_en_punto=float(v_hat - l_hat),
-                    deficit_min=float(min([2.0 * (l_hat - v_hat), *memo.values()])),
-                    n_rescates=estado["rescates"], n_sin_resolver=estado["sin_resolver"])
+    return PerfilRL(
+        punto=rl,
+        lo=u + lo,
+        hi=u + hi,
+        causa_lo=c_lo,
+        causa_hi=c_hi,
+        nivel=nivel,
+        loglik_max=l_hat,
+        tasa_por_anio=float(sum(lam)),
+        delta_loglik_en_punto=float(v_hat - l_hat),
+        deficit_min=float(min([2.0 * (l_hat - v_hat), *memo.values()])),
+        n_rescates=estado["rescates"],
+        n_sin_resolver=estado["sin_resolver"],
+    )
 
 
 # --- ξ y σ ----------------------------------------------------------------------------------------
+
 
 def _perfil_sigma_1(x: np.ndarray, sigma: float) -> float:
     """max_ξ ℓ(ξ, σ) con ξ ∈ [max(−1, −σ/máx x), XI_MAX]."""

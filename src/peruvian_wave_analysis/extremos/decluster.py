@@ -12,6 +12,7 @@ Reglas:
 - una tormenta con algún NaN entre IET horas antes de su inicio e IET horas después de su fin (extremos incluidos)
   se marca ``toca_hueco``: su pico pudo estar en el hueco, o el hueco pudo partirla o unirla con otra.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -30,12 +31,15 @@ def comprobar_rejilla(indice: pd.DatetimeIndex, paso_horas: float) -> None:
     if not indice.is_monotonic_increasing or not indice.is_unique:
         raise ValueError("El índice temporal debe ser creciente y sin duplicados")
     if len(indice) > 1 and not np.allclose(np.diff(_horas(indice)), paso_horas):
-        raise ValueError(f"La serie no está en su rejilla completa de {paso_horas} h: marque los registros "
-                         "ausentes con NaN en vez de eliminarlos")
+        raise ValueError(
+            f"La serie no está en su rejilla completa de {paso_horas} h: marque los registros "
+            "ausentes con NaN en vez de eliminarlos"
+        )
 
 
-def decluster_rachas(df: pd.DataFrame, u: float, iet_horas: float, paso_horas: float = 3.0,
-                     columna: str = "Hs") -> pd.DataFrame:
+def decluster_rachas(
+    df: pd.DataFrame, u: float, iet_horas: float, paso_horas: float = 3.0, columna: str = "Hs"
+) -> pd.DataFrame:
     """Picos independientes por rachas, indexados por la fecha del pico.
 
     Devuelve todas las columnas de ``df`` en el instante del pico más ``exceso``, ``t_inicio``, ``t_fin``,

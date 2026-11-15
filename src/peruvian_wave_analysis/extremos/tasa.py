@@ -7,6 +7,7 @@
 
 Con todos los años completos, Σ_s λ_s es el número medio de eventos por año.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -21,13 +22,20 @@ INDICE = ["anio_bloque", "estrato"]
 def anios_con_dato(tiempos, validos, paso_horas: float, est: Estratificacion) -> pd.DataFrame:
     """Horas válidas, horas de la ventana y fracción f por (año de bloque, estrato) presente en la rejilla."""
     t = pd.DatetimeIndex(tiempos)
-    df = pd.DataFrame({"anio_bloque": est.anio_bloque(t), "estrato": est.etiqueta(t),
-                       "horas_validas": np.asarray(validos, dtype=float) * paso_horas})
+    df = pd.DataFrame(
+        {
+            "anio_bloque": est.anio_bloque(t),
+            "estrato": est.etiqueta(t),
+            "horas_validas": np.asarray(validos, dtype=float) * paso_horas,
+        }
+    )
     out = df.groupby(INDICE, sort=True)["horas_validas"].sum().to_frame()
     out["horas_ventana"] = [est.horas_ventana(int(a), s) for a, s in out.index]
     out["fraccion"] = out["horas_validas"] / out["horas_ventana"]
     if (out["fraccion"] > 1 + 1e-9).any():
-        raise ValueError("Más horas válidas que horas de la ventana: la rejilla tiene duplicados o el paso es incorrecto")
+        raise ValueError(
+            "Más horas válidas que horas de la ventana: la rejilla tiene duplicados o el paso es incorrecto"
+        )
     return out
 
 
@@ -59,6 +67,14 @@ def tasas(tabla: pd.DataFrame, est: Estratificacion, nivel: float = 0.95) -> pd.
         n = int(sub["n_eventos"].sum()) if len(sub) else 0
         E = float(sub["fraccion"].sum()) if len(sub) else 0.0
         lo, hi = ic_garwood(n, E, nivel) if E > 0 else (np.nan, np.nan)
-        filas.append({"estrato": s, "n_eventos": n, "anios_con_dato": E,
-                      "tasa_por_anio": n / E if E > 0 else np.nan, "lo": lo, "hi": hi})
+        filas.append(
+            {
+                "estrato": s,
+                "n_eventos": n,
+                "anios_con_dato": E,
+                "tasa_por_anio": n / E if E > 0 else np.nan,
+                "lo": lo,
+                "hi": hi,
+            }
+        )
     return pd.DataFrame(filas).set_index("estrato")

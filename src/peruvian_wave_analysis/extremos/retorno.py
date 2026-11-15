@@ -7,6 +7,7 @@ recurrencia)::
 
 La probabilidad de excederlo al menos una vez en N años es 1 − exp(−N/T).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

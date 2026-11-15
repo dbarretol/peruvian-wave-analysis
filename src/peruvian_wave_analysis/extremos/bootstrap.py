@@ -10,6 +10,7 @@
 - Con ξ̂ ≤ −0.5 o ajuste en la frontera, el IC se marca no regular: el bootstrap de estadísticos que dependen del
   máximo muestral no es consistente.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -51,8 +52,13 @@ def remuestrear_claves(claves: list, B: int, rng: np.random.Generator, por_estra
     return reps
 
 
-def bootstrap_bloques(bloques: Mapping[Any, Any], estadistico: Callable[[list[Any]], Any], B: int,
-                      rng: np.random.Generator, estratos_independientes: bool = False) -> np.ndarray:
+def bootstrap_bloques(
+    bloques: Mapping[Any, Any],
+    estadistico: Callable[[list[Any]], Any],
+    B: int,
+    rng: np.random.Generator,
+    estratos_independientes: bool = False,
+) -> np.ndarray:
     """Réplicas del estadístico (forma B, o B × k si devuelve un vector).
 
     Con ``bloques_anuales`` (por defecto) se remuestrean años completos. Para remuestrear cada estrato por separado
@@ -82,13 +88,22 @@ class IC:
         return bool(self.lo <= self.punto <= self.hi)
 
 
-def ic_percentil(replicas, punto: float, nivel: float = 0.95, no_regular: bool = False,
-                 estratos_independientes: bool = False) -> IC:
+def ic_percentil(
+    replicas, punto: float, nivel: float = 0.95, no_regular: bool = False, estratos_independientes: bool = False
+) -> IC:
     """IC percentil. ``contiene_punto`` falso es un síntoma que la fase debe reportar; ``no_regular`` se pasa desde
     el ajuste (ξ̂ ≤ −0.5 o frontera)."""
     r = np.asarray(replicas, dtype=float).ravel()
     ok = r[np.isfinite(r)]
     a = (1.0 - nivel) / 2.0
-    lo, hi = (np.quantile(ok, [a, 1.0 - a]) if ok.size else (np.nan, np.nan))
-    return IC(float(punto), float(lo), float(hi), nivel, int(ok.size), int(r.size - ok.size), bool(no_regular),
-              bool(estratos_independientes))
+    lo, hi = np.quantile(ok, [a, 1.0 - a]) if ok.size else (np.nan, np.nan)
+    return IC(
+        float(punto),
+        float(lo),
+        float(hi),
+        nivel,
+        int(ok.size),
+        int(r.size - ok.size),
+        bool(no_regular),
+        bool(estratos_independientes),
+    )
