@@ -24,6 +24,7 @@ dev = [
     "pytest>=8",
     "ipykernel>=6.29",
     "nbconvert>=7.16",
+    "ruff==0.17.5",
 ]
 
 [project.scripts]
@@ -49,3 +50,13 @@ markers = [
     "red: descarga datos de servicios externos; excluir con -m \"not red\"",
     "lento: tarda más de un minuto; excluir con -m \"not lento\"",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F: errores; I: orden de imports; B: errores probables; UP: sintaxis moderna;
+# PLC0415: importaciones dentro de funciones (solo con noqa y motivo escrito).
+select = ["E", "F", "I", "B", "UP", "PLC0415"]
+
