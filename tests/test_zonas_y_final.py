@@ -227,11 +227,27 @@ def test_mapa_final_publica_y_no_descarga(exploratorio, gebco_descargado, cfg_si
     m = json.loads(r.salidas["manifiesto"].read_text(encoding="utf-8"))
     for nombre, h in m["salidas_sha256"].items():
         assert manifiesto.sha256(r.salidas["mapa"].parent / nombre) == h
+    assert set(m["salidas_sha256"]) == {"mapa.png", "detalle_nodo.png", "nodos.csv", "ficha_nodo.json"}
     ficha = json.loads(r.salidas["ficha"].read_text(encoding="utf-8"))
     assert ficha["nodo_elegido"]["lat"] == pytest.approx(c1["lat"])
-    assert len(ficha["alternativas"]) == 2
+    assert "candidato" not in ficha["nodo_elegido"] and "alternativas" not in ficha
     assert "Propuestas de ANP" in ficha["no_evaluado"]
+    assert "ADR-0007" in ficha["criterios"]["adr"]
+    # Vecindario de 3 × 3: el nodo y sus vecinas, sin repetir, a un paso de malla como máximo.
+    vec = ficha["vecindario_3x3"]
+    assert 4 <= len(vec) <= 9 and sum(v["es_nodo_elegido"] for v in vec) == 1
+    assert len({(v["lat"], v["lon"]) for v in vec}) == len(vec)
+    assert all(abs(v["lat"] - c1["lat"]) <= 0.2001 and abs(v["lon"] - c1["lon"]) <= 0.2001 for v in vec)
+    # Sin candidatos en el mapa ni en la tabla.
+    assert "candidato" not in r.tabla.columns
+    textos = [t.get_text() for t in r.figura.axes[0].get_legend().get_texts()]
+    assert not any(t.startswith("Candidato") for t in textos)
     assert r.figura.axes[0].get_title(loc="left").startswith("Mapa definitivo")
+    # Detalle: encuadra el bloque de 3 × 3 celdas alrededor del nodo.
+    ax = r.figura_detalle.axes[0]
+    assert ax.get_title(loc="left").startswith("Detalle del nodo elegido")
+    x0, x1 = ax.get_xlim()
+    assert x0 < c1["lon"] - 0.3 < c1["lon"] + 0.3 < x1 and (x1 - x0) < 0.9
 
 
 def test_gate_falla_si_el_nodo_esta_excluido_y_borra_la_salida_anterior(exploratorio, gebco_descargado, cfg_sintetica):
