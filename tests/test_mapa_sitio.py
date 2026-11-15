@@ -177,3 +177,20 @@ def test_cli(cfg_sintetica, capsys):
 
 def test_cli_sin_coordenada(capsys):
     assert main(["--nombre", "x"]) == 2
+
+
+def test_tierra_en_la_celda_es_informativa_salvo_max_tierra():
+    """ADR-0014: un nodo con dato y una esquina de tierra en la celda es elegible; max_tierra lo puede filtrar."""
+    from types import SimpleNamespace
+
+    f = SimpleNamespace(valido=True, frac_tierra_celda=0.01, excluido_por_zona=False, vecinas_validas=7)
+    assert candidatos._motivo(f) == ""
+    assert candidatos._motivo(f, max_tierra=0.05) == ""
+    assert candidatos._motivo(f, max_tierra=0.0).startswith("1: más de 0 %")
+    assert candidatos._motivo(SimpleNamespace(**{**vars(f), "valido": False})).startswith("1: nodo sin dato")
+    assert candidatos._motivo(SimpleNamespace(**{**vars(f), "excluido_por_zona": True})).startswith("2:")
+
+
+def test_max_tierra_fuera_de_rango():
+    with pytest.raises(ValueError):
+        ConfigMapa(nombre="x", latitud=-15, longitud=-75, max_tierra=1.5)
