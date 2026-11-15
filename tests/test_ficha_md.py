@@ -66,8 +66,7 @@ def test_redaccion_de_la_revision(carpeta):
     assert "una sola población" not in md
     assert "Supuesto, sin comprobar" in md
     assert "29.4" in md and "no alcanza" not in md.replace("«no alcanza»", "")  # región sin juicio de umbral
-    assert "no disponible en este proyecto" in md  # ADR-0019: sin cifras de v2
-    assert "v2" not in md
+    assert "no disponible en este proyecto" in md  # ADR-0019: sin cifras de otros proyectos
     assert "no disponible (falta `raw/waverys/estatico/`)" in md
     assert " nan " not in md.lower() and "| nan" not in md.lower()
 

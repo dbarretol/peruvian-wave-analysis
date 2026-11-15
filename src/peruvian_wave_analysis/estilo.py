@@ -1,4 +1,4 @@
-"""Estilo único de figuras (mínimo para el mapa de sitio; el completo se porta de v2 en la F2, ADR-0008).
+"""Estilo único de figuras (mínimo para el mapa de sitio; el completo llega en la F2).
 
 Colores: paleta de referencia validada para daltonismo (orden fijo, nunca cíclico).
 """
