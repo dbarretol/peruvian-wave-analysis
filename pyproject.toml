@@ -36,6 +36,8 @@ serie-waverys = "peruvian_wave_analysis.sitio.cli:main_serie"
 serie-waverys-gate = "peruvian_wave_analysis.sitio.cli:main_serie_gate"
 ficha-sitio = "peruvian_wave_analysis.sitio.ficha:main"
 verificacion-f2 = "peruvian_wave_analysis.verificacion.run:main"
+datos-candidatos = "peruvian_wave_analysis.datos.run:main_candidatos"
+datos-serie = "peruvian_wave_analysis.datos.run:main_serie"
 
 [build-system]
 requires = ["hatchling"]
