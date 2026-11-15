@@ -13,7 +13,7 @@ Primera herramienta: **mapa de selección de sitio**, en dos pasos.
 
 Después:
 
-3. **Serie de WAVERYS** (`serie-waverys`): consulta el catálogo, descarga el registro completo del bloque de 5 × 5 nodos alrededor del nodo, un archivo por año, con la versión del dataset fija, reanudación y hash por archivo, y pasa el gate de la serie.
+3. **Serie de WAVERYS**, en dos comandos: `serie-waverys` consulta el catálogo y descarga el registro completo del bloque de 5 × 5 nodos alrededor del nodo, un archivo por año, con la versión del dataset fija, reanudación y hash por archivo; `serie-waverys-gate` verifica la serie sin red y publica su gate.
 4. **Ficha del sitio** (`ficha-sitio`): exposición por sectores (Natural Earth), obstáculos (GEBCO), inventario de observaciones de altimetría (Ribal y Young, 2019, en AODN) con su independencia respecto de WAVERYS, ciclones tropicales (IBTrACS), cronología del producto, gate de la fase y `ficha_sitio.md`. No lee valores de Hs ni de Tp.
 
 ## Instalación
@@ -66,11 +66,12 @@ Si el nodo no cumple los criterios con GEBCO, termina con `GATE FALLIDO` y borra
 ### 4. Serie de WAVERYS
 
 ```bash
-uv run serie-waverys                 # registro completo y gate
-uv run serie-waverys --anio 2020     # prueba con un año (sin gate)
+uv run serie-waverys                 # descarga (con red): registro completo, solo escribe en raw/
+uv run serie-waverys --anio 2020     # descarga de un año
+uv run serie-waverys-gate            # gate (sin red): verifica y publica serie_gate.json
 ```
 
-Si el gate falla, termina con `GATE FALLIDO` y borra el informe anterior. El gate usa la cobertura del catálogo anotada en el manifiesto el día de la descarga y guarda el hash de cada archivo verificado.
+La descarga no publica nada: si el catálogo de hoy difiere del anotado al descargar, lo dice en la consola. El gate usa la cobertura del catálogo anotada en el manifiesto el día de la descarga, exige todos los años de esa cobertura y registra el hash de cada archivo. Si falla, termina con `GATE FALLIDO` y borra el informe anterior.
 
 ### 5. Ficha del sitio
 
@@ -79,7 +80,15 @@ uv run ficha-sitio              # todo (≈ 8 min; descarga Natural Earth, tesel
 uv run ficha-sitio --solo-md    # rehace solo ficha_sitio.md desde las salidas ya publicadas
 ```
 
-Requiere el mapa definitivo (`ficha_nodo.json`), el informe del gate de la serie y un recorte de GEBCO que cubra 200 km alrededor del nodo y del respaldo. Termina con código 1 si el gate de la fase no cumple.
+Requiere el mapa definitivo (`ficha_nodo.json`), el gate publicado de la serie y un recorte de GEBCO que cubra 200 km alrededor del nodo y del respaldo. Registra cada insumo con su hash. Si el gate de la fase no cumple, termina con código 1 y borra la ficha anterior.
+
+### 6. Estudio de verificación de la biblioteca de extremos
+
+```bash
+uv run verificacion-f2 --procesos 7   # ≈ 25 min con 7 procesos; el resultado no depende del número de procesos
+```
+
+Simula escenarios de respuesta conocida y comprueba la cobertura de los intervalos por perfil y el tamaño de la prueba de Poisson contra bandas fijadas antes de correr. Si una banda falla, repite ese escenario una vez con 1600 réplicas.
 
 ### Cuaderno
 
@@ -144,7 +153,11 @@ En `WAVE_DATA_DIR`:
 - `interim/F01-sitio-y-fuentes/mapa-sitio/<nombre>/` (exploratorio): `mapa.png`, `candidatos.csv`, `metadatos.json`, `siguiente_paso.md`.
 - `processed/F01-sitio-y-fuentes/mapa-sitio-final/<nombre>/` (definitivo): `mapa.png` (contexto regional con el nodo elegido, sin candidatos), `detalle_nodo.png` (la celda del nodo y sus ocho vecinas con la batimetría a resolución completa, líneas de profundidad, profundidad y tierra de cada celda), `nodos.csv` (todos los nodos recalculados con GEBCO, sin numeración), `ficha_nodo.json` (nodo elegido y vecindario de 3 × 3) y `MANIFEST.json`.
 - `raw/waverys/serie/`: la serie de WAVERYS, un NetCDF por año.
-- `processed/F01-sitio-y-fuentes/ficha-sitio/<nombre>/`: `serie_gate.json` (gate de la serie), `ficha_sitio.md`, `exposicion.csv` (por sector) y `exposicion_rayos.csv` (por rayo), `obstaculos.csv`, `observaciones.csv` y `cobertura_observaciones.csv` (por misión y por régimen), `observaciones_sensibilidad_periodo.csv` y `cobertura_sensibilidad_periodo.csv` (sensibilidad rotulada), `cronologia_waverys.csv`, `misiones_asimiladas_waverys.csv`, `resumen_ficha.json` (con el gate de la fase) y `MANIFEST.json`.
+- `processed/F01-sitio-y-fuentes/serie-waverys/<nombre>/`: `serie_gate.json` (gate de la serie) y `MANIFEST.json`.
+- `processed/F01-sitio-y-fuentes/ficha-sitio/<nombre>/`: `ficha_sitio.md`, `exposicion.csv` (por sector) y `exposicion_rayos.csv` (por rayo), `obstaculos.csv`, `observaciones.csv` y `cobertura_observaciones.csv` (por misión y por régimen), `observaciones_sensibilidad_periodo.csv` y `cobertura_sensibilidad_periodo.csv` (sensibilidad rotulada), `cronologia_waverys.csv`, `misiones_asimiladas_waverys.csv`, `resumen_ficha.json` (con el gate de la fase) y `MANIFEST.json`.
+- `processed/F02-biblioteca-comun/verificacion/`: `resumen.json` (bandas y métricas por escenario), `replicas/<escenario>.csv`, `bandas.png` y `MANIFEST.json`.
+
+Cada salida publicada lleva un `MANIFEST.json` sin marcas de tiempo: insumos con su ruta relativa a `WAVE_DATA_DIR` y su hash, salidas con su hash, huella del código, semilla y criterios del gate. Un gate fallido borra la salida anterior y deja solo `GATE_FAILED.json`.
 
 ### Columnas de `candidatos.csv`
 

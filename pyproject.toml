@@ -31,6 +31,7 @@ mapa-sitio = "peruvian_wave_analysis.sitio.cli:main"
 mapa-sitio-final = "peruvian_wave_analysis.sitio.cli:main_final"
 registrar-gebco = "peruvian_wave_analysis.sitio.cli:main_registrar_gebco"
 serie-waverys = "peruvian_wave_analysis.sitio.cli:main_serie"
+serie-waverys-gate = "peruvian_wave_analysis.sitio.cli:main_serie_gate"
 ficha-sitio = "peruvian_wave_analysis.sitio.ficha:main"
 verificacion-f2 = "peruvian_wave_analysis.verificacion.run:main"
 
