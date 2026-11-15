@@ -23,6 +23,7 @@ import numpy as np
 import xarray as xr
 
 from .. import __version__, manifiesto, rutas
+from ..comun.errores import ErrorGate
 from . import batimetria, candidatos, waverys
 from . import zonas as zonas_mod
 from .config import ConfigMapa
@@ -33,7 +34,7 @@ from .mapa import FASE, ResultadoMapa, dibujar
 TOL_COBERTURA = 0.01  # grados
 
 
-class ErrorGate(RuntimeError):
+class ErrorMapaFinal(ErrorGate):
     """El nodo elegido no cumple los criterios o falta un insumo."""
 
 
@@ -50,12 +51,12 @@ class ConfigFinal:
 def _cargar_exploratorio(cf: ConfigFinal) -> dict:
     p = Path(cf.exploratorio)
     if not p.exists():
-        raise ErrorGate(f"No existe la corrida exploratoria {p}.")
+        raise ErrorMapaFinal(f"No existe la corrida exploratoria {p}.")
     meta = json.loads(p.read_text(encoding="utf-8"))
     if meta.get("tipo") != "mapa exploratorio":
-        raise ErrorGate(f"{p} no es el metadatos.json de un mapa exploratorio.")
+        raise ErrorMapaFinal(f"{p} no es el metadatos.json de un mapa exploratorio.")
     if not meta.get("zonas"):
-        raise ErrorGate("La corrida exploratoria no evaluó zonas: repetirla con zonas antes del mapa definitivo.")
+        raise ErrorMapaFinal("La corrida exploratoria no evaluó zonas: repetirla con zonas antes del mapa definitivo.")
     return meta
 
 
@@ -64,12 +65,12 @@ def _verificar_gebco(ruta: Path, raiz: Path, cfg: ConfigMapa) -> dict:
     try:
         ruta.resolve().relative_to(raiz_raw.resolve())
     except ValueError as exc:
-        raise ErrorGate(f"{ruta} no está en {raiz_raw}: registrarlo antes con `registrar-gebco`.") from exc
+        raise ErrorMapaFinal(f"{ruta} no está en {raiz_raw}: registrarlo antes con `registrar-gebco`.") from exc
     if not ruta.exists():
-        raise ErrorGate(f"No existe {ruta}.")
+        raise ErrorMapaFinal(f"No existe {ruta}.")
     entrada = manifiesto.verificar(raiz_raw, ruta)
     if entrada.get("fuente") != FUENTE_GEBCO:
-        raise ErrorGate(f"{ruta} no está registrado como GEBCO (fuente: {entrada.get('fuente')}).")
+        raise ErrorMapaFinal(f"{ruta} no está registrado como GEBCO (fuente: {entrada.get('fuente')}).")
     o, e, s, n = batimetria.recuadro_con_margen(cfg)
     with xr.open_dataset(ruta) as ds:
         lat = ds[batimetria._primer_nombre(batimetria._NOMBRES_LAT, ds.coords)].values
@@ -80,7 +81,7 @@ def _verificar_gebco(ruta: Path, raiz: Path, cfg: ConfigMapa) -> dict:
         or lat.min() > s + TOL_COBERTURA
         or lat.max() < n - TOL_COBERTURA
     ):
-        raise ErrorGate(
+        raise ErrorMapaFinal(
             f"El recorte de GEBCO ({lon.min():.2f}…{lon.max():.2f}, {lat.min():.2f}…{lat.max():.2f}) no cubre "
             f"el recuadro necesario (O {o}, E {e}, S {s}, N {n})."
         )
@@ -138,10 +139,10 @@ def generar_mapa_final(cf: ConfigFinal) -> ResultadoMapa:
             np.isclose(tabla["lat"], cf.nodo_lat, atol=1e-3) & np.isclose(tabla["lon"], cf.nodo_lon, atol=1e-3)
         ]
         if elegido.empty:
-            raise ErrorGate(f"({cf.nodo_lat}, {cf.nodo_lon}) no es un nodo de WAVERYS dentro del recuadro.")
+            raise ErrorMapaFinal(f"({cf.nodo_lat}, {cf.nodo_lon}) no es un nodo de WAVERYS dentro del recuadro.")
         fila = elegido.iloc[0]
         if not fila["cumple_criterios"]:
-            raise ErrorGate(f"El nodo elegido no cumple los criterios con GEBCO: {fila['motivo_descarte']}.")
+            raise ErrorMapaFinal(f"El nodo elegido no cumple los criterios con GEBCO: {fila['motivo_descarte']}.")
     except Exception:
         if destino.exists():  # un gate fallido invalida la salida publicada anterior (roadmap §8.1)
             shutil.rmtree(destino)

@@ -24,10 +24,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from .. import rutas
-from ..comun.errores import ErrorGate as ErrorGateComun
+from ..comun.errores import ErrorGate
 from . import serie
 from .config import ConfigMapa
-from .final import ConfigFinal, ErrorGate, generar_mapa_final
+from .final import ConfigFinal, generar_mapa_final
 from .gebco import registrar
 from .mapa import generar_mapa
 
@@ -226,7 +226,7 @@ def main_serie_gate(argv=None) -> int:
     raiz = Path(rutas.directorio_datos(a.datos))
     try:
         salida = serie.publicar_gate(raiz, a.nombre)
-    except (ErrorGateComun, serie.ErrorSerie) as exc:
+    except (ErrorGate, serie.ErrorSerie) as exc:
         print(f"GATE FALLIDO: {exc}", file=sys.stderr)
         return 1
     print(f"Gate de la serie: CUMPLE. Publicado en {salida}")

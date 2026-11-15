@@ -33,6 +33,7 @@ R = 400
 R_REPETICION = 1600
 FASE = "F02-biblioteca-comun"
 TOPE_MAX = 0.01
+N_BANDAS = 21  # contrato, §5.2: A1–A4 (3 + 1 cada uno), B (3), D1 y D2 (1 cada uno)
 POTENCIA_MIN = 0.80
 VARIABLES_HILOS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS")
 ETAPA = orquestador.Etapa("verificacion", Path(__file__).resolve().parent, Path("."))
@@ -163,13 +164,39 @@ def _figura(resultados: list[dict], ruta: Path) -> None:
     estilo.guardar_figura(fig, ruta)
 
 
+def ruta_canonica(raiz_datos: Path | None) -> Path:
+    return rutas.directorio_datos(raiz_datos) / "processed" / FASE / "verificacion"
+
+
+def comprobar_salida(raiz_datos: Path | None, canonica: bool, salida: Path | None) -> Path:
+    """Carpeta de salida. Una corrida no canónica (``--solo`` o otro número de réplicas) exige ``--salida`` y no puede
+    escribir en la carpeta canónica: si pasara la reemplazaría con una salida parcial, y si fallara la borraría. Se
+    comprueba antes de abrir el staging, que borra la salida al fallar."""
+    canon = ruta_canonica(raiz_datos)
+    if salida is None:
+        if not canonica:
+            raise ValueError("Una corrida no canónica (--solo o --replicas distinto de 400) exige --salida")
+        return canon
+    salida = Path(salida)
+    if not canonica and salida.resolve() == canon.resolve():
+        raise ValueError(f"Una corrida no canónica no puede escribir en la carpeta canónica {canon}")
+    return salida
+
+
+def motivos_bandas(n_bandas: int, canonica: bool) -> list[str]:
+    """La corrida canónica debe evaluar exactamente las 21 bandas del contrato."""
+    if canonica and n_bandas != N_BANDAS:
+        return [f"la corrida canónica evaluó {n_bandas} bandas; el contrato fija {N_BANDAS}"]
+    return []
+
+
 def ejecutar(
     raiz_datos: Path, procesos: int, r: int = R, solo: list[str] | None = None, salida: Path | None = None
 ) -> Path:
     # Canónica = todos los escenarios con R = 400 (con regla de repetición). La carpeta de salida no cuenta: la
     # comprobación de determinismo (G4) corre la misma etapa en otra carpeta y debe dar el mismo manifiesto.
     canonica = r == R and solo is None
-    salida = Path(salida) if salida else rutas.directorio_datos(raiz_datos) / "processed" / FASE / "verificacion"
+    salida = comprobar_salida(raiz_datos, canonica, salida)
     lista = [e for e in esc.ESCENARIOS if solo is None or e.id in solo]
     raices = orquestador.rutas_codigo(ETAPA)
     with etapa.staging_protegido(salida, raices) as st:
@@ -201,6 +228,7 @@ def ejecutar(
                 flush=True,
             )
         n_bandas = sum(len(r_["bandas"]) for r_ in resultados)
+        motivos += motivos_bandas(n_bandas, canonica)
         potencia = next((r_["metricas"]["rechazo_ad"] for r_ in resultados if r_["id"] == "E"), None)
         resumen = {
             "replicas": r,
