@@ -208,11 +208,57 @@ def test_tipo_no_serializable_no_toca_la_salida(entorno):
     datos, insumo, codigo, salida = entorno
     _publicar(datos, insumo, codigo, salida)
     antes = (salida / etapa.MANIFIESTO).read_bytes()
-    st = etapa.abrir_staging(salida)
+    st = etapa.abrir_staging(salida, codigo, base_codigo=codigo[0].parent)
     (st / "r.txt").write_text("x", encoding="utf-8")
     with pytest.raises(TypeError):
-        etapa.publicar(st, salida, etapa.Gate(True, {"x": object()}), codigo, {"serie": insumo}, datos, None)
+        etapa.publicar(
+            st,
+            salida,
+            etapa.Gate(True, {"x": object()}),
+            codigo,
+            {"serie": insumo},
+            datos,
+            None,
+            base_codigo=codigo[0].parent,
+        )
     assert (salida / etapa.MANIFIESTO).read_bytes() == antes
+
+
+def test_codigo_editado_durante_la_corrida_falla_el_gate(entorno):
+    datos, insumo, codigo, salida = entorno
+    _publicar(datos, insumo, codigo, salida)
+    with pytest.raises(GateFallido, match="cambió durante la corrida"):
+        with etapa.staging_protegido(salida, codigo, base_codigo=codigo[0].parent) as st:
+            (st / "r.txt").write_text("x", encoding="utf-8")
+            (codigo[0] / "m.py").write_text("X = 2\n", encoding="utf-8")  # edición a mitad de corrida
+            etapa.publicar(
+                st, salida, etapa.Gate(True, {}), codigo, {"serie": insumo}, datos, None, base_codigo=codigo[0].parent
+            )
+    assert sorted(p.name for p in salida.iterdir()) == [etapa.GATE_FALLIDO]
+    motivos = json_estricto.leer(salida / etapa.GATE_FALLIDO)["motivos"]
+    assert len(motivos) == 1 and "cambió durante la corrida" in motivos[0]
+
+
+def test_editar_solo_comentarios_durante_la_corrida_no_falla(entorno):
+    datos, insumo, codigo, salida = entorno
+    with etapa.staging_protegido(salida, codigo, base_codigo=codigo[0].parent) as st:
+        (st / "r.txt").write_text("x", encoding="utf-8")
+        (codigo[0] / "m.py").write_text("# comentario\nX = 1\n", encoding="utf-8")
+        etapa.publicar(
+            st, salida, etapa.Gate(True, {}), codigo, {"serie": insumo}, datos, None, base_codigo=codigo[0].parent
+        )
+    etapa.exigir_publicada(salida)
+
+
+def test_publicar_exige_staging_abierto_con_huella(entorno):
+    datos, insumo, codigo, salida = entorno
+    st = etapa.ruta_staging(salida)
+    st.mkdir(parents=True)
+    (st / "r.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="huella del código al empezar"):
+        etapa.publicar(
+            st, salida, etapa.Gate(True, {}), codigo, {"serie": insumo}, datos, None, base_codigo=codigo[0].parent
+        )
 
 
 # --- Orquestador --------------------------------------------------------------------------------

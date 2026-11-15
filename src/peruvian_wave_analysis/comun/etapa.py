@@ -15,6 +15,9 @@ Reglas:
   hash, cada salida con su hash, la huella del código, la semilla y los criterios del gate.
 - Si el gate falla, o hay una excepción antes de publicar, **se borra la salida publicada anterior** y queda solo
   ``GATE_FAILED.json`` con el motivo. Ninguna etapa siguiente puede leer resultados viejos.
+- La huella del código se calcula al abrir el staging y otra vez al publicar; si difieren, el gate falla: la
+  salida no correspondería al código que la produjo. Por eso ``publicar`` solo acepta un staging abierto con
+  ``abrir_staging`` (o ``staging_protegido``) en el mismo proceso.
 - Leer una salida publicada (``exigir_publicada``) verifica el hash de cada archivo.
 """
 
@@ -33,6 +36,9 @@ from .errores import GateFallido, HashDistinto, InsumoFaltante
 
 MANIFIESTO = "MANIFEST.json"
 GATE_FALLIDO = "GATE_FAILED.json"
+
+# huella del código al abrir cada staging (ruta resuelta del staging → huella); la consume ``publicar``
+_HUELLAS_AL_ABRIR: dict[Path, str] = {}
 
 
 @dataclass
@@ -69,12 +75,13 @@ def ruta_staging(salida: Path) -> Path:
     return salida.with_name(salida.name + ".staging")
 
 
-def abrir_staging(salida: Path) -> Path:
-    """Crea vacío el directorio de staging de una salida."""
+def abrir_staging(salida: Path, raices_codigo: Sequence[Path], base_codigo: Path = huella.DIR_PROYECTO) -> Path:
+    """Crea vacío el directorio de staging de una salida y registra la huella del código en ese momento."""
     st = ruta_staging(salida)
     if st.exists():
         shutil.rmtree(st)
     st.mkdir(parents=True)
+    _HUELLAS_AL_ABRIR[st.resolve()] = huella.huella_codigo(raices_codigo, base_codigo)
     return st
 
 
@@ -115,11 +122,25 @@ def publicar(
     base_codigo: Path = huella.DIR_PROYECTO,
     extra: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Publica el staging como salida si el gate pasa; si no, aplica ``fallar`` y lanza GateFallido."""
+    """Publica el staging como salida si el gate pasa; si no, aplica ``fallar`` y lanza GateFallido.
+
+    También falla el gate si la huella del código cambió entre la apertura del staging y la publicación.
+    """
     staging, salida = Path(staging), Path(salida)
-    if not gate.aprobado:
-        fallar(staging, salida, gate.motivos, raices_codigo, gate.criterios, base_codigo)
-        raise GateFallido(f"Gate fallido en {salida.name}: {'; '.join(gate.motivos) or 'sin motivo'}")
+    al_abrir = _HUELLAS_AL_ABRIR.pop(staging.resolve(), None)
+    if al_abrir is None:
+        raise ValueError(
+            f"El staging {staging} no se abrió con abrir_staging en este proceso: falta la huella del código al empezar"
+        )
+    huella_final = huella.huella_codigo(raices_codigo, base_codigo)
+    motivos = [] if gate.aprobado else list(gate.motivos or ["sin motivo"])
+    if huella_final != al_abrir:
+        motivos.append(
+            f"El código cambió durante la corrida: huella {al_abrir} al abrir el staging y {huella_final} al publicar"
+        )
+    if motivos:
+        fallar(staging, salida, motivos, raices_codigo, gate.criterios, base_codigo)
+        raise GateFallido(f"Gate fallido en {salida.name}: {'; '.join(motivos)}")
     hashes = exigir_insumos(insumos)
     salidas = {
         p.relative_to(staging).as_posix(): manifiesto.sha256(p) for p in sorted(staging.rglob("*")) if p.is_file()
@@ -128,7 +149,7 @@ def publicar(
         raise ValueError(f"El staging no puede contener {MANIFIESTO} ni {GATE_FALLIDO}")
     contenido: dict[str, Any] = {
         "gate": {"aprobado": True, "criterios": gate.criterios},
-        "huella_codigo": huella.huella_codigo(raices_codigo, base_codigo),
+        "huella_codigo": huella_final,
         "huella_version": huella.VERSION,
         "insumos": {
             k: {"ruta": ruta_relativa(Path(v), raiz_datos), "sha256": hashes[k]} for k, v in sorted(insumos.items())
@@ -177,7 +198,7 @@ def staging_protegido(
     ``publicar`` consume el staging (lo renombra o lo borra): si sigue existiendo al salir con error, el fallo
     ocurrió antes de publicar.
     """
-    st = abrir_staging(salida)
+    st = abrir_staging(salida, raices_codigo, base_codigo)
     try:
         yield st
     except Exception as exc:
