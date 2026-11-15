@@ -16,7 +16,7 @@ import pandas as pd
 import xarray as xr
 
 from .. import __version__, manifiesto, rutas
-from . import batimetria, costa, exposicion as ex, observaciones as ob, waverys
+from . import batimetria, costa, exposicion as ex, ficha_md, observaciones as ob, waverys
 
 RESPALDO = (-14.8, -76.0)
 URL_IBTRACS = ("https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/"
@@ -253,14 +253,38 @@ def generar(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> dict
         }
         (t / "resumen_ficha.json").write_text(json.dumps(_json_limpio(resumen), ensure_ascii=False, indent=2, default=str, allow_nan=False) + "\n",
                                              encoding="utf-8")
+        _escribir_md(t, raiz_raw, ficha_nodo, gate_serie)
         destino.mkdir(parents=True, exist_ok=True)
         for p in t.iterdir():
             shutil.copy2(p, destino / p.name)
+    _manifiesto(destino)
+    resumen["destino"] = str(destino)
+    return resumen
+
+
+def _escribir_md(carpeta: Path, raiz_raw: Path, ficha_nodo: dict, gate_serie: Path) -> None:
+    n = ficha_nodo["nodo_elegido"]
+    estatico = next(iter(sorted((raiz_raw / "waverys" / "estatico").glob("deptho*.nc"))), None)
+    gate = json.loads(gate_serie.read_text(encoding="utf-8")) if gate_serie.exists() else None
+    texto = ficha_md.componer(carpeta, ficha_nodo, gate, ficha_md.deptho_en(estatico, n["lat"], n["lon"]), __version__)
+    (carpeta / "ficha_sitio.md").write_text(texto, encoding="utf-8")
+
+
+def _manifiesto(destino: Path) -> None:
     salidas = {p.name: manifiesto.sha256(p) for p in sorted(destino.iterdir()) if p.name != "MANIFEST.json"}
     (destino / "MANIFEST.json").write_text(json.dumps({"version_codigo": __version__, "salidas_sha256": salidas},
                                                       ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    resumen["destino"] = str(destino)
-    return resumen
+
+
+def regenerar_md(nombre: str = "marcona-200m", raiz_datos: str | None = None) -> Path:
+    """Rehace solo ``ficha_sitio.md`` (y el manifiesto) desde las salidas ya publicadas, sin recalcular."""
+    raiz = Path(rutas.directorio_datos(raiz_datos))
+    final = raiz / "processed" / "F01-sitio-y-fuentes" / "mapa-sitio-final" / nombre
+    ficha_nodo = json.loads((final / "ficha_nodo.json").read_text(encoding="utf-8"))
+    destino = raiz / "processed" / "F01-sitio-y-fuentes" / "ficha-sitio" / nombre
+    _escribir_md(destino, rutas.raw(raiz), ficha_nodo, destino / "serie_gate.json")
+    _manifiesto(destino)
+    return destino / "ficha_sitio.md"
 
 
 def json_geoms(ruta: Path) -> list:
@@ -277,7 +301,11 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="ficha-sitio", description="Ficha del sitio de la F1 y su gate (contrato §2–§4).")
     p.add_argument("--nombre", default="marcona-200m")
     p.add_argument("--datos")
+    p.add_argument("--solo-md", action="store_true", help="Rehace solo ficha_sitio.md desde las salidas publicadas.")
     a = p.parse_args(argv)
+    if a.solo_md:
+        print(regenerar_md(a.nombre, a.datos))
+        return 0
     r = generar(a.nombre, a.datos)
     print(json.dumps({k: r[k] for k in ("dist_costa_natural_earth_km", "obstaculos", "regla_respaldo_por_regimen",
                                         "ciclones_tropicales", "gate", "destino")}, ensure_ascii=False, indent=2, default=str))
