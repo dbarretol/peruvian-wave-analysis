@@ -9,8 +9,9 @@ import xarray as xr
 
 from peruvian_wave_analysis import manifiesto
 from peruvian_wave_analysis.comun import etapa
-from peruvian_wave_analysis.comun.errores import GateFallido
-from peruvian_wave_analysis.sitio import serie
+from peruvian_wave_analysis.comun.errores import ErrorGate, GateFallido
+from peruvian_wave_analysis.sitio import cli, serie
+from peruvian_wave_analysis.sitio.final import ErrorMapaFinal
 
 LATS = np.round(np.arange(-15.4, -14.59, 0.2), 4)
 LONS = np.round(np.arange(-76.2, -75.39, 0.2), 4)
@@ -281,3 +282,22 @@ def test_gate_publicado_exige_todos_los_anios(tmp_path, monkeypatch, mascara):
     with pytest.raises(serie.ErrorSerie, match="Faltan años"):
         serie.publicar_gate(raiz, "sitio", cfg, malla, mascara)
     assert (serie.ruta_gate(raiz, "sitio") / etapa.GATE_FALLIDO).exists()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [GateFallido("Gate fallido en sitio: máscara distinta"), serie.ErrorSerie("Faltan años de la cobertura anotada")],
+)
+def test_cli_gate_de_la_serie_informa_gate_fallido(tmp_path, monkeypatch, capsys, error):
+    """Regresión: la ErrorGate del mapa definitivo tapaba a la común y un gate fallido salía como traza."""
+
+    def falla(*_a, **_k):
+        raise error
+
+    monkeypatch.setattr(serie, "publicar_gate", falla)
+    assert cli.main_serie_gate(["--datos", str(tmp_path)]) == 1
+    assert "GATE FALLIDO" in capsys.readouterr().err
+
+
+def test_error_del_mapa_final_es_un_error_de_gate():
+    assert issubclass(ErrorMapaFinal, ErrorGate) and ErrorMapaFinal is not ErrorGate

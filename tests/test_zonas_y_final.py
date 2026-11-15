@@ -11,7 +11,7 @@ import yaml
 from peruvian_wave_analysis import manifiesto
 from peruvian_wave_analysis.sitio import batimetria, candidatos, gebco, generar_mapa, waverys, zonas
 from peruvian_wave_analysis.sitio.cli import main, main_final, main_registrar_gebco
-from peruvian_wave_analysis.sitio.final import ConfigFinal, ErrorGate, generar_mapa_final
+from peruvian_wave_analysis.sitio.final import ConfigFinal, ErrorMapaFinal, generar_mapa_final
 
 from .conftest import LAT0
 
@@ -287,13 +287,13 @@ def test_gate_falla_si_el_nodo_esta_excluido_y_borra_la_salida_anterior(explorat
     r = generar_mapa_final(ConfigFinal(meta, str(ruta_gebco), float(c1["lat"]), float(c1["lon"])))
     publicado = r.salidas["mapa"].parent
     assert publicado.exists()
-    with pytest.raises(ErrorGate, match="2: zona de exclusión"):
+    with pytest.raises(ErrorMapaFinal, match="2: zona de exclusión"):
         generar_mapa_final(ConfigFinal(meta, str(ruta_gebco), LAT0, -75.4))
     assert not publicado.exists()
 
 
 def test_gebco_sin_registrar_es_error(exploratorio, gebco_descargado):
-    with pytest.raises(ErrorGate, match="registrar-gebco"):
+    with pytest.raises(ErrorMapaFinal, match="registrar-gebco"):
         generar_mapa_final(ConfigFinal(str(exploratorio.salidas["metadatos"]), str(gebco_descargado), -15.2, -75.4))
 
 
@@ -305,7 +305,7 @@ def test_gebco_que_no_cubre_es_error(exploratorio, cfg_sintetica, tmp_path):
         {"elevation": (("lat", "lon"), -np.ones((lat.size, lon.size)))}, coords={"lat": lat, "lon": lon}
     ).to_netcdf(p)
     ruta, _ = gebco.registrar(p, Path(cfg_sintetica.directorio_datos), "GEBCO_2025")
-    with pytest.raises(ErrorGate, match="no cubre"):
+    with pytest.raises(ErrorMapaFinal, match="no cubre"):
         generar_mapa_final(ConfigFinal(str(exploratorio.salidas["metadatos"]), str(ruta), -15.2, -75.4))
 
 

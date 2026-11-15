@@ -65,6 +65,30 @@ def test_tormenta_en_el_borde_de_la_serie():
     assert a.random() == b.random()  # el corte no cambia cuántos números consume
 
 
+def test_corrida_no_canonica_no_toca_la_carpeta_canonica(tmp_path):
+    datos = tmp_path / "WAVE-DATA"
+    datos.mkdir()
+    canon = run.ruta_canonica(datos)
+    canon.mkdir(parents=True)
+    (canon / "MANIFEST.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="exige --salida"):
+        run.ejecutar(datos, 1, r=2, solo=["A2"])
+    with pytest.raises(ValueError, match="carpeta canónica"):
+        run.ejecutar(datos, 1, r=2, solo=["A2"], salida=canon)
+    with pytest.raises(ValueError, match="carpeta canónica"):
+        run.ejecutar(datos, 1, solo=["A2"], salida=canon)
+    assert sorted(p.name for p in canon.iterdir()) == ["MANIFEST.json"]  # intacta: no se abrió el staging
+    assert run.comprobar_salida(datos, True, None) == canon
+
+
+def test_la_corrida_canonica_exige_las_21_bandas():
+    assert run.motivos_bandas(21, canonica=True) == []
+    assert run.motivos_bandas(20, canonica=True)
+    assert run.motivos_bandas(3, canonica=False) == []
+    n = sum(3 + (e.tipo == "rl") if e.tipo.startswith("rl") else 1 for e in esc.ESCENARIOS if e.con_banda)
+    assert n == run.N_BANDAS
+
+
 def test_determinismo_con_uno_y_dos_procesos(tmp_path):
     datos = tmp_path / "WAVE-DATA"
     datos.mkdir()
