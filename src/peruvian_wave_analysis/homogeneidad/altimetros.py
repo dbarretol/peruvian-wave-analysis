@@ -303,3 +303,105 @@ def clasificar_placebos(nombres, con_pasos, potencia, alfa: float, minimo: float
         n: ("sin pasos" if n not in con_pasos else "cuenta" if n in cuentan else "no informativo") for n in nombres
     }
     return ClasesPlacebo(clase, pot, cuentan, len(cuentan))
+
+
+# --- Cociente por misión (exploratorio, posterior a ver datos; contrato §20, A1) ---------------
+ASIMILADA_TABLA3 = "asimilada según la tabla 3"
+FUERA_TABLA3 = "fuera del período de la tabla 3"
+NO_ASIMILADA_QUID = "no asimilada según el QUID"
+POR_VERIFICAR = "independencia por verificar"
+
+
+def segmento_quid(
+    mision: str, t: pd.DatetimeIndex, asimiladas: dict, no_asimiladas: Sequence[str], no_verificables: Sequence[str]
+) -> np.ndarray:
+    """Estado de la misión en cada t según el QUID, sin el trato de las no verificables como asimiladas."""
+    if mision in no_verificables:
+        return np.full(len(t), POR_VERIFICAR, dtype=object)
+    if mision in no_asimiladas:
+        return np.full(len(t), NO_ASIMILADA_QUID, dtype=object)
+    if mision in asimiladas:
+        dentro = asimilada_en(mision, t, asimiladas, ())
+        return np.where(dentro, ASIMILADA_TABLA3, FUERA_TABLA3).astype(object)
+    return np.full(len(t), "sin clasificar", dtype=object)
+
+
+def esperados_con_cociente_1(evento: np.ndarray, expuesto: np.ndarray, estrato: np.ndarray) -> float:
+    """Eventos esperados en los pasos con pasada si el cociente fuera 1: Σ n1·b/n0 en los estratos con los dos
+    grupos. Sirve para leer un grupo sin eventos, donde el IC de Greenland y Robins no se puede calcular."""
+    e = np.asarray(evento, bool)
+    x = np.asarray(expuesto, bool)
+    s = np.asarray(estrato, int)
+    ok = s >= 0
+    e, x, s = e[ok], x[ok], s[ok]
+    if s.size == 0:
+        return 0.0
+    k = int(s.max()) + 1
+    b = np.bincount(s, weights=(e & ~x), minlength=k)
+    n1 = np.bincount(s, weights=x, minlength=k)
+    n0 = np.bincount(s, weights=~x, minlength=k)
+    usar = (n1 > 0) & (n0 > 0)
+    return float(np.sum(n1[usar] * b[usar] / n0[usar]))
+
+
+def cocientes_por_mision(
+    evento: np.ndarray,
+    validos: np.ndarray,
+    pasadas: dict[str, np.ndarray],
+    hora: np.ndarray,
+    nivel: np.ndarray,
+    t: pd.DatetimeIndex,
+    asimiladas: dict,
+    no_asimiladas: Sequence[str],
+    no_verificables: Sequence[str],
+    nivel_conf: float = 0.95,
+) -> pd.DataFrame:
+    """Cociente MH de cada misión, por segmento del QUID y por año (contrato §20, A1).
+
+    Expuestos: pasos con pasada **solo de esa misión**; no expuestos: pasos **sin pasada de ninguna misión**. Se
+    limita a los pasos válidos entre la primera y la última pasada de la misión. Estratos: hora × nivel de Hs(t−1).
+    Exploratorio: conteos, cociente e IC, sin p-valor."""
+    nombres = sorted(pasadas)
+    if not nombres:
+        return pd.DataFrame()
+    M = np.column_stack([np.asarray(pasadas[m], bool) for m in nombres])
+    cuantas = M.sum(axis=1)
+    ninguna = cuantas == 0
+    validos = np.asarray(validos, bool)
+    anio = np.asarray(t.year)
+    filas = []
+    for j, m in enumerate(nombres):
+        solo = M[:, j] & (cuantas == 1)
+        con = np.flatnonzero(M[:, j])
+        if con.size == 0:
+            continue
+        activa = np.zeros(len(t), bool)
+        activa[con[0] : con[-1] + 1] = True
+        base = validos & activa & (solo | ninguna)
+        seg = segmento_quid(m, t, asimiladas, no_asimiladas, no_verificables)
+        grupos = [("segmento", s, seg == s) for s in sorted(set(seg[base & solo]))]
+        grupos += [("anio", str(y), anio == y) for y in sorted(set(anio[base & solo].tolist()))]
+        for agregado, clave, g in grupos:
+            v = base & g
+            est = codigos_estrato(hora, nivel, validos=v)
+            r = mantel_haenszel(evento, solo, est, nivel_conf)
+            ix = np.flatnonzero(v & solo)
+            filas.append(
+                {
+                    "mision": m,
+                    "agregado": agregado,
+                    "clave": clave,
+                    "desde": str(t[ix[0]]) if ix.size else "",
+                    "hasta": str(t[ix[-1]]) if ix.size else "",
+                    "pasos_con": r.pasos_con,
+                    "eventos_con": r.eventos_con,
+                    "pasos_sin": r.pasos_sin,
+                    "eventos_sin": r.eventos_sin,
+                    "estratos": r.estratos,
+                    "cociente": r.cociente,
+                    "ic_lo": r.lo,
+                    "ic_hi": r.hi,
+                    "eventos_esperados_con_cociente_1": esperados_con_cociente_1(evento, solo, est),
+                }
+            )
+    return pd.DataFrame(filas)

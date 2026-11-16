@@ -981,13 +981,38 @@ def homogeneidad(
         orden.registrar("figuras")
 
         # --- 4. Decisión (§3.7) --------------------------------------------------------------------
-        resumen = decision(res_A, res_B, res_C, res_D, res_alt)
+        geo = locales[locales["mision"] == "GEOSAT"]
+        obs_T0 = (
+            f"GEOSAT ({geo['inicio'].min().date()} a {geo['fin'].max().date()}, datos locales)"
+            if len(geo)
+            else "GEOSAT (sin datos locales)"
+        )
+        resumen = decision(res_A, res_B, res_C, res_D, res_alt, obs_T0)
         json_estricto.escribir(
             st / "pruebas_cambio.json", {"A": res_A, "B": res_B, "C": res_C, "D": res_D, "previo": previo}
         )
         orden.registrar("pruebas_cambio.json")
         json_estricto.escribir(st / "prueba_altimetros.json", res_alt)
         orden.registrar("prueba_altimetros.json")
+
+        # Añadidos posteriores a ver los resultados observados (§20): exploratorios
+        orden.exigir_potencia()
+        validos_m = ok_p & ~_en(alt["t"], *C.MES_TRANSICION) & np.asarray(alt["t"] <= pd.Timestamp(ultimo))
+        pasadas_m = {c.split(":", 1)[1]: expo[c].to_numpy(bool) for c in expo.columns if c.startswith("c:")}
+        por_mision = A.cocientes_por_mision(
+            ev_p,
+            validos_m,
+            pasadas_m,
+            alt["hora"],
+            alt["nivel"],
+            alt["t"],
+            C.ASIMILADAS,
+            C.NO_ASIMILADAS,
+            C.NO_VERIFICABLES,
+        )
+        _csv(por_mision, st / "altimetros_por_mision_anio.csv")
+        orden.registrar("altimetros_por_mision_anio.csv")
+        resumen["posterior_a_ver_datos"] = posteriores(res_A, res_B, res_C, res_D, res_alt, an_all, por_mision)
         json_estricto.escribir(st / "resumen_f04.json", resumen)
         orden.registrar("resumen_f04.json")
 
@@ -1009,7 +1034,7 @@ def homogeneidad(
         )
 
 
-def decision(res_A, res_B, res_C, res_D, res_alt) -> dict:
+def decision(res_A, res_B, res_C, res_D, res_alt, observaciones_T0: str = "GEOSAT (datos locales)") -> dict:
     """Escenarios y lo que heredan la F5, la F8 y la F9 (§3.7)."""
     a1, a2 = res_A["C1"], res_A["C2"]
     inicio = C.TRAMOS[0][1]
@@ -1095,7 +1120,7 @@ def decision(res_A, res_B, res_C, res_D, res_alt) -> dict:
             "C1": {
                 "pregunta": "¿El producto se aleja de las observaciones de forma distinta en T0 y en el tramo "
                 "asimilado, en la cola?",
-                "observaciones": {"T0": "GEOSAT (1985-03-31 a 1989-08-29)", "asimilado": ["HY-2", "HY-2B"]},
+                "observaciones": {"T0": observaciones_T0, "asimilado": ["HY-2", "HY-2B"]},
                 "activa": a1["cambia_periodo"],
             },
             "C2": {
@@ -1113,6 +1138,187 @@ def decision(res_A, res_B, res_C, res_D, res_alt) -> dict:
         "a_la_F9": {"sensibilidad_sin_saltos_coincidentes": res_alt["resultado"] == C.SENAL},
         "G8": "pendiente de la aceptación del usuario",
     }
+
+
+def posteriores(res_A, res_B, res_C, res_D, res_alt, anuales: pd.DataFrame, por_mision: pd.DataFrame) -> dict:
+    """Lecturas exploratorias decididas después de ver los resultados observados (contrato §20, A2). No cambian
+    ninguna prueba ni la decisión: se publican aparte, rotuladas."""
+    out: dict = {"rotulo": C.ROTULO_POSTERIOR}
+
+    # Placebos: cuántos tienen un IC del 95 % que excluye el 1, además de la etiqueta formal
+    pr_ = res_alt["principal"]
+    tasas = {"principal": pr_["eventos_con"] / pr_["pasos_con"] if pr_["pasos_con"] else None}
+    con_pasos, fallan = [], []
+    for pl in res_alt["placebos"]:
+        mh = pl["mh"]
+        if mh["pasos_con"] == 0:
+            continue
+        con_pasos.append(pl["nombre"])
+        tasas[pl["nombre"]] = mh["eventos_con"] / mh["pasos_con"]
+        lo, hi = mh["lo"], mh["hi"]
+        if lo is not None and hi is not None and np.isfinite(lo) and (lo > 1 or hi < 1):
+            fallan.append(pl["nombre"])
+    out["placebos"] = {
+        "etiqueta_formal": res_alt["control_de_placebo"],
+        "con_ic_95_que_excluye_1": fallan,
+        "con_pasos": len(con_pasos),
+        "lectura": f"{len(fallan)} de {len(con_pasos)} placebos con pasos tienen un IC del 95 % que excluye el 1. "
+        "La etiqueta formal no cambia: ninguno alcanza la potencia que pide la regla para contar.",
+        "tasa_de_salto_con_pasada": tasas,
+    }
+
+    # Controles de la tabla por misión: segmentos sin asimilación anteriores a 1993
+    controles = []
+    if len(por_mision):
+        seg = por_mision[
+            (por_mision["agregado"] == "segmento")
+            & por_mision["clave"].isin([A.FUERA_TABLA3, A.NO_ASIMILADA_QUID])
+            & (por_mision["hasta"] != "")
+        ]
+        seg = seg[pd.to_datetime(seg["hasta"]) < pd.Timestamp("1993-01-01")]
+        for _, f in seg.iterrows():
+            esp = float(f["eventos_esperados_con_cociente_1"])
+            if np.isfinite(f["ic_lo"]):
+                ok, criterio = bool(f["ic_lo"] <= 1 <= f["ic_hi"]), "IC del 95 % de Greenland y Robins"
+            elif f["eventos_con"] == 0:
+                # sin eventos con pasada: P(0 eventos | cociente 1) = exp(−esperados), Poisson; bilateral al 95 %
+                ok = bool(np.exp(-esp) >= 0.025)
+                criterio = "sin eventos con pasada: P(0 | cociente 1) = exp(−esperados) ≥ 0.025 (Poisson)"
+            else:
+                ok, criterio = None, "IC no calculable"
+            controles.append(
+                {
+                    "mision": f["mision"],
+                    "segmento": f["clave"],
+                    "desde": f["desde"],
+                    "hasta": f["hasta"],
+                    "cociente": float(f["cociente"]),
+                    "ic": [float(f["ic_lo"]), float(f["ic_hi"])],
+                    "eventos_con": int(f["eventos_con"]),
+                    "eventos_esperados_con_cociente_1": esp,
+                    "compatible_con_1": ok,
+                    "criterio": criterio,
+                }
+            )
+    if not controles:
+        lect_ctrl = "sin controles"
+    elif all(c["compatible_con_1"] is not False for c in controles):
+        esp_tot = sum(c["eventos_esperados_con_cociente_1"] for c in controles)
+        lect_ctrl = (
+            "los controles anteriores a la asimilación dan un cociente compatible con 1, pero son débiles: "
+            f"{esp_tot:.1f} eventos esperados con pasada entre todos si el cociente fuera 1"
+        )
+    else:
+        lect_ctrl = (
+            "algún control anterior a la asimilación no es compatible con 1: la tabla por misión no sirve para leer "
+            "GFO ni Saral"
+        )
+    out["controles_por_mision"] = {
+        "filas": controles,
+        "lectura": lect_ctrl,
+        "archivo": "altimetros_por_mision_anio.csv",
+    }
+
+    # A la F5: misiones por verificar
+    sens = res_alt["sensibilidades"]
+    a, b = sens.get("despues_de_2016_03"), sens.get("despues_de_2016_03_sin_no_verificables")
+    if a and b:
+        baja = bool(b["cociente"] < a["cociente"])
+        out["a_la_F5"] = {
+            "misiones_por_verificar": list(C.NO_VERIFICABLES),
+            "cociente_despues_de_2016_03": a["cociente"],
+            "cociente_tratandolas_como_no_asimiladas": b["cociente"],
+            "advertencia": "El cociente baja al tratarlas como no asimiladas: apunta a que están asimiladas. La F5 "
+            "no las usa como independientes sin verificarlo."
+            if baja
+            else "El cociente no baja al tratarlas como no asimiladas.",
+        }
+
+    # A la F8: hipótesis rotuladas
+    confirmatorias = [pd.Timestamp(C.TRAMOS[1][1]).year, pd.Timestamp(C.INICIO_SAR).year]
+    v = C.VENTANA_COINCIDE_ANIOS
+    tabla3 = []
+    for m, (ini, fin) in C.ASIMILADAS.items():
+        tabla3.append((pd.Timestamp(ini).year, f"{m}: inicio en la tabla 3 ({ini})"))
+        if fin is not None:
+            tabla3.append((pd.Timestamp(fin).year, f"{m}: fin en la tabla 3 ({fin})"))
+    hip = []
+    for k, r in res_C.items():
+        anio = r["primer_anio_despues"]
+        cerca = [txt for y, txt in tabla3 if abs(y - anio) <= v]
+        if r["coincide"] and all(abs(anio - c) > v for c in confirmatorias):
+            hip.append(
+                {
+                    "serie": k,
+                    "primer_anio_despues": anio,
+                    "motivo": "coincide con la cronología, pero no con un corte confirmatorio",
+                    "probabilidad_coincidir_por_azar": r["probabilidad_coincidir_por_azar"],
+                    "fechas_de_la_tabla_3_a_1_anio": cerca,
+                }
+            )
+        elif not r["coincide"] and cerca:
+            hip.append(
+                {
+                    "serie": k,
+                    "primer_anio_despues": anio,
+                    "motivo": "no coincide con la cronología, pero sí con fechas de misiones de la tabla 3, que la "
+                    "cronología de coincidencias no incluye",
+                    "fechas_de_la_tabla_3_a_1_anio": cerca,
+                }
+            )
+    completos = anuales[anuales["meses"] == 12]
+
+    def media(a_, b_):
+        g = completos.loc[a_:b_, "hs_p99"]
+        return float(g.mean()) if len(g) else None
+
+    fa, da = C.ANIOS_FINALES_T1_POSTERIOR, C.ANIOS_DESPUES_POSTERIOR
+    pb = res_B["principal"]
+    hip.append(
+        {
+            "hipotesis": "deriva al alza en T1 y caída en 2016-03 respecto de los últimos años de T1",
+            "familia_B": {
+                "resultado": res_B["resultado"],
+                "pendiente_relativa_por_anio_P99": pb["P99"]["pendiente_relativa_por_anio"],
+                "pendiente_relativa_por_anio_maximo": pb["maximo_anual"]["pendiente_relativa_por_anio"],
+            },
+            "P99_anual_medio_m": {
+                f"{fa[0]}-{fa[1]}": media(*fa),
+                f"{da[0]}-{da[1]}": media(*da),
+                f"T1 completo ({C.ANIOS_T1[0]}-{C.ANIOS_T1[1]})": media(*C.ANIOS_T1),
+            },
+            "nota": "los años finales de T1 se eligieron al ver los datos",
+        }
+    )
+    out["a_la_F8"] = hip
+
+    # Lectura de la potencia
+    pot = {
+        "A_C1": res_A["C1"]["potencia"]["potencia_delta_rel"],
+        "A_C2": res_A["C2"]["potencia"]["potencia_delta_rel"],
+        "B": res_B["potencia"]["potencia_relevante"],
+        "D": res_D["potencia"]["potencia_relevante"],
+    }
+    bajas = [k for k, p in pot.items() if p is not None and p < 0.5]
+    out["lectura_de_potencia"] = {
+        "potencia_al_efecto_relevante": pot,
+        "lectura": (
+            f"Potencia al efecto relevante por debajo del 50 % en {', '.join(bajas)}: esas pruebas no podían "
+            "descartar nada. Los escenarios y variantes que dependen de un «no concluyente» existen por falta de "
+            "potencia, no por evidencia de cambio."
+        )
+        if bajas
+        else "Ninguna prueba queda por debajo del 50 % de potencia al efecto relevante.",
+    }
+
+    # Recomendación para el contrato de la F9
+    if fallan:
+        out["a_la_F9"] = (
+            "Recomendación para el contrato de la F9: en la sensibilidad «sin saltos coincidentes», contar toda "
+            f"pasada salvo las de misiones no asimiladas según el QUID ({', '.join(C.NO_ASIMILADAS)}), porque "
+            f"fallan placebos definidos por fecha ({', '.join(fallan)}). La definición la fija el contrato de la F9."
+        )
+    return out
 
 
 def gate_f04(crono, cob, res_A, res_B, res_D, res_alt, resumen) -> list[str]:

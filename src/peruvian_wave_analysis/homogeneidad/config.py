@@ -135,6 +135,14 @@ VENTANA_COINCIDE_ANIOS = 1
 # Familia D (§3.5)
 EFECTO_TP_S = 0.3
 
+# Añadidos posteriores a ver los resultados observados (§20): exploratorios, sin p-valor
+ANIOS_FINALES_T1_POSTERIOR = (2010, 2015)  # últimos seis años de T1, elegidos al ver los datos (§20, A2)
+ANIOS_DESPUES_POSTERIOR = (2016, 2025)  # años completos después de 2016-03
+ROTULO_POSTERIOR = (
+    "Decidido después de ver los resultados observados (contrato §20). Exploratorio, sin p-valor: no cambia ninguna "
+    "prueba, clase de placebo ni la decisión de escenarios."
+)
+
 # Resultados (ADR-0005)
 ESTABLECIDO, DESCARTADO, NO_CONCLUYENTE = "establecido", "descartado", "no concluyente"
 SIN_RAIZ = "sin raíz"
