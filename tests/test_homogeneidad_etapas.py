@@ -149,3 +149,7 @@ def test_escalon_en_1993_queda_establecido_sin_atribuir(tmp_path):
         "figuras/exposicion_altimetros.png",
     ):
         assert (salida / f).is_file()
+    # G7: dos corridas idénticas byte a byte
+    salidas = dict(man["salidas"])
+    run.homogeneidad(raiz, NOMBRE, procesos_n=2, B=99, replicas=20, multiplos=(1.0,), B_ic=19)
+    assert etapa.exigir_publicada(salida)["salidas"] == salidas
