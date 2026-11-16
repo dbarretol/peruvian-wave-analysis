@@ -90,7 +90,7 @@ Requiere el mapa definitivo (`ficha_nodo.json`), el gate publicado de la serie y
 ### 6. Estudio de verificación de la biblioteca de extremos
 
 ```bash
-uv run verificacion-f2 --procesos 2   # ≈ 2 h 10 min con 2 procesos (medido); el resultado no depende del número de procesos
+uv run verificacion-f2 --procesos 2   # ≈ 2 h con 2 procesos (medido: 1 h 56 min); el resultado no depende del número de procesos
 ```
 
 Simula escenarios de respuesta conocida y comprueba la cobertura de los intervalos por perfil y el tamaño de la prueba de Poisson contra bandas fijadas antes de correr. Si una banda falla, repite ese escenario una vez con 1600 réplicas.
