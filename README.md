@@ -11,6 +11,10 @@ Fase 2 (biblioteca común) completa:
 - `extremos/`: ajuste GPD, niveles de retorno, IC por perfil de verosimilitud, estratos, declustering, tasas, prueba de Poisson por reescalado de tiempo y bootstrap por años.
 - `verificacion-f2`: estudio de verificación por simulación de todo lo anterior.
 
+Fase 3 (datos: ingesta, control de calidad e integridad) en cierre, en dos etapas:
+- `datos-candidatos`: ingesta contra el gate de la serie, particiones ausentes, centinelas y acumulaciones, período saturado, límites físicos, peralte, coherencia, calibración de k con series sintéticas, detector bilateral de picos, dipolo, los 20 mayores máximos independientes y una figura por máximo y por candidato.
+- `datos-serie`: aplica las resoluciones versionadas en `config/f03_resoluciones.yaml` y publica la serie del nodo con una columna por regla y `valido`, la cobertura, las marcas por año y por regla, Tp largo con la razón de asomeramiento y la lista de registros dudosos para la sensibilidad de los niveles de retorno.
+
 Primera herramienta: **mapa de selección de sitio**, en dos pasos.
 
 1. **Mapa exploratorio** (`mapa-sitio`): dada una coordenada de referencia, descarga la batimetría (GMRT), la malla de nodos de WAVERYS y las zonas protegidas y de hidrocarburos, y dibuja las isóbatas elegidas (por defecto 200, 100 y 50 m), la malla con el recuadro de cada celda, las zonas de exclusión y de colisión de usos, y hasta 3 nodos candidatos.
@@ -95,6 +99,15 @@ uv run verificacion-f2 --procesos 2   # ≈ 2 h con 2 procesos (medido: 1 h 56 m
 
 Simula escenarios de respuesta conocida y comprueba la cobertura de los intervalos por perfil y el tamaño de la prueba de Poisson contra bandas fijadas antes de correr. Si una banda falla, repite ese escenario una vez con 1600 réplicas.
 
+### 7. Datos: control de calidad de la serie del nodo
+
+```bash
+uv run datos-candidatos   # ≈ 6 min: calibración de k con 10 000 años sintéticos por generador
+uv run datos-serie        # segundos; exige una resolución por candidato manual y por máximo
+```
+
+`datos-candidatos` no exige resoluciones. Se detiene con «revisión requerida» si se supera un tope: 47 descartes automáticos, 5 en un año, 100 candidatos de revisión en la cola o 100 registros de una marca que exige resolución. `datos-serie` falla sin tocar la salida de la primera si falta una resolución, si una entrada no corresponde a un candidato ni a un máximo, si dos entradas se contradicen o si se descarta uno de los 20 máximos sin `confirmado_por_usuario`. Un descarte afecta a todas las variables del registro y a toda la excursión del candidato. La biblioteca carga la serie con `datos.carga.cargar_serie`, que aplica `valido`.
+
 ### Cuaderno
 
 `notebooks/01_mapa_seleccion_sitio.ipynb`: cambiar la celda de parámetros y ejecutar todo. Incluye el paso al mapa definitivo.
@@ -161,6 +174,8 @@ En `WAVE_DATA_DIR`:
 - `processed/F01-sitio-y-fuentes/serie-waverys/<nombre>/`: `serie_gate.json` (gate de la serie) y `MANIFEST.json`.
 - `processed/F01-sitio-y-fuentes/ficha-sitio/<nombre>/`: `ficha_sitio.md`, `exposicion.csv` (por sector) y `exposicion_rayos.csv` (por rayo), `obstaculos.csv`, `observaciones.csv` y `cobertura_observaciones.csv` (por misión y por régimen), `observaciones_sensibilidad_periodo.csv` y `cobertura_sensibilidad_periodo.csv` (sensibilidad rotulada), `cronologia_waverys.csv`, `misiones_asimiladas_waverys.csv`, `resumen_ficha.json` (con el gate de la fase) y `MANIFEST.json`.
 - `processed/F02-biblioteca-comun/verificacion/`: `resumen.json` (bandas y métricas por escenario), `replicas/<escenario>.csv`, `bandas.png` y `MANIFEST.json`.
+- `processed/F03-datos/candidatos/<nombre>/`: `serie_decodificada.parquet`, `hs_celdas.parquet`, `marcas.parquet`, `candidatos.csv` (con excursión, salto y vecinas usadas), `excursiones_k_rev.csv` (todas las excursiones del umbral de revisión, con sensibilidades de vecinas), `maximos.csv`, `figuras/` (máximos, candidatos e histogramas de acumulaciones), `resumen_candidatos.json` (escala, k, falsas alarmas sintéticas con IC, potencia, topes, particiones ausentes, períodos bajo resolución) y `MANIFEST.json`.
+- `processed/F03-datos/serie/<nombre>/`: `serie_nodo.parquet`, `vecinas_hs.parquet`, `cobertura.csv` (Hs y Tp, por año y mes), `cobertura_anual.csv`, `cobertura_mensual.csv`, `marcas_por_anio.csv`, `marcas_por_regla.csv`, `periodos_largos.json`, `resumen_f03.json` (con la lista de sensibilidad y sus dos variantes) y `MANIFEST.json`.
 
 Cada salida publicada lleva un `MANIFEST.json` sin marcas de tiempo: insumos con su ruta relativa a `WAVE_DATA_DIR` y su hash, salidas con su hash, huella del código, semilla y criterios del gate. Un gate fallido borra la salida anterior y deja solo `GATE_FAILED.json`.
 
