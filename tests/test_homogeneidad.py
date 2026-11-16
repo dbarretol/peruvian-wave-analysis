@@ -13,6 +13,7 @@ from peruvian_wave_analysis.homogeneidad import permutacion as P
 from peruvian_wave_analysis.homogeneidad import relevante as R
 from peruvian_wave_analysis.homogeneidad import run
 from peruvian_wave_analysis.homogeneidad import tendencia as T
+from peruvian_wave_analysis.homogeneidad.avance import Avance
 from peruvian_wave_analysis.homogeneidad.cuantiles import (
     HistAnual,
     TablaCola,
@@ -468,3 +469,30 @@ def test_orden_exige_potencia_antes_de_los_resultados(tmp_path):
         o.exigir_potencia()
     o.registrar("potencia.csv")
     o.exigir_potencia()
+
+
+# --- Avance guardado ------------------------------------------------------------------------------
+
+
+def test_avance_guarda_cada_lote_y_retoma_con_el_mismo_resultado(tmp_path):
+    """Una simulación interrumpida retoma desde los lotes guardados y da exactamente lo mismo."""
+    c = contraste_sintetico(np.random.default_rng(30))
+    mensajes = []
+    sin = F.simular_A(c, "anios", 49, 100, 0.0, 1, False, 0.3, ("prueba", "av"), lote=25)
+    av = Avance(tmp_path, "clave-1", mensajes.append)
+    con = F.simular_A(c, "anios", 49, 100, 0.0, 1, False, 0.3, ("prueba", "av"), lote=25, avance=av)
+    assert np.array_equal(sin, con) and av.calculados == 4
+    assert len(list((tmp_path / "clave-1").glob("*.npy"))) == 4
+    for f in sorted((tmp_path / "clave-1").glob("*.npy"))[:2]:  # «corte» que perdió dos lotes
+        f.unlink()
+    av2 = Avance(tmp_path, "clave-1", mensajes.append)
+    otra = F.simular_A(c, "anios", 49, 100, 0.0, 1, False, 0.3, ("prueba", "av"), lote=25, avance=av2)
+    assert np.array_equal(sin, otra) and av2.reutilizados == 2 and av2.calculados == 2
+    assert any("retoma" in m for m in mensajes) and any("réplicas/h" in m for m in mensajes)
+    # otro parámetro u otra clave (código o insumos distintos): no se reutiliza nada
+    av3 = Avance(tmp_path, "clave-2", mensajes.append)
+    F.simular_A(c, "anios", 49, 100, 0.0, 1, False, 0.3, ("prueba", "av"), lote=25, avance=av3)
+    assert av3.reutilizados == 0
+    av4 = Avance(tmp_path, "clave-1", mensajes.append)
+    F.simular_A(c, "anios", 49, 100, 0.01, 1, False, 0.3, ("prueba", "av"), lote=25, avance=av4)
+    assert av4.reutilizados == 0
