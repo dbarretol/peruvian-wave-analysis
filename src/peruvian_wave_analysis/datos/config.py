@@ -32,12 +32,14 @@ PARTICIONES = {  # partición → (altura, período medio, dirección)
 }
 
 # --- Centinelas, particiones ausentes y saturación (§3.2) --------------------------------------
-FIRMA_FRACCION_MIN = 0.99  # un par (período, dirección) es la firma de ausencia si lo comparte ≥ 99 % (F03-S-05)
+# Ausencia (v7, §15): período 0 con cualquier dirección. Sin parámetros: la regla del 99 % de la v6 se retiró.
+TOPE_MARCA = 100  # registros por marca que exige resolución; más detiene la etapa (v7, §15)
 ACUM_FACTOR = 20.0  # frecuencia ≥ 20 × mediana de los cuantos vecinos (§8 P3)
 ACUM_VECINOS = 10  # cuantos a cada lado
 ACUM_MIN = 50  # registros mínimos para una acumulación
 DISCRETO_MAX_DISTINTOS = 60  # VTPK es discreto si tiene ≤ 60 valores distintos (F03-S-06)
 F_MIN_HZ = 0.035  # primera frecuencia de MFWAM (QUID v1.5, §I y §II)
+F_MAX_HZ = 0.58  # última frecuencia de MFWAM (QUID v1.5, §II); solo para publicar períodos bajo resolución
 T_SATURACION_DISCRETO = 27.3  # s; punto medio entre 25.97 y 28.57 s (F03-S-16)
 TOL_SATURACION_CONTINUO = 0.05  # s; saturado si T ≥ 1/f_min − 0.05 s
 

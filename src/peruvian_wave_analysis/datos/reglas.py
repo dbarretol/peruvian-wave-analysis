@@ -31,54 +31,87 @@ def normalizar_direcciones(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @dataclass
-class Firma:
-    particion: str
-    aplica: bool  # False si la partición no tiene ningún Hs_i = 0
-    periodo: float | None = None
-    direccion: float | None = None
-    fraccion: float | None = None  # fracción de los Hs_i = 0 con ese par
-    n_ceros: int = 0
+class ResumenAusencia:
+    """Conteos de §3.2 por partición (v7): se publican; ninguno detiene la etapa."""
 
-    @property
-    def dominante(self) -> bool:
-        return (not self.aplica) or (self.fraccion is not None and self.fraccion >= C.FIRMA_FRACCION_MIN)
+    particion: str
+    ausentes: int  # período 0, con cualquier dirección
+    incoherencias: int  # período 0 con Hs_i > 0: exige resolución
+    bajo_cuanto: int  # Hs_i = 0 con período > 0: marca informativa
+    direcciones_distintas_ausentes: int  # valores distintos de dirección (a 0.01°) entre los ausentes
+    fraccion_ausentes_180: float | None  # fracción de los ausentes con dirección 180° ± 0.01°
 
 
 @dataclass
 class ResultadoAusentes:
     serie: pd.DataFrame  # período y dirección de las particiones ausentes, a NaN
-    marcas: pd.DataFrame  # columnas particion_ausente_<p>, incoherencia_ausente_<p>, hs_total_cero
-    firmas: dict[str, Firma] = field(default_factory=dict)
-
-    @property
-    def revision_requerida(self) -> bool:
-        return any(not f.dominante for f in self.firmas.values())
+    marcas: pd.DataFrame  # particion_ausente_<p>, incoherencia_ausente_<p>, bajo_cuanto_<p>, hs_total_cero
+    resumen: dict[str, ResumenAusencia] = field(default_factory=dict)
 
 
 def particiones_ausentes(df: pd.DataFrame) -> ResultadoAusentes:
-    """Hs_i = 0 → período y dirección ausentes, sin descarte; firma por partición con regla de respaldo (F03-S-05)."""
+    """Firma de ausencia por partición (contrato v7, §3.2 y §15; regla posterior a ver las particiones).
+
+    - Período 0, con cualquier dirección → partición ausente: período y dirección a NaN, sin descarte. La altura se
+      conserva.
+    - Período 0 con Hs_i > 0 → además, incoherencia que exige resolución.
+    - Hs_i = 0 con período > 0 → partición por debajo de un cuanto: marca informativa; período y dirección se
+      conservan, porque son salida real del modelo.
+    """
     out = df.copy()
     marcas = pd.DataFrame(index=df.index)
-    firmas: dict[str, Firma] = {}
+    resumen: dict[str, ResumenAusencia] = {}
     for p, (h, t, d) in C.PARTICIONES.items():
-        ceros = df[h] == 0.0
-        n = int(ceros.sum())
-        if n == 0:
-            firmas[p] = Firma(p, aplica=False)
-            marcas[f"particion_ausente_{p}"] = False
-            marcas[f"incoherencia_ausente_{p}"] = False
-            continue
-        pares = pd.Series(list(zip(df.loc[ceros, t].round(2), df.loc[ceros, d].round(2), strict=True)))
-        conteo = pares.value_counts()
-        (tf, df_), cnt = conteo.index[0], int(conteo.iloc[0])
-        firma = Firma(p, True, float(tf), float(df_), cnt / n, n)
-        firmas[p] = firma
-        con_firma = ceros & np.isclose(df[t], tf, atol=0.005) & np.isclose(df[d], df_, atol=0.005)
-        marcas[f"particion_ausente_{p}"] = con_firma
-        marcas[f"incoherencia_ausente_{p}"] = ceros & ~con_firma
-        out.loc[ceros, [t, d]] = np.nan  # sin dato de período ni dirección, con o sin firma
+        ausente = df[t] == 0.0
+        incoherente = ausente & (df[h] > 0.0)
+        bajo = (df[h] == 0.0) & (df[t] > 0.0)
+        marcas[f"particion_ausente_{p}"] = ausente
+        marcas[f"incoherencia_ausente_{p}"] = incoherente
+        marcas[f"bajo_cuanto_{p}"] = bajo
+        dirs = df.loc[ausente, d]
+        resumen[p] = ResumenAusencia(
+            p,
+            int(ausente.sum()),
+            int(incoherente.sum()),
+            int(bajo.sum()),
+            int(dirs.round(2).nunique()),
+            float(np.isclose(dirs, 180.0, rtol=0, atol=0.01).mean()) if len(dirs) else None,
+        )
+        out.loc[ausente, [t, d]] = np.nan  # sin dato de período ni dirección
     marcas["hs_total_cero"] = df["VHM0"] == 0.0
-    return ResultadoAusentes(out, marcas, firmas)
+    return ResultadoAusentes(out, marcas, resumen)
+
+
+def periodos_bajo_resolucion(df: pd.DataFrame) -> dict[str, dict]:
+    """Períodos medios de partición por debajo de 1/f_max (dato del producto, sin interpretar; v7, §15).
+
+    Por partición: registros con 0 < T < 1/f_max y con 0 < T ≤ 1.5 s, cuantiles de T y de Hs_i en ese grupo, y los
+    valores de T más frecuentes.
+    """
+    t_res = 1.0 / C.F_MAX_HZ
+    out = {}
+    for p, (h, t, _) in C.PARTICIONES.items():
+        T, H = df[t], df[h]
+        m = (T > 0) & (T < t_res)
+        q = [0.0, 0.5, 0.95, 1.0]
+        out[p] = {
+            "t_resolucion_s": t_res,
+            "n_bajo_resolucion": int(m.sum()),
+            "n_hasta_1_5_s": int(((T > 0) & (T <= 1.5)).sum()),
+            "cuantiles_t_s": {str(x): float(T[m].quantile(x)) for x in q} if m.any() else None,
+            "cuantiles_hs_m": {str(x): float(H[m].quantile(x)) for x in q} if m.any() else None,
+            "valores_t_mas_frecuentes": {f"{k:.2f}": int(v) for k, v in T[m].round(2).value_counts().head(10).items()},
+        }
+    return out
+
+
+def marcas_sobre_tope(conteos: dict[str, int]) -> list[str]:
+    """Motivos de «revisión requerida» de las marcas que exigen resolución con más de TOPE_MARCA registros (v7)."""
+    return [
+        f"{n} registros con la marca {regla} > {C.TOPE_MARCA}"
+        for regla, n in sorted(conteos.items())
+        if n > C.TOPE_MARCA
+    ]
 
 
 # --- §3.2: acumulaciones, discreción y saturación ----------------------------------------------

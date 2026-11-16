@@ -1,7 +1,7 @@
 """Etapas publicadas de la F3: ``datos-candidatos`` y ``datos-serie`` (contrato de la F3, §2).
 
 1. ``datos-candidatos``: ingesta, reglas, calibración de k, detector, dipolo, máximos y figuras. No exige
-   resoluciones; su gate comprueba la ingesta, que hay firma de ausencia y que los topes de §3.4 no se superan.
+   resoluciones; su gate comprueba la ingesta y que no se superan los topes de §3.4 ni el de marcas con resolución (v7).
 2. ``datos-serie``: lee la salida de la primera y el YAML de resoluciones, aplica los descartes y publica la serie.
    Su gate exige todas las resoluciones (G4, G5). Si falla, no toca la salida de la primera.
 
@@ -119,11 +119,6 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
         aus = reglas.particiones_ausentes(df0)
         df = aus.serie
         motivos: list[str] = []
-        if aus.revision_requerida:
-            motivos.append(
-                "revisión requerida: sin firma dominante de partición ausente "
-                + str({p: f.fraccion for p, f in aus.firmas.items() if not f.dominante})
-            )
         hs = df["VHM0"].to_numpy()
         tm02 = df["VTM02"].to_numpy()
         s = D.escala_s(hs)
@@ -168,10 +163,14 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
         marcas["peralte"] = reglas.peralte_excedido(df)
         for p in C.PARTICIONES:
             for i in np.flatnonzero(marcas[f"incoherencia_ausente_{p}"].to_numpy()).tolist():
-                agregar(i, f"incoherencia_ausente_{p}", D.MANUAL, "sin_firma_de_ausencia")
+                agregar(i, f"incoherencia_ausente_{p}", D.MANUAL, "periodo_cero_con_altura")
         for regla in REGLAS_CON_RESOLUCION:
             for i in np.flatnonzero(marcas[regla].fillna(False).to_numpy()).tolist():
                 agregar(i, regla, D.MANUAL, regla)
+        # tope por marca que exige resolución (v7, §15)
+        marcas_resolucion = [f"incoherencia_ausente_{p}" for p in C.PARTICIONES] + list(REGLAS_CON_RESOLUCION)
+        conteo_marcas = {r: int(marcas[r].fillna(False).sum()) for r in marcas_resolucion}
+        motivos += [f"revisión requerida: {m}" for m in reglas.marcas_sobre_tope(conteo_marcas)]
         cand = pd.DataFrame(filas, columns=["tiempo", "regla", "decision", "motivo", "hs"])
         cand = cand.sort_values(["tiempo", "regla"]).reset_index(drop=True)
         auto = pd.DatetimeIndex(cand.loc[cand["decision"] == D.DESCARTAR, "tiempo"].unique())
@@ -216,16 +215,18 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
             "carga_tormentas": {f"phi={p},nu={n}": c for (p, n), c in cal.carga_tormentas.items()} if cal else None,
             "rejilla_k": K.REJILLA_K.tolist(),
             "potencia_m": {"k_desc": cal.k_desc * s, "k_rev": cal.k_rev * s} if cal else None,
-            "firmas_ausencia": {
+            "ausencia": {
                 p: {
-                    "aplica": f.aplica,
-                    "periodo": f.periodo,
-                    "direccion": f.direccion,
-                    "fraccion": f.fraccion,
-                    "n": f.n_ceros,
+                    "ausentes": r.ausentes,
+                    "incoherencias": r.incoherencias,
+                    "bajo_cuanto": r.bajo_cuanto,
+                    "direcciones_distintas_ausentes": r.direcciones_distintas_ausentes,
+                    "fraccion_ausentes_180": r.fraccion_ausentes_180,
                 }
-                for p, f in aus.firmas.items()
+                for p, r in aus.resumen.items()
             },
+            "periodos_bajo_resolucion": reglas.periodos_bajo_resolucion(df0),
+            "marcas_con_resolucion": {"conteos": conteo_marcas, "tope": C.TOPE_MARCA},
             "fraccion_particion_ausente": {
                 p: float(aus.marcas[f"particion_ausente_{p}"].mean()) for p in C.PARTICIONES
             },
