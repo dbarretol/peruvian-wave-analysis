@@ -138,6 +138,16 @@ def test_escalon_en_1993_queda_establecido_sin_atribuir(tmp_path):
     assert any(f.get("origen") == "C1" for f in r["a_la_F8"]["fechas_de_cambio"])
     pc = json_estricto.leer(salida / "pruebas_cambio.json")
     assert pc["A"]["C1"]["cociente"][2] > 1.2
+    # §20: añadidos posteriores a ver datos, escritos después de lo observado y antes del resumen
+    assert orden.index("prueba_altimetros.json") < orden.index("altimetros_por_mision_anio.csv")
+    assert orden.index("altimetros_por_mision_anio.csv") < orden.index("resumen_f04.json")
+    post = r["posterior_a_ver_datos"]
+    assert "§20" in post["rotulo"] and {"placebos", "controles_por_mision", "a_la_F8", "lectura_de_potencia"} <= set(
+        post
+    )
+    assert r["a_la_F5"]["C1"]["observaciones"]["T0"] == "GEOSAT (sin datos locales)"
+    pm = pd.read_csv(salida / "altimetros_por_mision_anio.csv")
+    assert {"GFO", "SARAL", "HY-2"} <= set(pm["mision"])
     pa = json_estricto.leer(salida / "prueba_altimetros.json")
     assert {p["clase"] for p in pa["placebos"]} <= {"cuenta", "no informativo", "sin pasos"}
     for f in (

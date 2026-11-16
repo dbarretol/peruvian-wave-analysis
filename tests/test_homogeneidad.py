@@ -496,3 +496,44 @@ def test_avance_guarda_cada_lote_y_retoma_con_el_mismo_resultado(tmp_path):
     av4 = Avance(tmp_path, "clave-1", mensajes.append)
     F.simular_A(c, "anios", 49, 100, 0.01, 1, False, 0.3, ("prueba", "av"), lote=25, avance=av4)
     assert av4.reutilizados == 0
+
+
+# --- Cociente por misión (§20, A1) --------------------------------------------------------------
+
+
+def test_cociente_por_mision_aisla_cada_mision_y_separa_segmentos():
+    """Una misión sin efecto que pasa a menudo junto a una con efecto da ≈ 1 si se cuentan solo sus pasos «solo de
+    esa misión»; con la exposición ingenua (cualquier pasada suya) hereda el efecto de la otra."""
+    rng = np.random.default_rng(3)
+    t = pd.date_range("2000-01-01", "2001-12-31 21:00", freq="3h")
+    n = t.size
+    a = rng.random(n) < 0.08
+    b = np.zeros(n, bool)
+    b[np.flatnonzero(a)[::2]] = True  # la mitad de las pasadas de A llevan también una de B
+    b |= rng.random(n) < 0.04
+    p = np.where(a, 0.25, 0.02)
+    ev = rng.random(n) < p
+    hora = (t.hour.to_numpy() // 3).astype(int)
+    nivel = rng.integers(0, 3, n)
+    asim = {"A": ("2000-01-01", "2000-12-31")}
+    tab = A.cocientes_por_mision(ev, np.ones(n, bool), {"A": a, "B": b}, hora, nivel, t, asim, ("B",), ())
+    seg = tab[tab["agregado"] == "segmento"].set_index(["mision", "clave"])
+    fa = seg.loc[("A", A.ASIMILADA_TABLA3)]
+    assert fa["ic_lo"] > 5
+    assert ("A", A.FUERA_TABLA3) in seg.index
+    fb = seg.loc[("B", A.NO_ASIMILADA_QUID)]
+    assert fb["ic_lo"] <= 1 <= fb["ic_hi"]
+    ingenuo = A.mantel_haenszel(ev, b, A.codigos_estrato(hora, nivel))
+    assert ingenuo.lo > 1
+    anios = tab[(tab["mision"] == "A") & (tab["agregado"] == "anio")]["clave"].tolist()
+    assert anios == ["2000", "2001"]
+
+
+def test_esperados_con_cociente_1_para_grupos_sin_eventos():
+    """Un grupo con pasada sin eventos no tiene IC; los eventos esperados con cociente 1 son Σ n1·b/n0."""
+    ev = np.array([0, 0, 0, 1, 0, 0, 0, 0, 1, 1], bool)
+    x = np.array([1, 1, 0, 0, 0, 0, 1, 0, 0, 0], bool)
+    est = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+    # estrato 0: n1 = 2, b = 1, n0 = 3; estrato 1: n1 = 1, b = 2, n0 = 4
+    assert A.esperados_con_cociente_1(ev, x, est) == pytest.approx(2 / 3 + 2 / 4)
+    assert not A.mantel_haenszel(ev, x, est).excluye_1()
