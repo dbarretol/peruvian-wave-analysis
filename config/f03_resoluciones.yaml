@@ -8,137 +8,137 @@
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.02 m; sin este registro, el máximo en ±48 h sería 3.79 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2003-08-24 09:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.02 m; sin este registro, el máximo en ±48 h sería 4.01 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2003-09-09 21:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.05 m; sin este registro, el máximo en ±48 h sería 3.90 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2005-05-19 09:00"
   regla: maximo
   decision: mantener
   motivo: "dudoso: coincide con un candidato del detector resuelto por clase como dudoso_vecinas_comparten (contrato v8, §16). Supera a sus contiguos en 0.47 m; sin este registro, el máximo en ±48 h sería 3.50 m. Sensibilidad obligatoria en la F9."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2010-06-27 18:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.01 m; sin este registro, el máximo en ±48 h sería 3.89 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2010-08-19 15:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.04 m; sin este registro, el máximo en ±48 h sería 4.25 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2011-08-12 12:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.12 m; sin este registro, el máximo en ±48 h sería 3.84 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2012-08-14 15:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.08 m; sin este registro, el máximo en ±48 h sería 3.92 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2013-07-04 18:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.12 m; sin este registro, el máximo en ±48 h sería 3.72 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2014-06-27 21:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.06 m; sin este registro, el máximo en ±48 h sería 3.98 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2014-07-04 00:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.02 m; sin este registro, el máximo en ±48 h sería 3.78 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2014-07-24 00:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.02 m; sin este registro, el máximo en ±48 h sería 4.14 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2015-08-09 21:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.04 m; sin este registro, el máximo en ±48 h sería 4.51 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2017-07-17 12:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.08 m; sin este registro, el máximo en ±48 h sería 3.86 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2017-08-12 12:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.05 m; sin este registro, el máximo en ±48 h sería 4.27 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2020-09-14 21:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.01 m; sin este registro, el máximo en ±48 h sería 3.94 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2022-08-16 18:00"
   regla: maximo
   decision: mantener
   motivo: "dudoso: coincide con un candidato del detector resuelto por clase como dudoso_vecinas_comparten (contrato v8, §16). Supera a sus contiguos en 0.07 m; sin este registro, el máximo en ±48 h sería 4.00 m. Sensibilidad obligatoria en la F9."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2023-05-26 12:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.02 m; sin este registro, el máximo en ±48 h sería 4.19 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2023-10-11 18:00"
   regla: maximo
   decision: mantener
   motivo: "dudoso: coincide con un candidato del detector resuelto por clase como dudoso_vecinas_comparten (contrato v8, §16). Supera a sus contiguos en 0.53 m; sin este registro, el máximo en ±48 h sería 3.42 m. Sensibilidad obligatoria en la F9."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
 
 - tiempo: "2025-08-24 03:00"
   regla: maximo
   decision: mantener
   motivo: "§3.10: se mantiene por defecto; tormenta sostenida (supera a sus contiguos en 0.08 m; sin este registro, el máximo en ±48 h sería 4.63 m)."
   fecha: 2026-11-15
-  autor: "POR FIRMAR"
+  autor: "DBL"
