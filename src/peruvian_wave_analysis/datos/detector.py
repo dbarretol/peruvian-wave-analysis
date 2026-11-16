@@ -120,10 +120,14 @@ def resolver(
     p95: float,
 ) -> Resolucion:
     """Resolución automática de §3.4, con la protección de cola primero y el criterio de vecinas de §3.1."""
+    if np.asarray(hs, dtype=float)[exc.pico] >= p95:
+        return Resolucion(MANUAL, "cola_p95")
+    return _resolver_sin_cola(exc, hs, tm02, hs_vecinas)
+
+
+def _resolver_sin_cola(exc: Excursion, hs: np.ndarray, tm02: np.ndarray, hs_vecinas: np.ndarray) -> Resolucion:
     x = np.asarray(hs, dtype=float)
     previo = x[exc.inicio - 1]
-    if x[exc.pico] >= p95:
-        return Resolucion(MANUAL, "cola_p95")
     despues = x[exc.fin + 1] if exc.fin + 1 < x.size else np.nan
     vuelve = np.isfinite(despues) and abs(despues - previo) <= FRACCION_VUELTA * abs(exc.salto)
     if not vuelve:
@@ -139,6 +143,26 @@ def resolver(
     if abs(salto_t) >= SALTO_TM02_S and np.isfinite(vuelta_t) and abs(vuelta_t) <= FRACCION_VUELTA * abs(salto_t):
         return Resolucion(DESCARTAR, "salto_espectral_conjunto")
     return Resolucion(DESCARTAR, "reversion_rapida")
+
+
+DUDOSO = "dudoso_vecinas_comparten"
+
+
+def resolver_por_clase(exc: Excursion, hs: np.ndarray, tm02: np.ndarray, hs_vecinas: np.ndarray) -> Resolucion:
+    """Resolución por clase de los candidatos del detector en la cola (contrato v8, §16), fijada antes de mirarlos.
+
+    Las mismas definiciones que la resolución bajo P95 (vuelta, vecinas, salto espectral), con dos diferencias:
+    - un salto que vuelve y que las vecinas comparten se **mantiene** como dudoso (va a la F4 y a la sensibilidad de
+      la F9), porque una corrección de asimilación también abarca muchas celdas;
+    - con vecinas insuficientes, se mantiene («cualquier otro»).
+    Un salto que vuelve y no comparten se descarta; uno que no vuelve se mantiene.
+    """
+    r = _resolver_sin_cola(exc, hs, tm02, hs_vecinas)
+    if r.motivo == "vecinas_comparten":
+        return Resolucion(MANTENER, DUDOSO)
+    if r.motivo == "vecinas_insuficientes":
+        return Resolucion(MANTENER, "vecinas_insuficientes")
+    return r
 
 
 def percentil_cola(hs_decodificada: pd.Series | np.ndarray) -> float:

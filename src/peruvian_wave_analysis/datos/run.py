@@ -71,7 +71,16 @@ def _vecinas(serie: ingesta.Serie) -> tuple[np.ndarray, list[str]]:
     return serie.hs_celdas[nombres].to_numpy(), nombres
 
 
-def _figura_maximo(df: pd.DataFrame, vec: pd.DataFrame, t: pd.Timestamp, ruta: Path) -> None:
+def _figura_maximo(
+    df: pd.DataFrame,
+    vec: pd.DataFrame,
+    t: pd.Timestamp,
+    ruta: Path,
+    titulo: str | None = None,
+    tramo: tuple[pd.Timestamp, pd.Timestamp] | None = None,
+) -> None:
+    """Contexto de ±48 h. ``tramo``: (registro previo, registro de vuelta) de la excursión, sombreado en todos los
+    paneles para que se vea el paso del salto, no solo el pico."""
     ventana = df.loc[t - CONTEXTO : t + CONTEXTO]
     vv = vec.loc[t - CONTEXTO : t + CONTEXTO]
     fig, ax = estilo.nueva_figura(3, 1, figsize=(8.0, 8.0), sharex=True, layout="constrained")
@@ -81,6 +90,9 @@ def _figura_maximo(df: pd.DataFrame, vec: pd.DataFrame, t: pd.Timestamp, ruta: P
     for h, et in (("VHM0_WW", "Hs mar de viento"), ("VHM0_SW1", "Hs swell 1"), ("VHM0_SW2", "Hs swell 2")):
         ax[0].plot(ventana.index, ventana[h], lw=1.0, label=et)
     ax[0].axvline(t, color="r", lw=0.8)
+    if tramo is not None:
+        for a in ax:
+            a.axvspan(tramo[0], tramo[1], color="r", alpha=0.12, lw=0)
     ax[0].set_ylabel("Hs (m)")
     ax[0].legend(fontsize=7, ncol=2)
     for v, et in (("VTPK", "Tp"), ("VTM02", "Tm02"), ("VTM10", "Tm−1,0")):
@@ -91,7 +103,7 @@ def _figura_maximo(df: pd.DataFrame, vec: pd.DataFrame, t: pd.Timestamp, ruta: P
     ax[2].set_ylabel("Dirección de origen (°)")
     ax[2].set_ylim(0, 360)
     ax[2].set_xlabel("Tiempo (UTC)")
-    ax[0].set_title(f"Máximo del {t:%Y-%m-%d %H:%M} UTC: Hs = {df.at[t, 'VHM0']:.2f} m (gris: vecinas)")
+    ax[0].set_title(titulo or f"Máximo del {t:%Y-%m-%d %H:%M} UTC: Hs = {df.at[t, 'VHM0']:.2f} m (gris: vecinas)")
     estilo.guardar_figura(fig, ruta)
 
 
@@ -132,23 +144,49 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
         p95 = D.percentil_cola(df0["VHM0"])
         vec, nombres_vec = _vecinas(s_nodo)
         idx = df.index
-        filas = []  # candidatos: tiempo, regla, decision, motivo, hs
+        filas = []  # candidatos: tiempo, regla, decision, motivo, hs, inicio, fin
+        # máximos, sobre la serie antes de todo descarte (§3.10); se necesitan aquí para la regla por clase
+        maximos = D.maximos_independientes(df0["VHM0"])
+        en_maximos = set(maximos.index)
 
-        def agregar(i: int, regla: str, decision: str, motivo: str) -> None:
-            filas.append({"tiempo": idx[i], "regla": regla, "decision": decision, "motivo": motivo, "hs": hs[i]})
+        def agregar(i: int, regla: str, decision: str, motivo: str, exc: D.Excursion | None = None) -> None:
+            ini, fin = (exc.inicio, exc.fin) if exc is not None else (i, i)
+            filas.append(
+                {
+                    "tiempo": idx[i],
+                    "regla": regla,
+                    "decision": decision,
+                    "motivo": motivo,
+                    "hs": round(float(hs[i]), 2),
+                    "inicio": idx[ini],
+                    "fin": idx[fin],
+                }
+            )
+
+        def por_clase(e: D.Excursion, regla: str) -> None:
+            """Candidato del detector en la cola: regla por clase (v8, §16). Descartar un máximo sigue exigiendo la
+            confirmación del usuario (§3.10), así que en ese caso queda manual."""
+            r = D.resolver_por_clase(e, hs, tm02, vec)
+            if r.decision == D.DESCARTAR and idx[e.pico] in en_maximos:
+                agregar(e.pico, regla, D.MANUAL, f"clase:{r.motivo}:maximo", e)
+            else:
+                agregar(e.pico, regla, r.decision, f"clase:{r.motivo}", e)
 
         if cal is not None:
             picos_desc = set()
             for e in D.detectar(hs, cal.k_desc, s):
                 r = D.resolver(e, hs, tm02, vec, p95)
-                agregar(e.pico, "detector", r.decision, r.motivo)
+                if r.motivo == "cola_p95":
+                    por_clase(e, "detector")
+                else:
+                    agregar(e.pico, "detector", r.decision, r.motivo, e)
                 picos_desc.add(e.pico)
             n_rev = 0
             for e in D.detectar(hs, cal.k_rev, s):
                 if hs[e.pico] >= p95:
                     n_rev += 1
                     if e.pico not in picos_desc:
-                        agregar(e.pico, "detector_revision", D.MANUAL, "cola_p95_k_rev")
+                        por_clase(e, "detector_revision")
             for i in D.dipolo(hs, vec, cal.k_desc, s).tolist():
                 if i not in picos_desc:
                     agregar(i, "dipolo", D.MANUAL, "dipolo")
@@ -171,7 +209,7 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
         marcas_resolucion = [f"incoherencia_ausente_{p}" for p in C.PARTICIONES] + list(REGLAS_CON_RESOLUCION)
         conteo_marcas = {r: int(marcas[r].fillna(False).sum()) for r in marcas_resolucion}
         motivos += [f"revisión requerida: {m}" for m in reglas.marcas_sobre_tope(conteo_marcas)]
-        cand = pd.DataFrame(filas, columns=["tiempo", "regla", "decision", "motivo", "hs"])
+        cand = pd.DataFrame(filas, columns=["tiempo", "regla", "decision", "motivo", "hs", "inicio", "fin"])
         cand = cand.sort_values(["tiempo", "regla"]).reset_index(drop=True)
         auto = pd.DatetimeIndex(cand.loc[cand["decision"] == D.DESCARTAR, "tiempo"].unique())
         top = D.topes(auto, n_rev)
@@ -190,17 +228,28 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
             if vals:
                 acum[v] = vals
                 _figura_histograma(x.rename(v), vals, st / "figuras" / f"histograma_{v}.png", C.UNIDADES[v])
-        # máximos, sobre la serie antes de todo descarte (§3.10)
-        maximos = D.maximos_independientes(df0["VHM0"])
         vec_df = pd.DataFrame(vec, index=idx, columns=nombres_vec)
         for n_, t in enumerate(maximos.index, start=1):
             _figura_maximo(df, vec_df, t, st / "figuras" / f"maximo_{n_:02d}.png")
+        # una figura por candidato del detector o del dipolo (v8, §16: salida añadida)
+        paso = pd.Timedelta(hours=3)
+        figs = []
+        for n_, f in enumerate(cand.itertuples(), start=1):
+            if f.regla not in ("detector", "detector_revision", "dipolo"):
+                figs.append("")
+                continue
+            nombre_fig = f"candidato_{n_:02d}.png"
+            titulo = f"{f.regla} del {f.tiempo:%Y-%m-%d %H:%M} UTC: Hs = {f.hs:.2f} m · {f.decision} ({f.motivo})"
+            tramo = (f.inicio - paso, f.fin + paso)
+            _figura_maximo(df, vec_df, f.tiempo, st / "figuras" / nombre_fig, titulo, tramo)
+            figs.append(nombre_fig)
+        cand["figura"] = figs
         # salidas
         df.to_parquet(st / "serie_decodificada.parquet")
         s_nodo.hs_celdas.to_parquet(st / "hs_celdas.parquet")
         marcas.to_parquet(st / "marcas.parquet")
         cand.to_csv(st / "candidatos.csv", index=False, date_format="%Y-%m-%d %H:%M", lineterminator="\n")
-        pd.DataFrame({"tiempo": maximos.index, "hs": maximos.to_numpy()}).to_csv(
+        pd.DataFrame({"tiempo": maximos.index, "hs": maximos.to_numpy().round(2)}).to_csv(
             st / "maximos.csv", index=False, date_format="%Y-%m-%d %H:%M", lineterminator="\n"
         )
         resumen = {
@@ -227,6 +276,7 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
             },
             "periodos_bajo_resolucion": reglas.periodos_bajo_resolucion(df0),
             "marcas_con_resolucion": {"conteos": conteo_marcas, "tope": C.TOPE_MARCA},
+            "dudosos_por_clase": [str(t) for t in cand.loc[cand["motivo"] == f"clase:{D.DUDOSO}", "tiempo"]],
             "fraccion_particion_ausente": {
                 p: float(aus.marcas[f"particion_ausente_{p}"].mean()) for p in C.PARTICIONES
             },
@@ -311,6 +361,11 @@ def serie(raiz_datos=None, nombre: str = NOMBRE, ruta_resoluciones: Path = RESOL
             {"tiempo": str(t), "decision": r.decision, "motivo": r.motivo}
             for (t, regla), r in idx_res.items()
             if regla == R.REGLA_MAXIMO and (r.decision == "descartar" or "dudoso" in r.motivo.lower())
+        ]
+        # saltos compartidos por las vecinas que se mantienen por clase: van a la F4 y a la sensibilidad de la F9 (v8)
+        dudosos += [
+            {"tiempo": str(t), "decision": "mantener", "motivo": f"clase:{D.DUDOSO}"}
+            for t in cand.loc[cand["motivo"] == f"clase:{D.DUDOSO}", "tiempo"]
         ]
         out.to_parquet(st / "serie_nodo.parquet")
         pd.read_parquet(insumos["hs_celdas"]).to_parquet(st / "vecinas_hs.parquet")
