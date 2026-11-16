@@ -4,7 +4,8 @@ from __future__ import annotations
 
 # --- Nodo y celdas (§3.1) ----------------------------------------------------------------------
 NODO = (-15.0, -75.8)  # (lat, lon), ADR-0007
-TOL_COORD = 1e-6  # coincidencia exacta de coordenadas, en grados
+TOL_COORD = 1e-3  # coincidencia con un nodo de la malla (espaciado 0.2°), en grados; cubre el float32 del
+# producto (≈ 1e-5° a esa magnitud). Contrato v6 (§3.1): 1e-6° era más estricto que la precisión del archivo.
 PASO_MALLA = 0.2  # grados entre celdas de WAVERYS
 VECINAS_MIN = 5  # mínimo de vecinas del primer anillo con dato para decidir (§3.1, F03-S-03)
 

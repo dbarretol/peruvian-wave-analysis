@@ -120,6 +120,18 @@ def test_ingesta_rechaza_lo_que_no_coincide(tmp_path, tiempos, caso):
         ingesta.leer_serie([r])
 
 
+def test_ingesta_con_coordenadas_float32_como_el_producto(tmp_path, tiempos):
+    def a_float32(ds, enc):
+        enc["latitude"] = {"dtype": "float32"}
+        enc["longitude"] = {"dtype": "float32"}
+
+    r = escribir_nc(tmp_path / "a.nc", tiempos, cambiar=a_float32)
+    with xr.open_dataset(r) as ds:
+        assert ds["longitude"].dtype == np.float32 and abs(float(ds["longitude"][2]) + 75.8) > 1e-6
+    s = ingesta.leer_serie([r])
+    assert len(s.celdas) == 25 and s.nodo.shape[0] == len(tiempos)
+
+
 def test_ingesta_exige_coincidencia_exacta_del_nodo(tmp_path, tiempos):
     r = escribir_nc(tmp_path / "a.nc", tiempos)
     with pytest.raises(ingesta.ErrorIngesta, match="no coincide"):
