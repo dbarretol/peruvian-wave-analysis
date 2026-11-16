@@ -258,15 +258,29 @@ def test_delta_rel_con_gpd_conocida_y_lado_sin_cola():
 # --- Mann-Kendall con Hamed-Rao, Pettitt y SNHT ----------------------------------------------
 
 
-@pytest.mark.lento
-def test_mann_kendall_hamed_rao_n23():
-    """§5: AR(1) sin tendencia con n = 23: rechazo en [3 %, 7 %]; la versión sin corrección rechaza más."""
+@pytest.mark.parametrize("n", [23, 18])
+def test_mann_kendall_calibrado_mantiene_el_nivel(n):
+    """§5 (cambiada en §19, D1): AR(1) con ρ = 0.3 sin tendencia, n = 23 y n = 18: con la p de Monte Carlo frente a
+    la nula calibrada, el rechazo al 5 % está en [4 %, 6 %]. Réplicas independientes de las de la calibración."""
+    nula = T.nula_mk(n, 0.3, 50_000, np.random.default_rng(100 + n))
+    z = T.z_mk_lote(T.ar1_lote(6000, n, 0.3, np.random.default_rng(200 + n)))
+    tasa = np.mean([T.p_monte_carlo(x, nula) <= 0.05 for x in z])
+    assert 0.04 <= tasa <= 0.06
+
+
+def test_hamed_rao_no_mantiene_el_nivel_con_n23():
+    """Documenta el hallazgo D1 (§19): con n = 23 y ρ = 0.3, Hamed-Rao rechaza mucho más del 5 % nominal."""
     rng = np.random.default_rng(12)
-    ys = [P.ar1(23, C.RHO_AR1, rng) for _ in range(2000)]
-    corr = np.mean([T.mann_kendall(y).p <= 0.05 for y in ys])
-    sin = np.mean([T.mann_kendall(y, corregir=False).p <= 0.05 for y in ys])
-    assert 0.03 <= corr <= 0.07, f"Hamed-Rao rechaza {corr:.3f}"
-    assert sin > corr
+    ys = T.ar1_lote(1500, 23, 0.3, rng)
+    assert np.mean([T.mann_kendall(y).p <= 0.05 for y in ys]) > 0.10
+
+
+def test_p_monte_carlo_y_z_por_lote():
+    nula = np.sort(np.array([0.5, 1.0, 1.5, 2.0]))
+    assert T.p_monte_carlo(1.5, nula) == pytest.approx(3 / 5)
+    assert T.p_monte_carlo(-3.0, nula) == pytest.approx(1 / 5)
+    y = np.random.default_rng(1).normal(size=23)
+    assert T.z_mk_lote(y)[0] == pytest.approx(T.mann_kendall(y, corregir=False).z)
 
 
 def test_mann_kendall_detecta_tendencia_y_sen_la_estima():

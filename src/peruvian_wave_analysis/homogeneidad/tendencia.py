@@ -94,3 +94,60 @@ def snht(y) -> PuntoCambio:
     T = np.array([k * z[:k].mean() ** 2 + (n - k) * z[k:].mean() ** 2 for k in range(1, n)])
     k = int(np.argmax(T))
     return PuntoCambio(k + 1, float(T[k]))
+
+
+# --- Mann-Kendall calibrado por simulación (familia B; contrato §19, D1) -------------------------
+
+
+def ar1_lote(R: int, n: int, rho: float, rng: np.random.Generator) -> np.ndarray:
+    """R series AR(1) estacionarias de varianza 1 (R × n)."""
+    e = rng.standard_normal((R, n))
+    y = np.empty((R, n))
+    y[:, 0] = e[:, 0]
+    s = np.sqrt(1 - rho**2)
+    for k in range(1, n):
+        y[:, k] = rho * y[:, k - 1] + s * e[:, k]
+    return y
+
+
+def z_mk_lote(Y: np.ndarray) -> np.ndarray:
+    """z de Mann-Kendall sin corrección, por fila (sin empates: series continuas)."""
+    Y = np.atleast_2d(Y)
+    n = Y.shape[1]
+    i, j = np.triu_indices(n, 1)
+    S = np.sign(Y[:, j] - Y[:, i]).sum(axis=1)
+    var = n * (n - 1) * (2 * n + 5) / 18.0
+    return (S - np.sign(S)) / np.sqrt(var)
+
+
+def nula_mk(n: int, rho: float, R: int, rng: np.random.Generator, lote: int = 5000) -> np.ndarray:
+    """|z| de Mann-Kendall sin corrección en R series AR(1) sin tendencia. Como la prueba usa rangos, el resultado no
+    depende de la distribución marginal: solo de n y de ρ (supuesto)."""
+    out = [np.abs(z_mk_lote(ar1_lote(min(lote, R - k), n, rho, rng))) for k in range(0, R, lote)]
+    return np.sort(np.concatenate(out))
+
+
+def p_monte_carlo(z: float, nula_abs: np.ndarray) -> float:
+    """p bilateral = (1 + #{|z_nula| ≥ |z|}) / (N + 1), con ``nula_abs`` ordenada."""
+    k = nula_abs.size - np.searchsorted(nula_abs, abs(z) - 1e-12, side="left")
+    return float((1 + k) / (nula_abs.size + 1))
+
+
+def mk_calibrado(y, nula_abs: np.ndarray) -> dict:
+    """Mann-Kendall sin corrección (con la varianza corregida por empates) y su p de Monte Carlo frente a la nula
+    AR(1). Incluye Hamed-Rao con su p nominal como sensibilidad rotulada."""
+    y = np.asarray(y, float)
+    sin = mann_kendall(y, corregir=False)
+    hr = mann_kendall(y, corregir=True)
+    return {
+        "pendiente": sin.pendiente,
+        "s": sin.s,
+        "z": sin.z,
+        "p": p_monte_carlo(sin.z, nula_abs),
+        "sensibilidad_hamed_rao": {
+            "z": hr.z,
+            "p_nominal": hr.p,
+            "factor": hr.factor,
+            "rotulo": "no mantiene el nivel con n ≈ 20 (contrato §19, D1)",
+        },
+    }

@@ -443,22 +443,51 @@ def homogeneidad(
                 "mde_80": _mde(efectos, pots, C.POTENCIA_MIN),
             }
 
-        # Familia B: pendiente relevante y potencia con n = 23
+        # Familia B (§3.5 y §19, D1): Mann-Kendall sin corrección con p de Monte Carlo frente a una nula AR(1)
+        # (ρ = 0.3, supuesto), calibrada aparte para cada número de años; potencia con años AR(1)
         pend = pr.pendiente_relevante()
         previo["pendiente_relevante"] = pend
-        pot_B = {"efectos": [], "potencias": [], "potencia_relevante": None, "mde_80": None}
+        n_B = {"principal": C.ANIOS_T1[1] - C.ANIOS_T1[0] + 1, "sin_1993_1997": C.ANIOS_T1[1] - C.SIN_PRIMEROS[1]}
+        nulas_B = {
+            k: tendencia.nula_mk(n, C.RHO_AR1, C.R_NULA_MK, semillas.generador("f04", "B", "nula", str(n)))
+            for k, n in n_B.items()
+        }
+        tipoI_B = {}
+        for k, n in n_B.items():
+            for rho in C.RHOS_TIPO_I_B:
+                z = tendencia.z_mk_lote(
+                    tendencia.ar1_lote(C.R_TIPO_I_B, n, rho, semillas.generador("f04", "B", "tipo-I", str(n), str(rho)))
+                )
+                tasa = float(np.mean([tendencia.p_monte_carlo(x, nulas_B[k]) <= C.ALFA for x in z]))
+                tipoI_B[f"{k}:rho={rho}"] = tasa
+                filas_pot.append(
+                    {
+                        "prueba": "B",
+                        "contraste": f"T1 ({k}, n = {n})",
+                        "efecto": f"tipo I AR(1) ρ = {rho}",
+                        "valor": 0.0,
+                        "tasa": tasa,
+                        "replicas": C.R_TIPO_I_B,
+                        "B": C.R_NULA_MK,
+                        "esquema": "Mann-Kendall calibrado (ρ = 0.3)",
+                        "critico": C.ALFA,
+                        "dependencia": True,
+                    }
+                )
+        pot_B = {"efectos": [], "potencias": [], "potencia_relevante": None, "mde_80": None, "tipo_I": tipoI_B}
         if pend["pendiente_relativa_por_anio"] is not None:
             hs_t1 = pr.hs[_en(pr.t, f"{C.ANIOS_T1[0]}-01-01", f"{C.ANIOS_T1[1]}-12-31")]
-            # valores anuales de T1 reordenados al azar en cada réplica: su orden (el resultado) no se usa
+            # valores anuales de T1 reasignados con la cópula AR(1) en cada réplica: su orden observado no se usa
             base = descriptivos.anuales_hs(hs_t1)[["hs_p99", "hs_max"]].to_numpy(float)
             efs = [m * pend["pendiente_relativa_por_anio"] for m in multiplos]
             for e in efs:
                 rng = semillas.generador("f04", "B", "potencia", f"{e:.8f}")
                 rech = 0
                 for _ in range(replicas):
-                    y = base[rng.permutation(base.shape[0])]
+                    y = base[P.orden_ar1(base[:, 1], C.RHO_AR1, rng)]
                     y = y * (1.0 + e * np.arange(y.shape[0]))[:, None]
-                    ps = [tendencia.mann_kendall(y[:, j]).p for j in range(2)]
+                    zs = tendencia.z_mk_lote(y.T)
+                    ps = [tendencia.p_monte_carlo(z, nulas_B["principal"]) for z in zs]
                     rech += P.holm(ps).min() <= C.ALFA
                 pot_B["efectos"].append(e)
                 pot_B["potencias"].append(rech / replicas)
@@ -470,10 +499,10 @@ def homogeneidad(
                         "valor": e,
                         "tasa": rech / replicas,
                         "replicas": replicas,
-                        "B": 0,
-                        "esquema": "Mann-Kendall con Hamed-Rao, Holm",
+                        "B": C.R_NULA_MK,
+                        "esquema": "Mann-Kendall calibrado (ρ = 0.3), Holm",
                         "critico": C.ALFA,
-                        "dependencia": False,
+                        "dependencia": True,
                     }
                 )
             pot_B["potencia_relevante"] = pot_B["potencias"][list(multiplos).index(1.0)] if 1.0 in multiplos else None
@@ -565,6 +594,32 @@ def homogeneidad(
                 "dependencia": False,
             }
         )
+        pot_alt_sens = {}
+        for fr in C.FRACCIONES_OCULTAS_SENSIBILIDAD:
+            pot_alt_sens[str(fr)] = A.potencia_mh(
+                x_p,
+                est_p,
+                tasa_paso,
+                C.COCIENTE_ALTERNATIVO,
+                fr,
+                1 - C.ALFA,
+                replicas,
+                semillas.generador("f04", "altimetros", "principal", "oculta", str(fr)),
+            )
+            filas_pot.append(
+                {
+                    "prueba": "altimetros",
+                    "contraste": f"principal, fracción oculta {fr}",
+                    "efecto": "cociente",
+                    "valor": 1.5,
+                    "tasa": pot_alt_sens[str(fr)],
+                    "replicas": replicas,
+                    "B": 0,
+                    "esquema": "Mantel-Haenszel (sensibilidad)",
+                    "critico": C.ALFA,
+                    "dependencia": False,
+                }
+            )
         placebos = pr.placebos(alt)
         for pl in placebos:
             pl["n_pasos"] = int((pl["pasos"] & ok_p).sum())
@@ -641,6 +696,11 @@ def homogeneidad(
                 "resultado": cat,
                 "cambia_periodo": cat in (C.ESTABLECIDO, C.NO_CONCLUYENTE) and not d.sin_raiz,
             }
+            if not regla.recalibrable:
+                res_A[n]["rotulo"] = (
+                    "no concluyente por construcción: el valor crítico no se pudo recalibrar con este B, la prueba "
+                    "no rechaza nunca y su potencia es 0 (contrato §19)"
+                )
 
         # Cuerpo (equivalencia de P50) por contraste
         rng_ic = semillas.generador("f04", "ic")
@@ -661,18 +721,19 @@ def homogeneidad(
         res_B = {}
         for etiqueta, desde in (("principal", C.ANIOS_T1[0]), ("sin_1993_1997", C.SIN_PRIMEROS[1] + 1)):
             g = an_all.loc[desde : C.ANIOS_T1[1]]
-            r99, rmx = tendencia.mann_kendall(g["hs_p99"].to_numpy()), tendencia.mann_kendall(g["hs_max"].to_numpy())
-            ph = P.holm([r99.p, rmx.p])
+            r99 = tendencia.mk_calibrado(g["hs_p99"].to_numpy(), nulas_B[etiqueta])
+            rmx = tendencia.mk_calibrado(g["hs_max"].to_numpy(), nulas_B[etiqueta])
+            ph = P.holm([r99["p"], rmx["p"]])
             res_B[etiqueta] = {
                 "anios": [int(g.index.min()), int(g.index.max())],
                 "P99": {
-                    **asdict(r99),
-                    "pendiente_relativa_por_anio": r99.pendiente / g["hs_p99"].mean(),
+                    **r99,
+                    "pendiente_relativa_por_anio": r99["pendiente"] / g["hs_p99"].mean(),
                     "p_holm": float(ph[0]),
                 },
                 "maximo_anual": {
-                    **asdict(rmx),
-                    "pendiente_relativa_por_anio": rmx.pendiente / g["hs_max"].mean(),
+                    **rmx,
+                    "pendiente_relativa_por_anio": rmx["pendiente"] / g["hs_max"].mean(),
                     "p_holm": float(ph[1]),
                 },
                 "rechaza": bool(ph.min() <= C.ALFA),
@@ -683,12 +744,14 @@ def homogeneidad(
         res_B["resultado"] = familias.resultado_adr0005(
             res_B["principal"]["rechaza"], pot_B["potencia_relevante"], C.POTENCIA_MIN, sin_raiz_B
         )
-        res_B["advertencia"] = (
-            "Mann-Kendall con Hamed-Rao no mantiene el nivel con n = 23 bajo AR(1) "
-            "(prueba sintética de §5); ver metodología."
+        res_B["nota"] = (
+            "Mann-Kendall sin corrección con p de Monte Carlo frente a una nula AR(1) con ρ = 0.3 (supuesto), "
+            "calibrada para cada número de años (contrato §19, D1). La calibración es exacta solo si ρ = 0.3: el "
+            "error de tipo I con ρ = 0 y ρ = 0.5 está en potencia.tipo_I. Hamed-Rao, como sensibilidad rotulada."
         )
 
         # Familia C
+        orden.exigir_potencia()
         completos = an_all[an_all["meses"] == 12]
         anios_crono = sorted({pd.Timestamp(f).year for f in crono["fecha"] if f > "1980-01-01"})
         res_C = {}
@@ -707,6 +770,7 @@ def homogeneidad(
                 }
 
         # Familia D
+        orden.exigir_potencia()
         r_D = familias.prueba_D(
             ev, ev.tp, np.arange(ev.anios.size), esq_D, B, semillas.generador("f04", "D", "observada")
         )
@@ -732,6 +796,8 @@ def homogeneidad(
         res_D["resultado"] = familias.resultado_adr0005(r_D.p <= critico_D, pot_D["potencia_relevante"], C.POTENCIA_MIN)
 
         # Altímetros
+        orden.exigir_potencia()
+
         def mh(evento, ok, pasos, expuesto, epoca, nivel=None, nivel_conf=0.95):
             est = pr.estrato(alt, epoca, pasos, ok, nivel)
             return A.mantel_haenszel(evento, expuesto, est, nivel_conf)
@@ -805,6 +871,7 @@ def homogeneidad(
             "tasa_base_T0_por_nivel": tasas.tolist(),
             "principal": asdict(principal),
             "potencia_principal": pot_alt,
+            "potencia_sensibilidad_fraccion_oculta": pot_alt_sens,
             "lectura": lect,
             "placebos": res_pl,
             "placebos_que_cuentan": m_cuentan,
@@ -816,6 +883,7 @@ def homogeneidad(
         }
 
         # Descriptivos: cuantiles por tramo, indicadores, figuras
+        orden.exigir_potencia()
         grupos = {n: (a, b) for n, a, b, _ in C.TRAMOS + C.SUBTRAMOS_DESCRIPTIVOS}
         for n in C.CONTRASTES:
             (a1, b1), (a2, b2) = pr.lados_t[n]
@@ -874,6 +942,7 @@ def homogeneidad(
         _csv(ind, st / "indicadores_anuales.csv", index=True)
         orden.registrar("indicadores_anuales.csv")
         fechas = sorted({pd.Timestamp(f) for f, tr in zip(crono["fecha"], crono["tramo"], strict=True) if tr})
+        orden.exigir_potencia()
         figuras.cuantiles_por_tramo(cpt, [n for n, *_ in C.TRAMOS], st / "figuras" / "cuantiles_por_tramo.png")
         figuras.indicadores(ind, fechas, st / "figuras" / "indicadores_anuales.png")
         figuras.cuantiles_anuales(an_all, fechas, st / "figuras" / "cuantiles_anuales.png")

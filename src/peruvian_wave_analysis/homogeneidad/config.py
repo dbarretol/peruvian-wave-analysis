@@ -91,6 +91,7 @@ UMBRAL_RELATIVO_POSTERIOR = 0.10  # sensibilidad rotulada como posterior a ver l
 
 COCIENTE_ALTERNATIVO = 1.5  # §3.4 punto 6
 FRACCION_OCULTA = 1.0 / 3.0  # dilución por pasadas entre 200 y 600 km (§3.6, v6, F04-S-08)
+FRACCIONES_OCULTAS_SENSIBILIDAD = (0.0, 0.5)  # el tercio no está justificado: sensibilidad (§19)
 
 # Placebos (§3.4 punto 8): (nombre, misión, inicio, fin). El de T0 se trata aparte.
 PLACEBOS = (
@@ -121,8 +122,11 @@ REJILLA_DELTA = (-0.30, 0.30, 0.005)
 # Rejilla de efectos para la potencia (§3.6): múltiplos de δ_rel, más δ_rel
 MULTIPLOS_EFECTO = (0.5, 1.0, 1.5, 2.0, 3.0, 4.0)
 
-# Familia B (§3.5)
+# Familia B (§3.5; §19, D1)
 ANIOS_T1 = (1993, 2015)
+R_NULA_MK = 99_999  # series AR(1) de la nula de Mann-Kendall, por número de años
+R_TIPO_I_B = 4_000  # réplicas para publicar el error de tipo I con ρ = 0, 0.3 y 0.5
+RHOS_TIPO_I_B = (0.0, 0.3, 0.5)
 SIN_PRIMEROS = (1993, 1997)  # sensibilidad sin 1993–1997 (QUID §VI.1.1)
 
 # Familia C (§3.5)
