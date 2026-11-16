@@ -6,6 +6,11 @@ Análisis de oleaje extremo y contornos ambientales Hs–Tp a partir del reanál
 
 Fase 1 (sitio y fuentes) completa: mapa de selección de sitio, serie de WAVERYS y ficha del sitio.
 
+Fase 2 (biblioteca común) completa:
+- `comun/`: publicación de etapas con staging, gate y `MANIFEST.json`; huella semántica del código, comprobada al abrir el staging y al publicar; orquestador; semillas por nombre; procesos con un hilo de BLAS.
+- `extremos/`: ajuste GPD, niveles de retorno, IC por perfil de verosimilitud, estratos, declustering, tasas, prueba de Poisson por reescalado de tiempo y bootstrap por años.
+- `verificacion-f2`: estudio de verificación por simulación de todo lo anterior.
+
 Primera herramienta: **mapa de selección de sitio**, en dos pasos.
 
 1. **Mapa exploratorio** (`mapa-sitio`): dada una coordenada de referencia, descarga la batimetría (GMRT), la malla de nodos de WAVERYS y las zonas protegidas y de hidrocarburos, y dibuja las isóbatas elegidas (por defecto 200, 100 y 50 m), la malla con el recuadro de cada celda, las zonas de exclusión y de colisión de usos, y hasta 3 nodos candidatos.
@@ -85,7 +90,7 @@ Requiere el mapa definitivo (`ficha_nodo.json`), el gate publicado de la serie y
 ### 6. Estudio de verificación de la biblioteca de extremos
 
 ```bash
-uv run verificacion-f2 --procesos 7   # ≈ 25 min con 7 procesos; el resultado no depende del número de procesos
+uv run verificacion-f2 --procesos 2   # ≈ 2 h 10 min con 2 procesos (medido); el resultado no depende del número de procesos
 ```
 
 Simula escenarios de respuesta conocida y comprueba la cobertura de los intervalos por perfil y el tamaño de la prueba de Poisson contra bandas fijadas antes de correr. Si una banda falla, repite ese escenario una vez con 1600 réplicas.
@@ -185,7 +190,7 @@ Cada salida publicada lleva un `MANIFEST.json` sin marcas de tiempo: insumos con
 uv run pytest
 ```
 
-Las pruebas usan datos sintéticos en directorios temporales y **no acceden a la red**.
+Las pruebas usan datos sintéticos en directorios temporales y **no acceden a la red**. Se comprueban con `uv run ruff check src tests` (ruff fijado en las dependencias de desarrollo).
 
 ## Fuentes de datos
 
