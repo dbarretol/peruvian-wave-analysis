@@ -367,6 +367,14 @@ def serie(raiz_datos=None, nombre: str = NOMBRE, ruta_resoluciones: Path = RESOL
             {"tiempo": str(t), "decision": "mantener", "motivo": f"clase:{D.DUDOSO}"}
             for t in cand.loc[cand["motivo"] == f"clase:{D.DUDOSO}", "tiempo"]
         ]
+        # un registro aparece una sola vez aunque lo listen su resolución y su clase: se unen los motivos
+        unidos: dict[str, dict] = {}
+        for x in dudosos:
+            if x["tiempo"] in unidos:
+                unidos[x["tiempo"]]["motivo"] += " | " + x["motivo"]
+            else:
+                unidos[x["tiempo"]] = dict(x)
+        dudosos = [unidos[t] for t in sorted(unidos)]
         # qué significa «sin él» para la F9: se quita solo ese registro y la tormenta conserva su siguiente máximo
         for x in dudosos:
             t = pd.Timestamp(x["tiempo"])
