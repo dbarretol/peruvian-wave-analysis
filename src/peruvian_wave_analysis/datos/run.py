@@ -381,6 +381,12 @@ def serie(raiz_datos=None, nombre: str = NOMBRE, ruta_resoluciones: Path = RESOL
             w = df["VHM0"].loc[t - CONTEXTO : t + CONTEXTO].drop(t, errors="ignore")
             x["hs_m"] = round(float(df.at[t, "VHM0"]), 2) if t in df.index else None
             x["hs_max_48h_sin_registro_m"] = round(float(w.max()), 2) if w.notna().any() else None
+            # solo pesa en la F9 si es el máximo de su ventana: si no, quitarlo no cambia el pico de la tormenta
+            x["es_maximo_48h"] = bool(
+                x["hs_m"] is not None
+                and x["hs_max_48h_sin_registro_m"] is not None
+                and x["hs_m"] > x["hs_max_48h_sin_registro_m"]
+            )
         out.to_parquet(st / "serie_nodo.parquet")
         pd.read_parquet(insumos["hs_celdas"]).to_parquet(st / "vecinas_hs.parquet")
         anual.to_csv(st / "cobertura_anual.csv", lineterminator="\n")
@@ -397,7 +403,8 @@ def serie(raiz_datos=None, nombre: str = NOMBRE, ruta_resoluciones: Path = RESOL
                 "sensibilidad_f9": dudosos,
                 "sensibilidad_f9_definicion": (
                     "Quitar solo el registro listado; la tormenta conserva su siguiente máximo "
-                    "(hs_max_48h_sin_registro_m), no se elimina entera."
+                    "(hs_max_48h_sin_registro_m), no se elimina entera. Si es_maximo_48h es falso, el registro no es "
+                    "el pico de su ventana y quitarlo no cambia el máximo."
                 ),
                 "faltas": faltas,
             },

@@ -128,6 +128,7 @@ def test_serie_aplica_descartes_a_todas_las_variables(datos, tmp_path):
     res = json.loads((d / "resumen_f03.json").read_text(encoding="utf-8"))
     assert res["descartados"] == 1 and any(x["decision"] == "descartar" for x in res["sensibilidad_f9"])
     assert all("hs_max_48h_sin_registro_m" in x for x in res["sensibilidad_f9"]) and res["sensibilidad_f9_definicion"]
+    assert all(x["es_maximo_48h"] == (x["hs_m"] > x["hs_max_48h_sin_registro_m"]) for x in res["sensibilidad_f9"])
     tiempos = [x["tiempo"] for x in res["sensibilidad_f9"]]
     assert len(tiempos) == len(set(tiempos))  # sin repetidos aunque un registro sea máximo y candidato
     largos = json.loads((d / "periodos_largos.json").read_text(encoding="utf-8"))
