@@ -67,7 +67,12 @@ def test_candidatos_publica_sin_exigir_resoluciones(datos):
     cand = pd.read_csv(d / "candidatos.csv", parse_dates=["tiempo"])
     t_pico = pd.Timestamp("2024-01-01") + PICO * pd.Timedelta(hours=3)
     fila = cand[(cand["tiempo"] == t_pico) & (cand["regla"] == "detector")]
-    assert len(fila) == 1 and fila["decision"].iloc[0] == "manual" and fila["motivo"].iloc[0] == "cola_p95"
+    # v8: en la cola se resuelve por clase; descartar un máximo sigue exigiendo al usuario, así que queda manual
+    motivo = fila["motivo"].iloc[0]
+    assert len(fila) == 1 and fila["decision"].iloc[0] == "manual"
+    assert motivo.startswith("clase:") and motivo.endswith(":maximo")
+    assert (d / "figuras" / fila["figura"].iloc[0]).is_file()
+    assert fila["hs"].iloc[0] == round(fila["hs"].iloc[0], 2)
     maximos = pd.read_csv(d / "maximos.csv", parse_dates=["tiempo"])
     assert len(maximos) == 20 and t_pico in set(maximos["tiempo"])
     assert sorted(p.name for p in (d / "figuras").glob("maximo_*.png"))[0] == "maximo_01.png"

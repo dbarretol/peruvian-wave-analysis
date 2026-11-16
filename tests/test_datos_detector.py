@@ -83,6 +83,19 @@ def test_resolucion_automatica():
     assert D.resolver(exc, x, tm, v, p95=10.0) == D.Resolucion(D.MANUAL, "vecinas_insuficientes")
 
 
+def test_resolucion_por_clase_en_la_cola():
+    """v8, §16: mismas definiciones que bajo P95; compartido → mantener dudoso; vecinas insuficientes → mantener."""
+    exc, x, tm, v = _caso(pico_hs=3.0)
+    assert D.resolver_por_clase(exc, x, tm, v) == D.Resolucion(D.DESCARTAR, "reversion_rapida")
+    exc, x, tm, v = _caso(pico_hs=3.0, comparten=True)
+    assert D.resolver_por_clase(exc, x, tm, v) == D.Resolucion(D.MANTENER, D.DUDOSO)
+    exc, x, tm, v = _caso(pico_hs=3.0, n_vec=4)
+    assert D.resolver_por_clase(exc, x, tm, v) == D.Resolucion(D.MANTENER, "vecinas_insuficientes")
+    # no depende del P95: el mismo caso da lo mismo que la resolución automática bajo P95
+    exc, x, tm, v = _caso()
+    assert D.resolver_por_clase(exc, x, tm, v) == D.resolver(exc, x, tm, v, p95=10.0)
+
+
 def test_proteccion_de_cola_antes_que_el_descarte():
     exc, x, tm, v = _caso(pico_hs=3.0)
     assert D.resolver(exc, x, tm, v, p95=2.9) == D.Resolucion(D.MANUAL, "cola_p95")
