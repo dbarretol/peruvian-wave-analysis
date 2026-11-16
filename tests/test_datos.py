@@ -157,28 +157,50 @@ def _df(n=200, **cols):
     return base
 
 
-def test_particiones_ausentes_con_firma():
+def test_particiones_ausentes_por_periodo_cero_con_cualquier_direccion():
     df = _df()
     df.loc[df.index[:120], ["VHM0_SW2", "VTM01_SW2", "VMDR_SW2"]] = [0.0, 0.0, 180.0]
+    dirs = np.linspace(9.0, 359.0, 50)  # en WW la dirección de los ausentes varía (v7)
+    df.loc[df.index[:50], "VHM0_WW"] = 0.0
+    df.loc[df.index[:50], "VTM01_WW"] = 0.0
+    df.loc[df.index[:50], "VMDR_WW"] = dirs
     r = reglas.particiones_ausentes(df)
-    f = r.firmas["SW2"]
-    assert f.aplica and f.periodo == 0.0 and f.direccion == 180.0 and f.fraccion == 1.0 and f.dominante
-    assert r.marcas["particion_ausente_SW2"].sum() == 120 and not r.marcas["incoherencia_ausente_SW2"].any()
+    assert r.marcas["particion_ausente_SW2"].sum() == 120 and r.marcas["particion_ausente_WW"].sum() == 50
+    assert r.resumen["SW2"].fraccion_ausentes_180 == 1.0 and r.resumen["WW"].direcciones_distintas_ausentes == 50
+    assert not r.marcas.filter(like="incoherencia_ausente").any().any()
     assert r.serie.loc[df.index[:120], ["VTM01_SW2", "VMDR_SW2"]].isna().all().all()
+    assert r.serie.loc[df.index[:50], ["VTM01_WW", "VMDR_WW"]].isna().all().all()
     assert (r.serie.loc[df.index[:120], "VHM0_SW2"] == 0.0).all()  # la altura se conserva
-    assert not r.firmas["WW"].aplica and not r.revision_requerida  # sin ceros, la regla no aplica
+    assert r.resumen["SW1"].ausentes == 0  # sin período 0, nada que marcar
     # los límites físicos no se disparan por la partición ausente
     assert not reglas.fuera_de_limites(r.serie).any().any()
 
 
-def test_particiones_ausentes_sin_firma_marca_o_detiene():
+def test_bajo_cuanto_conserva_periodo_y_direccion_e_incoherencia_por_periodo_cero():
     df = _df()
-    df.loc[df.index[:100], ["VHM0_WW", "VTM01_WW", "VMDR_WW"]] = [0.0, 0.0, 180.0]
-    df.loc[df.index[100], ["VHM0_WW", "VTM01_WW", "VMDR_WW"]] = [0.0, 3.0, 90.0]  # 1 % sin firma
+    df.loc[df.index[3], ["VHM0_SW2", "VTM01_SW2", "VMDR_SW2"]] = [0.0, 17.52, 200.0]  # por debajo de un cuanto
+    df.loc[df.index[4], ["VHM0_WW", "VTM01_WW", "VMDR_WW"]] = [0.3, 0.0, 180.0]  # período 0 con altura
     r = reglas.particiones_ausentes(df)
-    assert r.firmas["WW"].dominante and r.marcas["incoherencia_ausente_WW"].sum() == 1
-    df.loc[df.index[101:110], ["VHM0_WW", "VTM01_WW", "VMDR_WW"]] = [0.0, 5.0, 45.0]  # sin par dominante
-    assert reglas.particiones_ausentes(df).revision_requerida
+    assert r.marcas["bajo_cuanto_SW2"].sum() == 1 and not r.marcas["particion_ausente_SW2"].any()
+    assert r.serie.loc[df.index[3], "VTM01_SW2"] == 17.52 and r.serie.loc[df.index[3], "VMDR_SW2"] == 200.0
+    assert r.marcas["incoherencia_ausente_WW"].sum() == 1 and r.marcas["particion_ausente_WW"].sum() == 1
+    assert np.isnan(r.serie.loc[df.index[4], "VTM01_WW"]) and r.serie.loc[df.index[4], "VHM0_WW"] == 0.3
+    assert r.resumen["WW"].incoherencias == 1 and r.resumen["SW2"].bajo_cuanto == 1
+
+
+def test_tope_de_marcas_con_resolucion():
+    assert reglas.marcas_sobre_tope({"peralte": 100, "hs_total_cero": 0}) == []
+    m = reglas.marcas_sobre_tope({"peralte": 101, "incoherencia_ausente_WW": 100, "tm10_menor_tm02": 500})
+    assert len(m) == 2 and "peralte" in m[0] and "tm10_menor_tm02" in m[1]
+
+
+def test_periodos_bajo_resolucion_se_publican():
+    df = _df()
+    df.loc[df.index[:30], ["VHM0_WW", "VTM01_WW"]] = [0.02, 0.52]
+    df.loc[df.index[30:40], ["VHM0_WW", "VTM01_WW"]] = [0.05, 1.6]
+    r = reglas.periodos_bajo_resolucion(df)["WW"]
+    assert r["n_hasta_1_5_s"] >= 30 and r["n_bajo_resolucion"] >= 40
+    assert r["valores_t_mas_frecuentes"]["0.52"] >= 30
 
 
 def test_hs_total_cero_se_marca():

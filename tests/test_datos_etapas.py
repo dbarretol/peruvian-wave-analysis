@@ -73,7 +73,8 @@ def test_candidatos_publica_sin_exigir_resoluciones(datos):
     assert sorted(p.name for p in (d / "figuras").glob("maximo_*.png"))[0] == "maximo_01.png"
     res = json.loads((d / "resumen_candidatos.json").read_text(encoding="utf-8"))
     assert res["k_rev"] <= res["k_desc"] and res["s_cuantos"] >= 2
-    assert all(not f["aplica"] for f in res["firmas_ausencia"].values())
+    assert all(r["incoherencias"] == 0 for r in res["ausencia"].values())
+    assert res["marcas_con_resolucion"]["tope"] == 100 and "peralte" in res["marcas_con_resolucion"]["conteos"]
 
 
 def _resoluciones(raiz, ruta, descartar_pico=False, confirmar=True):
