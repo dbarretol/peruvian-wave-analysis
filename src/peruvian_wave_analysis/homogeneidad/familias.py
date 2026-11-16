@@ -18,9 +18,10 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from ..comun import procesos, semillas
+from ..comun import semillas
 from . import config as C
 from . import permutacion as P
+from .avance import Avance
 from .cuantiles import TablaCola, anio_de_contraste
 
 CUANTIL_CORTE = 0.90  # cola guardada para las permutaciones: sobre el P90 sin ponderar del contraste
@@ -97,16 +98,19 @@ def simular_A(
     nombres: tuple[str, ...],
     procesos_n: int = 1,
     lote: int = 25,
+    avance: Avance | None = None,
 ) -> np.ndarray:
-    """p mínimo ajustado de cada réplica (reasignación + inyección opcional)."""
+    """p mínimo ajustado de cada réplica (reasignación + inyección opcional). Con ``avance``, cada lote terminado
+    se guarda y una corrida interrumpida retoma desde ahí."""
     tareas = [
         (c, esquema, B, delta, lado_iny, dependencia, rho, nombres, i, min(i + lote, replicas))
         for i in range(0, replicas, lote)
     ]
-    if procesos_n <= 1:
-        res = [_tarea_A(t) for t in tareas]
-    else:
-        res = procesos.mapear(_tarea_A, tareas, procesos=procesos_n)
+    av = avance or Avance(None, "")
+    firmas = [["A", c.nombre, *t[1:]] for t in tareas]
+    res = av.ejecutar(
+        _tarea_A, tareas, firmas, [t[-1] - t[-2] for t in tareas], procesos_n, " ".join(map(str, nombres[1:])) or "A"
+    )
     return np.array([p for r in res for p in r])
 
 
@@ -196,12 +200,18 @@ def _tarea_D(args) -> list[float]:
     return out
 
 
-def simular_D(ev, esquema, B, replicas, efecto, dependencia, rho, nombres, procesos_n=1, lote=50) -> np.ndarray:
+def simular_D(
+    ev, esquema, B, replicas, efecto, dependencia, rho, nombres, procesos_n=1, lote=50, avance: Avance | None = None
+) -> np.ndarray:
     tareas = [
         (ev, esquema, B, efecto, dependencia, rho, nombres, i, min(i + lote, replicas))
         for i in range(0, replicas, lote)
     ]
-    res = [_tarea_D(t) for t in tareas] if procesos_n <= 1 else procesos.mapear(_tarea_D, tareas, procesos=procesos_n)
+    av = avance or Avance(None, "")
+    firmas = [["D", *t[1:]] for t in tareas]
+    res = av.ejecutar(
+        _tarea_D, tareas, firmas, [t[-1] - t[-2] for t in tareas], procesos_n, " ".join(map(str, nombres[1:])) or "D"
+    )
     return np.array([p for r in res for p in r])
 
 

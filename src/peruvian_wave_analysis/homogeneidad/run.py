@@ -16,7 +16,6 @@ Uso::
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from dataclasses import asdict
@@ -26,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from .. import manifiesto, rutas
-from ..comun import etapa, json_estricto, orquestador, semillas
+from ..comun import etapa, json_estricto, orquestador, procesos, semillas
 from ..comun.errores import GateFallido
 from ..datos import carga
 from ..datos import detector as D
@@ -34,8 +33,8 @@ from ..datos.run import ruta_candidatos, ruta_serie
 from ..extremos import decluster
 from ..sitio import observaciones
 from . import altimetros as A
+from . import avance, cronologia, descriptivos, familias, figuras, relevante, tendencia
 from . import config as C
-from . import cronologia, descriptivos, familias, figuras, relevante, tendencia
 from . import permutacion as P
 
 NOMBRE = "marcona-200m"
@@ -288,7 +287,7 @@ def homogeneidad(
     B_ic: int = C.B_IC,
 ) -> Path:
     raiz = rutas.directorio_datos(raiz_datos)
-    procesos_n = procesos_n or os.cpu_count() or 1
+    procesos_n = procesos_n or avance.procesos_por_defecto()
     dir_s, dir_c, dir_a = ruta_serie(raiz, nombre), ruta_candidatos(raiz, nombre), ruta_altimetros(raiz, nombre)
     for d in (dir_s, dir_c, dir_a):
         etapa.exigir_publicada(d)
@@ -305,7 +304,7 @@ def homogeneidad(
         "exposicion": dir_a / "exposicion_altimetros.parquet",
         "misiones_locales": dir_a / "misiones_locales.csv",
     }
-    etapa.exigir_insumos(insumos)
+    hashes_insumos = etapa.exigir_insumos(insumos)
     salida = ruta_homogeneidad(raiz, nombre)
     raices = orquestador.rutas_codigo(ETAPA)
     with etapa.staging_protegido(salida, raices) as st:
@@ -342,18 +341,30 @@ def homogeneidad(
         dr = {n: pr.delta_rel(n) for n in C.CONTRASTES}
         previo["delta_rel"] = {n: asdict(d) for n, d in dr.items()}
 
-        # cronometraje y B de las réplicas (§3.6)
+        # avance guardado: clave = huella del código + hashes de los insumos (avance.py)
+        clave = avance._clave([orquestador.huella_etapa(ETAPA), hashes_insumos, nombre])
+        av = avance.Avance(rutas.interim(raiz, "F04-homogeneidad", "avance"), clave, lambda m: print(m, flush=True))
+
+        # cronometraje en paralelo y B de las réplicas (§3.6): procesos_n tareas de 2 réplicas a la vez
         c1 = pr.contrastes["C1"]
         t_ini = time.perf_counter()
-        familias._tarea_A((c1, "anios", B, 0.0, 1, False, C.RHO_AR1, ("f04", "cronometro"), 0, 1))
-        seg = time.perf_counter() - t_ini
-        n_sets = 3 + len(multiplos)
-        proyectado_h = seg * replicas * n_sets * len(C.CONTRASTES) / procesos_n / 3600.0
+        crono_t = [
+            (c1, "anios", B, 0.0, 1, False, C.RHO_AR1, ("f04", "cronometro"), 2 * i, 2 * i + 2)
+            for i in range(procesos_n)
+        ]
+        if procesos_n <= 1:
+            [familias._tarea_A(t) for t in crono_t]
+        else:
+            procesos.mapear(familias._tarea_A, crono_t, procesos=procesos_n)
+        vel = 2 * procesos_n / (time.perf_counter() - t_ini)  # réplicas por segundo, en paralelo
+        n_sets = 3 + len(multiplos)  # peor caso: tres simulaciones de error de tipo I por contraste
+        proyectado_h = replicas * n_sets * len(C.CONTRASTES) / vel / 3600.0
         B_pot = B if proyectado_h <= C.HORAS_MAX_POTENCIA else min(B, C.B_REDUCIDO)
         # el cronometraje varía entre corridas: va a la consola, no a las salidas (G7)
         print(
-            f"Cronómetro: {seg:.2f} s por réplica; potencia proyectada {proyectado_h:.2f} h con {procesos_n} "
-            f"procesos; B de las réplicas = {B_pot}",
+            f"Cronómetro en paralelo: {vel * 3600:.0f} réplicas/h con {procesos_n} procesos; potencia de la familia "
+            f"A proyectada en {proyectado_h:.2f} h (peor caso, B = {B}); B de las réplicas = {B_pot}. "
+            f"Avance guardado en {av.dir}",
             flush=True,
         )
         previo["B_replicas"] = {
@@ -370,7 +381,17 @@ def homogeneidad(
 
             def nula(esquema: str, etiqueta: str, c=c, n=n) -> np.ndarray:
                 return familias.simular_A(
-                    c, esquema, B_pot, replicas, 0.0, 1, True, C.RHO_AR1, ("f04", "A", n, etiqueta, esquema), procesos_n
+                    c,
+                    esquema,
+                    B_pot,
+                    replicas,
+                    0.0,
+                    1,
+                    True,
+                    C.RHO_AR1,
+                    ("f04", "A", n, etiqueta, esquema),
+                    procesos_n,
+                    avance=av,
                 )
 
             regla = familias.aplicar_regla(nula, C.ALFA, C.TIPO_I_MAX)
@@ -419,6 +440,7 @@ def homogeneidad(
                     C.RHO_AR1,
                     ("f04", "A", n, "potencia", f"{e:.6f}"),
                     procesos_n,
+                    avance=av,
                 )
                 pots.append(float(np.mean(p <= regla.critico)))
                 filas_pot.append(
@@ -514,7 +536,7 @@ def homogeneidad(
 
         def nula_D(etiqueta: str) -> np.ndarray:
             return familias.simular_D(
-                ev, esq_D, B_pot, replicas, 0.0, True, C.RHO_AR1, ("f04", "D", etiqueta), procesos_n
+                ev, esq_D, B_pot, replicas, 0.0, True, C.RHO_AR1, ("f04", "D", etiqueta), procesos_n, avance=av
             )
 
         p_nula_D = nula_D("tipo-I")
@@ -542,7 +564,16 @@ def homogeneidad(
         for m in multiplos:
             e = m * C.EFECTO_TP_S
             p = familias.simular_D(
-                ev, esq_D, B_pot, replicas, e, dep_D, C.RHO_AR1, ("f04", "D", "potencia", f"{e}"), procesos_n
+                ev,
+                esq_D,
+                B_pot,
+                replicas,
+                e,
+                dep_D,
+                C.RHO_AR1,
+                ("f04", "D", "potencia", f"{e}"),
+                procesos_n,
+                avance=av,
             )
             pot_D["efectos"].append(e)
             pot_D["potencias"].append(float(np.mean(p <= critico_D)))
@@ -1125,7 +1156,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="homogeneidad")
     ap.add_argument("--datos")
     ap.add_argument("--nombre", default=NOMBRE)
-    ap.add_argument("--procesos", type=int, default=None)
+    ap.add_argument("--procesos", type=int, default=None, help="por defecto, los núcleos físicos")
     a = ap.parse_args(argv)
     try:
         print(f"Publicado en {homogeneidad(a.datos, a.nombre, a.procesos)}")
