@@ -43,13 +43,18 @@ def test_tormenta_sostenida_y_llegada_de_swell_no_se_marcan():
     assert D.detectar(x, k=10, s=s) == []
 
 
-def test_excursiones_contiguas_se_unen_y_el_cierre_no_abre_otra():
+def test_excursion_de_dos_pasos_y_el_cierre_no_abre_otra():
+    """§17 (F03-K-06): las excursiones no se solapan por construcción; el paso de cierre no abre otra."""
     x = _base()
     s = D.escala_s(x)
     x[100] += 1.0
-    x[101] += 1.5  # contiguo: una sola excursión de dos pasos
+    x[101] += 1.5  # dos pasos seguidos: una sola excursión
     exc = D.detectar(x, k=10, s=s)
     assert len(exc) == 1 and exc[0].inicio == 100 and exc[0].fin == 101 and exc[0].pico == 101
+    y = _base()
+    y[200] += 1.0
+    y[201] -= 1.0  # pico y valle seguidos: el valle arranca en el paso de cierre y no se abre
+    assert [e.pico for e in D.detectar(y, k=10, s=s)] == [200]
 
 
 # --- Resolución ---------------------------------------------------------------------------------
@@ -108,6 +113,36 @@ def test_proteccion_de_cola_antes_que_el_descarte():
     assert p95 == pytest.approx(np.nanpercentile(hs, 95))
 
 
+def test_vuelta_de_un_solo_lado_sobre_una_tormenta_que_decae():
+    """§3.4 «vuelve al menos al 50 % del nivel previo» (F03-S-23): pasar por debajo del nivel previo también vuelve."""
+    x = _base()
+    x[150:260] = np.linspace(4.0, 2.0, 110)  # tormenta que decae
+    x[200] += 1.5  # pico; el registro siguiente queda por debajo del previo
+    s = D.escala_s(x)
+    exc = [e for e in D.detectar(x, k=10, s=s) if e.pico == 200][0]
+    tm = np.full(x.size, 8.0)
+    r = D.resolver(exc, x, tm, _vecinas(x), p95=50.0)
+    assert r.motivo != "evento_sostenido"
+
+
+def test_misma_firma_misma_resolucion():
+    """§3.8: dos casos con la misma firma reciben la misma resolución automática, sin depender de la fecha."""
+    x = _base()
+    x[100] = x[99] + 1.0
+    x[300] = x[299] + 1.0
+    s = D.escala_s(x)
+    tm = np.full(x.size, 8.0)
+    v = _vecinas(x)
+    r = [D.resolver(e, x, tm, v, p95=50.0) for e in D.detectar(x, k=10, s=s)]
+    assert len(r) == 2 and r[0] == r[1]
+
+
+def test_razon_de_vecinas():
+    exc, x, tm, v = _caso(comparten=True)
+    razon, nv = D.razon_vecinas(x, v, exc)
+    assert nv == 7 and razon == pytest.approx(0.5, abs=0.02)
+
+
 def test_evento_sostenido_se_mantiene():
     x = _base()
     x[200:] += 4.0  # escalón de 4 m con un sobrepico de 2 m: revierte 2 m (> k·s), pero no vuelve al 50 %
@@ -160,6 +195,10 @@ def test_maximos_independientes_antes_de_descartes():
     hs[sembrados] = [5.0, 4.9, 6.0, 25.0, 4.0]  # 101 es de la misma tormenta que 100; 900 viola el límite
     m = D.maximos_independientes(hs, n=4)
     assert list(m.index) == list(idx[[100, 400, 900, 1500]])
+    # empate en Hs: gana el más antiguo, con orden estable (F03-K-05)
+    hs2 = pd.Series(1.0, index=idx)
+    hs2[idx[[2000, 500]]] = 3.0
+    assert list(D.maximos_independientes(hs2, n=1).index) == [idx[500]]
 
 
 # --- Calibración --------------------------------------------------------------------------------
@@ -194,3 +233,15 @@ def test_calibracion_reproducible_y_k_desc_k_rev():
     assert a.k_rev <= a.k_desc
     # la cola pesada (ν = 3) exige k mayor que la ligera (ν = 10) con el mismo φ
     assert a.k_por_generador[(0.90, 3)] >= a.k_por_generador[(0.90, 10)]
+
+
+def test_tasa_y_potencia_publicadas():
+    """§3.4: tasa de falsas alarmas con IC por generador y potencia para picos de 0.3 a 1.5·k·s (F03-K-03)."""
+    conteos = [0] * K.REJILLA_K.size
+    conteos[0] = 12  # 12 excursiones con k = 4 en 50 años
+    cal = K.Calibracion({(0.9, 10): 4.5}, {(0.9, 10): conteos}, anios=50)
+    t = K.tasa_falsas_alarmas(cal, 4.0)["phi=0.9,nu=10"]
+    assert t["n"] == 12 and t["ic95_anio"][0] < t["tasa_anio"] == 12 / 50 < t["ic95_anio"][1]
+    assert K.tasa_falsas_alarmas(cal, 4.5)["phi=0.9,nu=10"]["ic95_anio"][0] == 0.0
+    pot = K.potencia(0.2, 10.0, anios=20, generadores=[(0.9, 10)])["phi=0.9,nu=10"]
+    assert pot["0.3"] <= pot["1.5"] and pot["1.5"] > 0.9
