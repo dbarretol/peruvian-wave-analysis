@@ -71,6 +71,31 @@ def _vecinas(serie: ingesta.Serie) -> tuple[np.ndarray, list[str]]:
     return serie.hs_celdas[nombres].to_numpy(), nombres
 
 
+def _vecinas_sensibilidad(serie: ingesta.Serie) -> dict[str, np.ndarray]:
+    """Variantes del criterio de vecinas que se publican como sensibilidad y no deciden nada (§3.1, F03-K-03):
+    sin la vecina con tierra y con los dos anillos."""
+    a1 = [c.nombre for c in ingesta.vecinas_con_dato(serie, anillo=1)]
+    a2 = [c.nombre for c in ingesta.vecinas_con_dato(serie, anillo=2)]
+    tierra = ingesta.Celda(*C.VECINA_TIERRA, 1).nombre
+    return {
+        "sin_tierra": serie.hs_celdas[[n for n in a1 if n != tierra]].to_numpy(),
+        "dos_anillos": serie.hs_celdas[a1 + a2].to_numpy(),
+    }
+
+
+def _particion_del_salto(df: pd.DataFrame, e: D.Excursion) -> str:
+    """Partición con mayor |ΔHs_i| entre el registro previo y el pico (F03-S-20)."""
+    saltos = {p: abs(df[h].iloc[e.pico] - df[h].iloc[e.inicio - 1]) for p, (h, _, _) in C.PARTICIONES.items()}
+    saltos = {p: v for p, v in saltos.items() if np.isfinite(v)}
+    return max(saltos, key=saltos.get) if saltos else ""
+
+
+def _resumen_numerico(x: pd.Series) -> dict:
+    x = x.dropna()
+    q = [0.0, 0.5, 0.9, 0.95, 0.99, 1.0]
+    return {"n": int(x.size), "cuantiles": {str(c): float(x.quantile(c)) for c in q} if x.size else None}
+
+
 def _figura_maximo(
     df: pd.DataFrame,
     vec: pd.DataFrame,
@@ -143,14 +168,15 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
             cuantos = s / C.CUANTO
         p95 = D.percentil_cola(df0["VHM0"])
         vec, nombres_vec = _vecinas(s_nodo)
+        vec_sens = _vecinas_sensibilidad(s_nodo)
         idx = df.index
-        filas = []  # candidatos: tiempo, regla, decision, motivo, hs, inicio, fin
-        # máximos, sobre la serie antes de todo descarte (§3.10); se necesitan aquí para la regla por clase
+        filas = []  # candidatos: tiempo, regla, decision, motivo, hs, inicio, fin, salto, vecinas
+        # máximos, sobre la serie antes de todo descarte (§3.10)
         maximos = D.maximos_independientes(df0["VHM0"])
-        en_maximos = set(maximos.index)
 
         def agregar(i: int, regla: str, decision: str, motivo: str, exc: D.Excursion | None = None) -> None:
-            ini, fin = (exc.inicio, exc.fin) if exc is not None else (i, i)
+            e = exc if exc is not None else D.Excursion(i, i, i, float(hs[i] - hs[i - 1]) if i > 0 else 0.0)
+            razon, nv = D.razon_vecinas(hs, vec, e) if (exc is not None or regla == "dipolo") else (np.nan, 0)
             filas.append(
                 {
                     "tiempo": idx[i],
@@ -158,17 +184,20 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
                     "decision": decision,
                     "motivo": motivo,
                     "hs": round(float(hs[i]), 2),
-                    "inicio": idx[ini],
-                    "fin": idx[fin],
+                    "inicio": idx[e.inicio],
+                    "fin": idx[e.fin],
+                    "salto_m": round(float(e.salto), 2) if exc is not None else np.nan,
+                    "razon_vecinas": round(float(razon), 3) if np.isfinite(razon) else np.nan,
+                    "n_vecinas": int(nv),
                 }
             )
 
         def por_clase(e: D.Excursion, regla: str) -> None:
-            """Candidato del detector en la cola: regla por clase (v8, §16). Descartar un máximo sigue exigiendo la
-            confirmación del usuario (§3.10), así que en ese caso queda manual."""
+            """Candidato del detector en la cola: regla por clase (v8, §16). La clase «vuelve y no la comparten»
+            queda manual con figura: nada se descarta automáticamente en la cola (v9, §17, F03-S-21)."""
             r = D.resolver_por_clase(e, hs, tm02, vec)
-            if r.decision == D.DESCARTAR and idx[e.pico] in en_maximos:
-                agregar(e.pico, regla, D.MANUAL, f"clase:{r.motivo}:maximo", e)
+            if r.decision == D.DESCARTAR:
+                agregar(e.pico, regla, D.MANUAL, f"clase:{r.motivo}:cola", e)
             else:
                 agregar(e.pico, regla, r.decision, f"clase:{r.motivo}", e)
 
@@ -209,7 +238,19 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
         marcas_resolucion = [f"incoherencia_ausente_{p}" for p in C.PARTICIONES] + list(REGLAS_CON_RESOLUCION)
         conteo_marcas = {r: int(marcas[r].fillna(False).sum()) for r in marcas_resolucion}
         motivos += [f"revisión requerida: {m}" for m in reglas.marcas_sobre_tope(conteo_marcas)]
-        cand = pd.DataFrame(filas, columns=["tiempo", "regla", "decision", "motivo", "hs", "inicio", "fin"])
+        columnas = [
+            "tiempo",
+            "regla",
+            "decision",
+            "motivo",
+            "hs",
+            "inicio",
+            "fin",
+            "salto_m",
+            "razon_vecinas",
+            "n_vecinas",
+        ]
+        cand = pd.DataFrame(filas, columns=columnas)
         cand = cand.sort_values(["tiempo", "regla"]).reset_index(drop=True)
         auto = pd.DatetimeIndex(cand.loc[cand["decision"] == D.DESCARTAR, "tiempo"].unique())
         top = D.topes(auto, n_rev)
@@ -228,6 +269,41 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
             if vals:
                 acum[v] = vals
                 _figura_histograma(x.rename(v), vals, st / "figuras" / f"histograma_{v}.png", C.UNIDADES[v])
+        # todas las excursiones de k_rev, en toda la serie, para la F4 (v9, §17, F03-S-20), con las sensibilidades
+        # del criterio de vecinas de §3.1 (F03-K-03)
+        p99 = float(np.nanpercentile(df0["VHM0"], 99))
+        en_cand = set(cand.loc[cand["regla"].isin(["detector", "detector_revision"]), "tiempo"])
+        exc_rev = []
+        for e in D.detectar(hs, cal.k_rev, s) if cal is not None else []:
+            fila = {
+                "tiempo": idx[e.pico],
+                "inicio": idx[e.inicio],
+                "fin": idx[e.fin],
+                "anio": int(idx[e.pico].year),
+                "signo": int(np.sign(e.salto)),
+                "salto_m": round(float(e.salto), 2),
+                "hs": round(float(hs[e.pico]), 2),
+                "cola_p95": bool(hs[e.pico] >= p95),
+                "candidato": idx[e.pico] in en_cand,
+                "particion": _particion_del_salto(df, e),
+                "d_tm02_s": round(float(tm02[e.pico] - tm02[e.inicio - 1]), 2),
+                "d_tp_s": round(float(df["VTPK"].iloc[e.pico] - df["VTPK"].iloc[e.inicio - 1]), 2),
+            }
+            for nombre_v, arr in (
+                ("", vec),
+                ("_sin_tierra", vec_sens["sin_tierra"]),
+                ("_dos_anillos", vec_sens["dos_anillos"]),
+            ):
+                r_, n_v = D.razon_vecinas(hs, arr, e)
+                fila[f"razon_vecinas{nombre_v}"] = round(float(r_), 3) if np.isfinite(r_) else np.nan
+                fila[f"n_vecinas{nombre_v}"] = int(n_v)
+            exc_rev.append(fila)
+        exc_rev = pd.DataFrame(exc_rev)
+        # una columna booleana por regla (§3.8, F03-K-01)
+        for regla in ("detector", "detector_revision", "dipolo"):
+            marcas[regla] = idx.isin(cand.loc[cand["regla"] == regla, "tiempo"])
+        for v, vals in acum.items():
+            marcas[f"acumulacion_{v}"] = df[v].round(2).isin(np.round(vals, 2))
         vec_df = pd.DataFrame(vec, index=idx, columns=nombres_vec)
         for n_, t in enumerate(maximos.index, start=1):
             _figura_maximo(df, vec_df, t, st / "figuras" / f"maximo_{n_:02d}.png")
@@ -249,6 +325,7 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
         s_nodo.hs_celdas.to_parquet(st / "hs_celdas.parquet")
         marcas.to_parquet(st / "marcas.parquet")
         cand.to_csv(st / "candidatos.csv", index=False, date_format="%Y-%m-%d %H:%M", lineterminator="\n")
+        exc_rev.to_csv(st / "excursiones_k_rev.csv", index=False, date_format="%Y-%m-%d %H:%M", lineterminator="\n")
         pd.DataFrame({"tiempo": maximos.index, "hs": maximos.to_numpy().round(2)}).to_csv(
             st / "maximos.csv", index=False, date_format="%Y-%m-%d %H:%M", lineterminator="\n"
         )
@@ -264,6 +341,42 @@ def candidatos(raiz_datos=None, nombre: str = NOMBRE, anios_calibracion: int = K
             "carga_tormentas": {f"phi={p},nu={n}": c for (p, n), c in cal.carga_tormentas.items()} if cal else None,
             "rejilla_k": K.REJILLA_K.tolist(),
             "potencia_m": {"k_desc": cal.k_desc * s, "k_rev": cal.k_rev * s} if cal else None,
+            # §3.4: por generador, sobre la serie sintética (no la real); F03-K-03
+            "falsas_alarmas_sinteticas": {
+                "k_desc": K.tasa_falsas_alarmas(cal, cal.k_desc),
+                "k_rev": K.tasa_falsas_alarmas(cal, cal.k_rev),
+            }
+            if cal
+            else None,
+            "potencia_picos_un_paso": {
+                "amplitudes_en_k_s": list(K.AMPLITUDES_POTENCIA),
+                "anios": K.ANIOS_POTENCIA,
+                "k_desc": K.potencia(C.CUANTO / s, cal.k_desc),
+                "k_rev": K.potencia(C.CUANTO / s, cal.k_rev),
+            }
+            if cal
+            else None,
+            "excursiones_k_rev": {
+                "n": int(len(exc_rev)),
+                "en_la_cola": int(exc_rev["cola_p95"].sum()) if len(exc_rev) else 0,
+                "comparten_vecinas": {
+                    v: int((exc_rev[f"razon_vecinas{v}"] >= D.FRACCION_VECINAS).sum()) if len(exc_rev) else 0
+                    for v in ("", "_sin_tierra", "_dos_anillos")
+                },
+                "razon_vecinas_minima": float(exc_rev["razon_vecinas"].min()) if len(exc_rev) else None,
+                "por_anio": {str(a): int(n) for a, n in exc_rev.groupby("anio").size().items()} if len(exc_rev) else {},
+            },
+            "discrepancia_energia": _resumen_numerico(marcas["discrepancia_energia"]),
+            "saturados_en_extremos": {
+                c: {
+                    "n": int(marcas[c].sum()),
+                    "con_hs_ge_p99": int((marcas[c] & (df0["VHM0"] >= p99)).sum()),
+                    "entre_los_maximos": int(marcas[c].reindex(maximos.index).sum()),
+                }
+                for c in marcas.columns
+                if c.endswith("_saturado")
+            },
+            "p99_hs_m": p99,
             "ausencia": {
                 p: {
                     "ausentes": r.ausentes,
@@ -321,6 +434,36 @@ def _profundidades(raiz: Path, nombre: str) -> tuple[float, float]:
     return h_sitio, h_modelo
 
 
+def _marcas_por_regla(
+    booleanas: pd.DataFrame, df: pd.DataFrame, marcas: pd.DataFrame, cand: pd.DataFrame, idx_res: dict
+) -> pd.DataFrame:
+    """`marcas_por_regla.csv` (§2, F03-K-03): cada registro marcado, con regla, valor de Hs, magnitud del criterio y
+    resolución. Magnitud: el salto en m para el detector y el dipolo; la discrepancia relativa para la energía."""
+    por_cand = {(f.tiempo, f.regla): f for f in cand.itertuples()}
+    filas = []
+    for regla in booleanas.columns:
+        for t in booleanas.index[booleanas[regla].to_numpy()]:
+            c = por_cand.get((t, regla))
+            r = idx_res.get((t, regla))
+            if regla == "energia":
+                magnitud = float(marcas.at[t, "discrepancia_energia"])
+            elif c is not None:
+                magnitud = float(c.salto_m)
+            else:
+                magnitud = np.nan
+            if r is not None:
+                resolucion = f"{r.decision}: {r.motivo}"
+            elif c is not None:
+                resolucion = f"{c.decision}: {c.motivo}"
+            else:
+                resolucion = "descartado" if regla == "descartado" else "marca"
+            filas.append(
+                {"tiempo": t, "regla": regla, "hs": df.at[t, "VHM0"], "magnitud": magnitud, "resolucion": resolucion}
+            )
+    out = pd.DataFrame(filas, columns=["tiempo", "regla", "hs", "magnitud", "resolucion"])
+    return out.sort_values(["tiempo", "regla"]).reset_index(drop=True)
+
+
 def serie(raiz_datos=None, nombre: str = NOMBRE, ruta_resoluciones: Path = RESOLUCIONES) -> Path:
     raiz = rutas.directorio_datos(raiz_datos)
     dir_c = ruta_candidatos(raiz, nombre)
@@ -336,24 +479,45 @@ def serie(raiz_datos=None, nombre: str = NOMBRE, ruta_resoluciones: Path = RESOL
         "ficha_nodo": raiz / "processed" / "F01-sitio-y-fuentes" / "mapa-sitio-final" / nombre / "ficha_nodo.json",
     }
     with etapa.staging_protegido(salida, raices) as st:
-        cand = pd.read_csv(insumos["candidatos"], parse_dates=["tiempo"])
+        cand = pd.read_csv(insumos["candidatos"], parse_dates=["tiempo", "inicio", "fin"])
         maximos = pd.read_csv(insumos["maximos"], parse_dates=["tiempo"])["tiempo"]
         df = pd.read_parquet(insumos["serie_decodificada"])
         marcas = pd.read_parquet(insumos["marcas"])
         res = R.leer(ruta_resoluciones)
         manuales = cand[cand["decision"] == D.MANUAL]
-        faltas = R.faltas(manuales, maximos, res)
+        clase_dudoso = set(cand.loc[cand["motivo"] == f"clase:{D.DUDOSO}", "tiempo"])
+        faltas = R.faltas(manuales, maximos, res, maximos_dudosos=sorted(clase_dudoso & set(maximos)))
         idx_res = R.indice(res)
-        descartar = set(pd.to_datetime(cand.loc[cand["decision"] == D.DESCARTAR, "tiempo"]))
-        descartar |= {t for (t, _), r in idx_res.items() if r.decision == "descartar"}
+        # excursión de cada candidato del detector: un descarte afecta a toda la excursión (v9, §17, F03-S-22)
+        exc_de = {
+            f.tiempo: (f.inicio, f.fin)
+            for f in cand.itertuples()
+            if f.regla in ("detector", "detector_revision", "dipolo")
+        }
+
+        def tramo(t: pd.Timestamp) -> pd.DatetimeIndex:
+            ini, fin = exc_de.get(t, (t, t))
+            return df.index[(df.index >= ini) & (df.index <= fin)]
+
+        descartar: set[pd.Timestamp] = set()
+        for t in pd.to_datetime(cand.loc[cand["decision"] == D.DESCARTAR, "tiempo"]):
+            descartar |= set(tramo(t))
+        for (t, _), r in idx_res.items():
+            if r.decision == "descartar":
+                descartar |= set(tramo(t))
         valido = ~df.index.isin(sorted(descartar))
         out = df.copy()
         out.loc[~valido, list(C.VARIABLES)] = np.nan  # un descarte afecta a todas las variables del registro
         out = pd.concat([out, marcas.add_prefix("marca_")], axis=1)
         out["valido"] = valido
         anual, mensual = reglas.cobertura(pd.Series(valido, index=df.index))
-        por_anio = marcas.groupby(marcas.index.year).sum(numeric_only=True)
+        cobertura_var = reglas.cobertura_por_variable(out, valido, ("VHM0", "VTPK"))
+        # solo columnas booleanas: una magnitud continua (discrepancia de energía) no se suma (F03-K-01)
+        booleanas = marcas.select_dtypes(include="bool").copy()
+        booleanas["descartado"] = ~valido
+        por_anio = booleanas.groupby(booleanas.index.year).sum()
         por_anio.index.name = "anio"
+        por_regla = _marcas_por_regla(booleanas, df, marcas, cand, idx_res)
         h_sitio, h_modelo = _profundidades(raiz, nombre)
         completos = [a for a in sorted(set(df.index.year)) if a != C.ANIO_PARCIAL]
         largos = periodos.resumen(out[out["valido"]], completos, h_sitio, h_modelo)
@@ -375,12 +539,21 @@ def serie(raiz_datos=None, nombre: str = NOMBRE, ruta_resoluciones: Path = RESOL
             else:
                 unidos[x["tiempo"]] = dict(x)
         dudosos = [unidos[t] for t in sorted(unidos)]
-        # qué significa «sin él» para la F9: se quita solo ese registro y la tormenta conserva su siguiente máximo
+        # qué significa «sin él» para la F9; se publican las dos variantes y elige el contrato de la F9 (v9, §17):
+        # - sin el registro: la tormenta conserva su siguiente máximo;
+        # - sin la excursión: se quitan su excursión y las de todo candidato del detector a ±48 h (F03-S-22)
         for x in dudosos:
             t = pd.Timestamp(x["tiempo"])
-            w = df["VHM0"].loc[t - CONTEXTO : t + CONTEXTO].drop(t, errors="ignore")
+            ventana = df["VHM0"].loc[t - CONTEXTO : t + CONTEXTO]
+            w = ventana.drop(t, errors="ignore")
+            quitar = set(tramo(t))
+            for t2 in exc_de:
+                if abs(t2 - t) <= CONTEXTO:
+                    quitar |= set(tramo(t2))
+            w2 = ventana.drop(sorted(quitar), errors="ignore")
             x["hs_m"] = round(float(df.at[t, "VHM0"]), 2) if t in df.index else None
             x["hs_max_48h_sin_registro_m"] = round(float(w.max()), 2) if w.notna().any() else None
+            x["hs_max_48h_sin_excursion_m"] = round(float(w2.max()), 2) if w2.notna().any() else None
             # solo pesa en la F9 si es el máximo de su ventana: si no, quitarlo no cambia el pico de la tormenta
             x["es_maximo_48h"] = bool(
                 x["hs_m"] is not None
@@ -390,6 +563,8 @@ def serie(raiz_datos=None, nombre: str = NOMBRE, ruta_resoluciones: Path = RESOL
         out.to_parquet(st / "serie_nodo.parquet")
         pd.read_parquet(insumos["hs_celdas"]).to_parquet(st / "vecinas_hs.parquet")
         anual.to_csv(st / "cobertura_anual.csv", lineterminator="\n")
+        cobertura_var.to_csv(st / "cobertura.csv", index=False, lineterminator="\n")
+        por_regla.to_csv(st / "marcas_por_regla.csv", index=False, date_format="%Y-%m-%d %H:%M", lineterminator="\n")
         mensual.to_csv(st / "cobertura_mensual.csv", lineterminator="\n")
         por_anio.to_csv(st / "marcas_por_anio.csv", lineterminator="\n")
         json_estricto.escribir(st / "periodos_largos.json", largos)
@@ -402,9 +577,10 @@ def serie(raiz_datos=None, nombre: str = NOMBRE, ruta_resoluciones: Path = RESOL
                 "resoluciones": len(res),
                 "sensibilidad_f9": dudosos,
                 "sensibilidad_f9_definicion": (
-                    "Quitar solo el registro listado; la tormenta conserva su siguiente máximo "
-                    "(hs_max_48h_sin_registro_m), no se elimina entera. Si es_maximo_48h es falso, el registro no es "
-                    "el pico de su ventana y quitarlo no cambia el máximo."
+                    "Dos variantes; cuál usa la F9 lo decide su contrato. hs_max_48h_sin_registro_m: se quita solo "
+                    "el registro listado y la tormenta conserva su siguiente máximo. hs_max_48h_sin_excursion_m: se "
+                    "quitan la excursión completa del registro y las de todo candidato del detector a ±48 h. Si "
+                    "es_maximo_48h es falso, el registro no es el pico de su ventana y quitarlo no cambia el máximo."
                 ),
                 "faltas": faltas,
             },

@@ -248,3 +248,18 @@ def cobertura(valido: pd.Series) -> tuple[pd.DataFrame, pd.DataFrame]:
     mensual["incompleto"] = mensual["fraccion"] < C.COBERTURA_MIN
     mensual.index.names = ["anio", "mes"]
     return anual, mensual
+
+
+def cobertura_por_variable(serie: pd.DataFrame, valido: pd.Series | np.ndarray, variables) -> pd.DataFrame:
+    """`cobertura.csv` (§2, §3.7; F03-K-03): por variable, año y mes, fracción de registros válidos y con dato, con
+    la bandera de bloque incompleto y la de año parcial."""
+    v_ok = np.asarray(valido, dtype=bool)
+    filas = []
+    for var in variables:
+        ok = pd.Series(v_ok & serie[var].notna().to_numpy(), index=serie.index)
+        anual, mensual = cobertura(ok)
+        a = anual.reset_index().assign(variable=var, bloque="anio", mes=np.nan)
+        m = mensual.reset_index().assign(variable=var, bloque="mes", parcial=lambda d: d["anio"] == C.ANIO_PARCIAL)
+        filas += [a, m]
+    cols = ["variable", "bloque", "anio", "mes", "validos", "registros", "fraccion", "incompleto", "parcial"]
+    return pd.concat(filas, ignore_index=True)[cols]

@@ -132,3 +132,53 @@ def calibrar(
             xt = cuantizar(x + tormentas(n, 1.0, rng), cuanto_en_s)
             carga[(phi, nu)] = D.contar(xt, REJILLA_K, D.escala_s(xt)).tolist()
     return Calibracion(kg, conteos, carga, anios, cuanto_en_s)
+
+
+# --- Publicación de §3.4: tasa de falsas alarmas con IC y potencia (F03-K-03) ------------------
+
+AMPLITUDES_POTENCIA = (0.3, 0.5, 0.7, 0.9, 1.1, 1.3, 1.5)  # en unidades de k·s (§3.4)
+ANIOS_POTENCIA = 200
+SEPARACION_POTENCIA = 500  # pasos entre picos sembrados
+
+
+def tasa_falsas_alarmas(cal: Calibracion, k: float, nivel: float = 0.95) -> dict[str, dict]:
+    """Por generador: excursiones del fondo con ese k, tasa por año e IC bilateral exacto de Poisson (Garwood).
+    Vale para la serie sintética, no para la real (§3.4)."""
+    i = int(np.flatnonzero(np.isclose(REJILLA_K, k))[0])
+    a = (1.0 - nivel) / 2.0
+    out = {}
+    for (phi, nu), c in cal.conteos.items():
+        n = int(c[i])
+        lo = float(stats.chi2.ppf(a, 2 * n) / 2.0 / cal.anios) if n > 0 else 0.0
+        hi = float(stats.chi2.ppf(1.0 - a, 2 * (n + 1)) / 2.0 / cal.anios)
+        out[f"phi={phi},nu={nu}"] = {"n": n, "tasa_anio": n / cal.anios, "ic95_anio": [lo, hi]}
+    return out
+
+
+def potencia(
+    cuanto_en_s: float,
+    k: float,
+    amplitudes=AMPLITUDES_POTENCIA,
+    anios: int = ANIOS_POTENCIA,
+    generadores=GENERADORES,
+    raiz: str = "f03-potencia",
+) -> dict[str, dict[str, float]]:
+    """Por generador: fracción de picos de un paso de amplitud a·k·s sembrados en el fondo cuantizado que el detector
+    marca en el registro sembrado (§3.4, «potencia para picos de 0.3 a 1.5·s·k»)."""
+    n = anios * PASOS_ANIO
+    out = {}
+    for phi, nu in generadores:
+        rng = semillas.generador(raiz, f"phi={phi}", f"nu={nu}")
+        x = fondo(n, phi, nu, rng)
+        x = x / D.escala_s(x)
+        xq = cuantizar(x, cuanto_en_s)
+        s = D.escala_s(xq)
+        pos = np.arange(SEPARACION_POTENCIA, n - 10, SEPARACION_POTENCIA)
+        fila = {}
+        for a in amplitudes:
+            y = xq.copy()
+            y[pos] += cuantizar(np.full(pos.size, a * k * s), cuanto_en_s)
+            picos = {e.pico for e in D.detectar(y, k, s)}
+            fila[f"{a:.1f}"] = float(np.mean([int(q) in picos for q in pos.tolist()]))
+        out[f"phi={phi},nu={nu}"] = fila
+    return out

@@ -2,7 +2,9 @@
 
 Detector: un candidato se abre en t si |ΔHs(t)| > k·s y Hs **vuelve** en j ≤ w pasos, es decir, la reversión
 acumulada −signo(ΔHs(t))·[Hs(t+j) − Hs(t)] supera k·s. La excursión son los registros t … t+j−1 (el menor j). El
-salto que la cierra no abre otra. La marca va al **pico**: el registro de la excursión con mayor |Hs − Hs(t−1)|.
+salto que la cierra no abre otra (contrato v9, §17, F03-K-06): por construcción las excursiones no se solapan, y un
+pico de signo contrario que arranque en el paso de cierre no se abre. La marca va al **pico**: el registro de la
+excursión con mayor |Hs − Hs(t−1)|.
 La regla es simétrica (subidas y caídas). s = 1.4826·MAD(ΔHs) de la serie que se analiza.
 """
 
@@ -50,7 +52,7 @@ class Excursion:
 
 
 def detectar(hs: np.ndarray | pd.Series, k: float, s: float, w: int = W) -> list[Excursion]:
-    """Excursiones del detector bilateral, unidas si se solapan o se tocan."""
+    """Excursiones del detector bilateral. No se solapan por construcción: el salto que cierra una no abre otra."""
     x = np.asarray(hs, dtype=float)
     n = x.size
     umbral = k * s
@@ -69,15 +71,7 @@ def detectar(hs: np.ndarray | pd.Series, k: float, s: float, w: int = W) -> list
                 ini, fin = t, t + j - 1
                 seg = x[ini : fin + 1] - x[t - 1]
                 pico = ini + int(np.argmax(np.abs(seg)))
-                exc = Excursion(ini, fin, pico, float(x[pico] - x[t - 1]))
-                if out and exc.inicio <= out[-1].fin + 1:  # solapada o contigua: se unen
-                    a = out[-1]
-                    ini2 = a.inicio
-                    seg2 = x[ini2 : fin + 1] - x[ini2 - 1]
-                    p2 = ini2 + int(np.argmax(np.abs(seg2)))
-                    out[-1] = Excursion(ini2, fin, p2, float(x[p2] - x[ini2 - 1]))
-                else:
-                    out.append(exc)
+                out.append(Excursion(ini, fin, pico, float(x[pico] - x[t - 1])))
                 siguiente = t + j + 1
                 break
     return out
@@ -97,6 +91,13 @@ def salto_vecinas(hs_vecinas: np.ndarray, inicio: int, pico: int) -> tuple[float
     v = np.abs(hs_vecinas[pico, :] - hs_vecinas[inicio - 1, :])
     v = v[np.isfinite(v)]
     return (float(np.median(v)) if v.size else float("nan")), int(v.size)
+
+
+def razon_vecinas(hs: np.ndarray, hs_vecinas: np.ndarray, exc: Excursion) -> tuple[float, int]:
+    """(mediana del salto de las vecinas / |salto del nodo|, vecinas con dato). Es la magnitud del criterio de §3.1:
+    las vecinas comparten si la razón es ≥ FRACCION_VECINAS."""
+    med, nv = salto_vecinas(hs_vecinas, exc.inicio, exc.pico)
+    return (med / abs(exc.salto) if exc.salto else float("nan")), nv
 
 
 # --- Resolución (§3.4) --------------------------------------------------------------------------
@@ -129,7 +130,9 @@ def _resolver_sin_cola(exc: Excursion, hs: np.ndarray, tm02: np.ndarray, hs_veci
     x = np.asarray(hs, dtype=float)
     previo = x[exc.inicio - 1]
     despues = x[exc.fin + 1] if exc.fin + 1 < x.size else np.nan
-    vuelve = np.isfinite(despues) and abs(despues - previo) <= FRACCION_VUELTA * abs(exc.salto)
+    # «vuelve al menos al 50 % del nivel previo» (§3.4), de un solo lado: pasar más allá del nivel previo también es
+    # volver (contrato v9, §17, F03-S-23)
+    vuelve = np.isfinite(despues) and np.sign(exc.salto) * (despues - previo) <= FRACCION_VUELTA * abs(exc.salto)
     if not vuelve:
         return Resolucion(MANTENER, "evento_sostenido")
     med, nv = salto_vecinas(hs_vecinas, exc.inicio, exc.pico)
@@ -225,7 +228,8 @@ def dipolo(hs: np.ndarray, hs_vecinas: np.ndarray, k: float, s: float) -> np.nda
 
 def maximos_independientes(hs: pd.Series, n: int = N_MAXIMOS, separacion: pd.Timedelta = SEPARACION_MAXIMOS):
     """Los n mayores picos de Hs separados al menos ``separacion``, sobre la serie **antes de todo descarte**."""
-    x = hs.dropna().sort_values(ascending=False)
+    x = hs.dropna()
+    x = x.iloc[np.lexsort((np.arange(x.size), -x.to_numpy()))]  # Hs descendente; empate → el más antiguo (F03-K-05)
     elegidos: list[pd.Timestamp] = []
     for t in x.index:
         if all(abs(t - e) >= separacion for e in elegidos):
