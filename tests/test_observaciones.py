@@ -1,10 +1,12 @@
 """Clasificación de observaciones (contrato de la F1 §3.4 y §5.4) con mediciones sintéticas y sin red."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import pytest
 import shapely
+import xarray as xr
 from shapely.geometry import box
 
 from peruvian_wave_analysis.sitio import exposicion as ex
@@ -31,8 +33,12 @@ def _punto(rumbo, dist_km):
 
 
 def _df(filas):
-    return pd.DataFrame([{"mision": m, "tiempo": pd.Timestamp(t), "lat": la, "lon": lo, "prof_archivo_m": -3000.0}
-                         for m, t, (la, lo) in filas])
+    return pd.DataFrame(
+        [
+            {"mision": m, "tiempo": pd.Timestamp(t), "lat": la, "lon": lo, "prof_archivo_m": -3000.0}
+            for m, t, (la, lo) in filas
+        ]
+    )
 
 
 def _prof(la, lo):
@@ -46,12 +52,25 @@ def test_teselas_y_bloque():
 
 
 def test_clases_por_distancia_costa_y_exposicion(sectores, costa):
-    d = ob.clasificar(_df([
-        ("HY-2", "2015-01-01T00:00:00", _punto(270, 10)),   # sitio: cerca, mar adentro
-        ("HY-2", "2015-01-02T00:00:00", _punto(90, 20)),    # 20 km hacia la costa: más costero que el nodo → región
-        ("HY-2", "2015-01-03T00:00:00", _punto(270, 150)),  # región
-        ("HY-2", "2015-01-04T00:00:00", _punto(270, 250)),  # cuenca
-    ]), LAT0, LON0, costa, _prof, sectores)
+    d = ob.clasificar(
+        _df(
+            [
+                ("HY-2", "2015-01-01T00:00:00", _punto(270, 10)),  # sitio: cerca, mar adentro
+                (
+                    "HY-2",
+                    "2015-01-02T00:00:00",
+                    _punto(90, 20),
+                ),  # 20 km hacia la costa: más costero que el nodo → región
+                ("HY-2", "2015-01-03T00:00:00", _punto(270, 150)),  # región
+                ("HY-2", "2015-01-04T00:00:00", _punto(270, 250)),  # cuenca
+            ]
+        ),
+        LAT0,
+        LON0,
+        costa,
+        _prof,
+        sectores,
+    )
     assert list(d["clase"]) == ["sitio", "cuenca", "región", "cuenca"]
     # El punto hacia la costa queda a ≈ 12 km de ella pero en el sector E, que es «cerrado»: no es región.
     assert d.loc[1, "clase_sector"] == "cerrado"
@@ -72,27 +91,33 @@ def test_profundidad_minima_y_respaldo_de_la_profundidad(sectores, costa):
     assert d.loc[0, "clase"] == "sitio" and d.loc[0, "fuente_prof"] == "archivo (SRTM30+)"
 
 
-@pytest.mark.parametrize("mision,fecha,esperado", [
-    ("GEOSAT", "1987-05-01", "no asimilada"),
-    ("ERS-1", "1992-06-01", "no asimilada"),     # antes de 1993: sin asimilación
-    ("ERS-1", "1994-06-01", "asimilada"),
-    ("SARAL", "2014-06-01", "asimilada"),        # misión de la tabla, fuera de su período pero desde 1993
-    ("HY-2", "2016-06-01", "no asimilada"),      # QUID: HY-2A no asimilada
-    ("SENTINEL-6A", "2022-06-01", "no verificable"),
-])
+@pytest.mark.parametrize(
+    "mision,fecha,esperado",
+    [
+        ("GEOSAT", "1987-05-01", "no asimilada"),
+        ("ERS-1", "1992-06-01", "no asimilada"),  # antes de 1993: sin asimilación
+        ("ERS-1", "1994-06-01", "asimilada"),
+        ("SARAL", "2014-06-01", "asimilada"),  # misión de la tabla, fuera de su período pero desde 1993
+        ("HY-2", "2016-06-01", "no asimilada"),  # QUID: HY-2A no asimilada
+        ("SENTINEL-6A", "2022-06-01", "no verificable"),
+    ],
+)
 def test_asimilacion(mision, fecha, esperado):
     assert ob.asimilacion(mision, pd.Timestamp(fecha)) == esperado
 
 
-@pytest.mark.parametrize("mision,fecha,contrato,periodo", [
-    ("SARAL", "2014-06-01", "asimilada", "no asimilada"),    # antes de su período (2016-03)
-    ("SARAL", "2017-06-01", "asimilada", "asimilada"),
-    ("GFO", "2007-06-01", "asimilada", "no asimilada"),      # después de su período (2006-08)
-    ("CFOSAT", "2019-06-01", "asimilada", "no asimilada"),   # antes de 2020-02
-    ("ERS-1", "1992-06-01", "no asimilada", "no asimilada"),
-    ("HY-2", "2016-06-01", "no asimilada", "no asimilada"),
-    ("SWOT", "2024-06-01", "no verificable", "no verificable"),
-])
+@pytest.mark.parametrize(
+    "mision,fecha,contrato,periodo",
+    [
+        ("SARAL", "2014-06-01", "asimilada", "no asimilada"),  # antes de su período (2016-03)
+        ("SARAL", "2017-06-01", "asimilada", "asimilada"),
+        ("GFO", "2007-06-01", "asimilada", "no asimilada"),  # después de su período (2006-08)
+        ("CFOSAT", "2019-06-01", "asimilada", "no asimilada"),  # antes de 2020-02
+        ("ERS-1", "1992-06-01", "no asimilada", "no asimilada"),
+        ("HY-2", "2016-06-01", "no asimilada", "no asimilada"),
+        ("SWOT", "2024-06-01", "no verificable", "no verificable"),
+    ],
+)
 def test_sensibilidad_por_periodo(mision, fecha, contrato, periodo):
     t = pd.Timestamp(fecha)
     assert ob.asimilacion(mision, t) == contrato
@@ -134,6 +159,7 @@ def test_pasadas_y_cobertura_por_regimen(sectores, costa):
 def test_regla_del_respaldo():
     def cob(util):
         return pd.DataFrame([{"regimen": "desde 1993 (asimilado)", "cobertura_util_sitio": util}])
+
     r = "desde 1993 (asimilado)"
     assert ob.regla_respaldo(cob(False), cob(True), r).startswith("pasar")
     assert ob.regla_respaldo(cob(True), cob(True), r) == "mantener el nodo"
@@ -141,17 +167,19 @@ def test_regla_del_respaldo():
 
 
 def test_leer_usa_la_banda_que_trae_el_archivo(tmp_path):
-    import xarray as xr
 
     def archivo(mision, banda):
         d = tmp_path / mision
         d.mkdir()
         t = pd.date_range("2015-01-01", periods=3, freq="1s")
-        ds = xr.Dataset({f"SWH_{banda}_quality_control": ("TIME", [1.0, 2.0, 1.0]), "BOT_DEPTH": ("TIME", [-3000.0] * 3)},
-                        coords={"TIME": t, "LATITUDE": ("TIME", [-15.0] * 3), "LONGITUDE": ("TIME", [284.2] * 3)})
+        ds = xr.Dataset(
+            {f"SWH_{banda}_quality_control": ("TIME", [1.0, 2.0, 1.0]), "BOT_DEPTH": ("TIME", [-3000.0] * 3)},
+            coords={"TIME": t, "LATITUDE": ("TIME", [-15.0] * 3), "LONGITUDE": ("TIME", [284.2] * 3)},
+        )
         ruta = d / "x.nc"
         ds.to_netcdf(ruta)
         return ruta
+
     df = ob.leer([archivo("HY-2", "KU"), archivo("SARAL", "KA")])
     assert len(df) == 4 and set(df["banda"]) == {"KU", "KA"}  # la bandera 2 se descarta
     assert df["lon"].iloc[0] == pytest.approx(-75.8)
@@ -162,8 +190,14 @@ KX = 111.195 * np.cos(np.radians(LAT0))  # km por grado de longitud en la proyec
 
 
 def test_borde_de_25_km(sectores, costa):
-    d = ob.clasificar(_df([("HY-2", "2015-01-01", _punto(270, 24.9)), ("HY-2", "2015-01-02", _punto(270, 25.1))]),
-                      LAT0, LON0, costa, _prof, sectores)
+    d = ob.clasificar(
+        _df([("HY-2", "2015-01-01", _punto(270, 24.9)), ("HY-2", "2015-01-02", _punto(270, 25.1))]),
+        LAT0,
+        LON0,
+        costa,
+        _prof,
+        sectores,
+    )
     assert list(d["clase"]) == ["sitio", "región"]
 
 
@@ -178,8 +212,14 @@ def test_borde_de_la_distancia_del_nodo_a_la_costa(sectores, costa):
     """Al norte (sector abierto), a la misma longitud que el nodo: igual distancia a la costa → «sitio»;
     un poco hacia la costa → ya no es «sitio»."""
     la = float(ex.destino(LAT0, LON0, 0.0, 10.0)[0])
-    d = ob.clasificar(_df([("HY-2", "2015-01-01", (la, LON0)), ("HY-2", "2015-01-02", (la, LON0 + 0.01))]),
-                      LAT0, LON0, costa, _prof, sectores)
+    d = ob.clasificar(
+        _df([("HY-2", "2015-01-01", (la, LON0)), ("HY-2", "2015-01-02", (la, LON0 + 0.01))]),
+        LAT0,
+        LON0,
+        costa,
+        _prof,
+        sectores,
+    )
     assert d.loc[0, "dist_costa_km"] == pytest.approx(d.attrs["dist_costa_nodo_km"], abs=1e-9)
     assert list(d["clase"]) == ["sitio", "región"]
 

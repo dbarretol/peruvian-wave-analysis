@@ -1,12 +1,16 @@
 """Piezas de la ficha del sitio que no necesitan red ni datos reales."""
+
 from __future__ import annotations
 
 import json
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
+from peruvian_wave_analysis.comun import etapa, huella, orquestador
+from peruvian_wave_analysis.comun.errores import ErrorGate
 from peruvian_wave_analysis.sitio import ficha
 
 
@@ -56,15 +60,25 @@ def test_profundidad_vectorizada_y_nan_fuera(tmp_path):
 
 
 # --- Gate de la ficha (F01-K-01, F01-K-02) ---
-import pandas as pd  # noqa: E402
 
-GATE_SERIE = {"cumple": True, "catalogo": {"dataset_id": "ds", "version": "202411", "inicio": "1980-01-01T00:00:00Z",
-                                           "fin": "2026-08-31T21:00:00Z", "paso_h": 3.0, "consulta_utc": "2026-11-15T04:35:53Z"}}
+GATE_SERIE = {
+    "cumple": True,
+    "catalogo": {
+        "dataset_id": "ds",
+        "version": "202411",
+        "inicio": "1980-01-01T00:00:00Z",
+        "fin": "2026-08-31T21:00:00Z",
+        "paso_h": 3.0,
+        "consulta_utc": "2026-11-15T04:35:53Z",
+    },
+}
 SECTORES = pd.DataFrame({"sector": range(16), "clase": ["abierto"] * 16})
 
 
 def _crono(gate=GATE_SERIE):
-    return pd.DataFrame(ficha.CRONOLOGIA + ficha.filas_catalogo(gate), columns=["fecha", "tipo", "descripcion", "referencia"])
+    return pd.DataFrame(
+        ficha.CRONOLOGIA + ficha.filas_catalogo(gate), columns=["fecha", "tipo", "descripcion", "referencia"]
+    )
 
 
 def _res(filas, prof_archivo=0):
@@ -73,19 +87,26 @@ def _res(filas, prof_archivo=0):
     return {"principal": {"mediciones": m, "prof_archivo_200km": prof_archivo}}
 
 
-BUENAS = [("HY-2", "2015-01-01", "no asimilada", True), ("GEOSAT", "1987-01-01", "no asimilada", True),
-          ("JASON-2", "2012-01-01", "asimilada", False), ("SWOT", "2024-01-01", "no verificable", False)]
+BUENAS = [
+    ("HY-2", "2015-01-01", "no asimilada", True),
+    ("GEOSAT", "1987-01-01", "no asimilada", True),
+    ("JASON-2", "2012-01-01", "asimilada", False),
+    ("SWOT", "2024-01-01", "no verificable", False),
+]
 
 
 def test_gate_cumple_con_datos_correctos():
     assert ficha.gate_ficha(_res(BUENAS), _crono(), SECTORES, GATE_SERIE, "g.nc") == []
 
 
-@pytest.mark.parametrize("fila", [
-    ("JASON-2", "2012-01-01", "asimilada", True),          # asimilada marcada como útil
-    ("SWOT", "2024-01-01", "no verificable", True),         # no verificable marcada como útil
-    ("SARAL", "2014-01-01", "no asimilada", True),          # útil sin ser de 1980–1992 ni no asimilada según el QUID
-])
+@pytest.mark.parametrize(
+    "fila",
+    [
+        ("JASON-2", "2012-01-01", "asimilada", True),  # asimilada marcada como útil
+        ("SWOT", "2024-01-01", "no verificable", True),  # no verificable marcada como útil
+        ("SARAL", "2014-01-01", "no asimilada", True),  # útil sin ser de 1980–1992 ni no asimilada según el QUID
+    ],
+)
 def test_gate_falla_con_util_indebido(fila):
     fallas = ficha.gate_ficha(_res(BUENAS + [fila]), _crono(), SECTORES, GATE_SERIE, "g.nc")
     assert any("útiles para el sesgo" in f for f in fallas)
@@ -114,3 +135,37 @@ def test_cronologia_sin_catalogo_dice_no_disponible():
 def test_gate_falla_con_sector_sin_clase():
     malos = SECTORES.assign(clase=["abierto"] * 15 + [None])
     assert any("16 sectores" in f for f in ficha.gate_ficha(_res(BUENAS), _crono(), malos, GATE_SERIE, "g.nc"))
+
+
+def _ficha_publicada(datos, destino, raices, insumo, base):
+    with etapa.staging_protegido(destino, raices, base_codigo=base) as st:
+        (st / "tabla.csv").write_text("a\n1\n", encoding="utf-8")
+        etapa.publicar(st, destino, etapa.Gate(True, {}), raices, {"i": insumo}, datos, None, base_codigo=base)
+    return (destino / etapa.MANIFIESTO).read_bytes()
+
+
+def test_solo_md_rechaza_codigo_o_insumo_cambiado_sin_borrar_la_ficha(tmp_path):
+    """F02-K-04: --solo-md no reutiliza tablas de otro código o de otros insumos, y el rechazo no borra la ficha."""
+    datos = tmp_path / "WAVE-DATA"
+    final = datos / "processed" / "F01-sitio-y-fuentes" / "mapa-sitio-final" / "x"
+    final.mkdir(parents=True)
+    (final / "ficha_nodo.json").write_text(json.dumps({"nodo_elegido": {"lat": -15.0, "lon": -75.8}}), "utf-8")
+    insumo = datos / "raw" / "i.txt"
+    insumo.parent.mkdir(parents=True)
+    insumo.write_text("1\n", encoding="utf-8")
+    destino = datos / "processed" / "F01-sitio-y-fuentes" / "ficha-sitio" / "x"
+
+    otro = tmp_path / "otro"  # publicada por otro código: huella distinta de la actual
+    otro.mkdir()
+    (otro / "m.py").write_text("X = 1\n", encoding="utf-8")
+    antes = _ficha_publicada(datos, destino, [otro], insumo, tmp_path)
+    with pytest.raises(ErrorGate, match="código cambió"):
+        ficha.regenerar_md("x", str(datos))
+    assert (destino / etapa.MANIFIESTO).read_bytes() == antes
+
+    raices = orquestador.rutas_codigo(ficha.ETAPA)  # publicada por el código actual, pero el insumo cambia
+    antes = _ficha_publicada(datos, destino, raices, insumo, huella.DIR_PROYECTO)
+    insumo.write_text("2\n", encoding="utf-8")
+    with pytest.raises(ErrorGate, match="insumo cambió"):
+        ficha.regenerar_md("x", str(datos))
+    assert (destino / etapa.MANIFIESTO).read_bytes() == antes

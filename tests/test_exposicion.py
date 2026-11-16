@@ -1,4 +1,5 @@
 """Exposición por sectores y obstáculos (contrato de la F1 §3.1, §3.2 y §5.2–5.3) con geometría sintética."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -41,7 +42,11 @@ def test_isla_que_solo_toca_el_borde_de_una_cuna_deja_el_sector_parcial():
     isla = box(lo - 0.05, la - 0.05, lo + 0.05, la + 0.05)
     e = ex.calcular(_prep(shapely.union(CONTINENTE, isla)), LAT0, LON0)
     o = e.sectores.set_index("nombre_sector").loc["O"]
-    assert o["clase"] == "parcial" and o["fraccion_rayos_1000_km"] < 1 and o["dist_min_tierra_km"] == pytest.approx(300, abs=10)
+    assert (
+        o["clase"] == "parcial"
+        and o["fraccion_rayos_1000_km"] < 1
+        and o["dist_min_tierra_km"] == pytest.approx(300, abs=10)
+    )
 
 
 def test_alcance_oceano_austral_y_pacifico_norte():
@@ -73,14 +78,14 @@ def _gebco(islas):
     lat = np.round(np.arange(-15.6, -14.4, 1 / 240), 5)
     lon = np.round(np.arange(-76.4, -75.0, 1 / 240), 5)
     z = np.where(lon[None, :] > -75.5, 100.0, -300.0) * np.ones((lat.size, 1))
-    for (la, lo, r) in islas:
+    for la, lo, r in islas:
         z[(np.abs(lat[:, None] - la) <= r) & (np.abs(lon[None, :] - lo) <= r)] = 10.0
     return xr.DataArray(z, coords={"lat": lat, "lon": lon}, dims=("lat", "lon"))
 
 
 def test_obstaculos_dentro_y_fuera_de_50_km_y_bajo_la_resolucion():
     sect = ex.calcular(_prep(CONTINENTE), LAT0, LON0).sectores
-    cerca = (-15.0, -76.0, 0.02)   # ≈ 21 km al oeste
+    cerca = (-15.0, -76.0, 0.02)  # ≈ 21 km al oeste
     lejos = (-15.55, -76.35, 0.02)  # ≈ 85 km: fuera
     df = ex.obstaculos(_gebco([cerca, lejos]), [], LAT0, LON0, sect, es_tierra_modelo=lambda la, lo: False)
     assert len(df) == 1 and df.loc[0, "dist_min_km"] == pytest.approx(19, abs=3)
@@ -97,8 +102,20 @@ def test_error_si_el_rayo_sale_del_insumo_en_el_tramo_de_cuenca():
         ex.calcular(_prep(CONTINENTE), LAT0, LON0, extension=(-87.0, -64.0, -25.0, -5.0))
 
 
-@pytest.mark.parametrize("rumbo,sector", [(0.0, 0), (11.2499, 0), (11.25, 1), (33.75, 2), (348.75, 0),
-                                          (348.7499, 15), (359.99, 0), (191.25, 9), (213.75, 10)])
+@pytest.mark.parametrize(
+    "rumbo,sector",
+    [
+        (0.0, 0),
+        (11.2499, 0),
+        (11.25, 1),
+        (33.75, 2),
+        (348.75, 0),
+        (348.7499, 15),
+        (359.99, 0),
+        (191.25, 9),
+        (213.75, 10),
+    ],
+)
 def test_sector_de_semiabierto_y_simetrico(rumbo, sector):
     """F01-K-06: intervalos [c − 11.25°, c + 11.25°), sin redondeo a par."""
     assert int(ex.sector_de(rumbo)) == sector

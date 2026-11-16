@@ -12,6 +12,7 @@ Informativos (no descartan salvo que se fije el parámetro): fracción de tierra
 Las colisiones de uso se declaran. Orden por distancia a la isóbata principal y luego a la referencia.
 Se numeran como candidatos hasta ``n_candidatos`` nodos.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -41,7 +42,9 @@ def proyectar(lon, lat, lon0: float, lat0: float) -> np.ndarray:
 def isolineas(elev: xr.DataArray, nivel: float) -> list[np.ndarray]:
     """Isolíneas de elevación ``nivel`` como lista de arreglos (n, 2) de (lon, lat)."""
     gen = contourpy.contour_generator(
-        x=elev["lon"].values, y=elev["lat"].values, z=np.ma.masked_invalid(elev.values),
+        x=elev["lon"].values,
+        y=elev["lat"].values,
+        z=np.ma.masked_invalid(elev.values),
         line_type=contourpy.LineType.Separate,
     )
     return [ln for ln in gen.lines(nivel) if len(ln) >= 2]
@@ -51,7 +54,7 @@ def _densificar(lineas: list[np.ndarray], paso_grados: float) -> np.ndarray:
     """Vértices de las líneas con puntos intermedios cada ``paso_grados`` como máximo."""
     pts = []
     for ln in lineas:
-        for a, b in zip(ln[:-1], ln[1:]):
+        for a, b in zip(ln[:-1], ln[1:], strict=True):
             n = max(1, int(np.ceil(np.hypot(*(b - a)) / paso_grados)))
             t = np.linspace(0.0, 1.0, n, endpoint=False)[:, None]
             pts.append(a + t * (b - a))
@@ -124,22 +127,33 @@ def tabla(
             nv, npres = _vecinas_validas(malla.valido, i, j)
             if evaluador is not None:
                 ev = evaluador.evaluar(la, lo, malla.paso)
-                z = {"excluido_por_zona": ev.excluido, "zonas_exclusion": "; ".join(ev.zonas_exclusion),
-                     "zonas_colision": "; ".join(ev.zonas_colision), "dist_exclusion_km": ev.dist_exclusion_km}
+                z = {
+                    "excluido_por_zona": ev.excluido,
+                    "zonas_exclusion": "; ".join(ev.zonas_exclusion),
+                    "zonas_colision": "; ".join(ev.zonas_colision),
+                    "dist_exclusion_km": ev.dist_exclusion_km,
+                }
             else:
-                z = {"excluido_por_zona": False, "zonas_exclusion": "", "zonas_colision": "", "dist_exclusion_km": np.nan}
-            filas.append({
-                "lat": round(float(la), 4),
-                "lon": round(float(lo), 4),
-                "valido": bool(malla.valido[i, j]),
-                "prof_nodo_m": float(-elev.sel(lat=la, lon=lo, method="nearest")),
-                "prof_min_celda_m": pmin,
-                "prof_media_celda_m": pmed,
-                "frac_tierra_celda": ftierra,
-                "vecinas_validas": nv,
-                "vecinas_presentes": npres,
-                **z,
-            })
+                z = {
+                    "excluido_por_zona": False,
+                    "zonas_exclusion": "",
+                    "zonas_colision": "",
+                    "dist_exclusion_km": np.nan,
+                }
+            filas.append(
+                {
+                    "lat": round(float(la), 4),
+                    "lon": round(float(lo), 4),
+                    "valido": bool(malla.valido[i, j]),
+                    "prof_nodo_m": float(-elev.sel(lat=la, lon=lo, method="nearest")),
+                    "prof_min_celda_m": pmin,
+                    "prof_media_celda_m": pmed,
+                    "frac_tierra_celda": ftierra,
+                    "vecinas_validas": nv,
+                    "vecinas_presentes": npres,
+                    **z,
+                }
+            )
     df = pd.DataFrame(filas)
     if df.empty:
         raise ValueError("No hay nodos de WAVERYS dentro del recuadro.")

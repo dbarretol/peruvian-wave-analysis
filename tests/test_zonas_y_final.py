@@ -1,15 +1,17 @@
 """Zonas (ADR-0010, ADR-0012), mapa exploratorio con zonas y mapa definitivo (ADR-0011)."""
+
 import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 import xarray as xr
+import yaml
 
 from peruvian_wave_analysis import manifiesto
 from peruvian_wave_analysis.sitio import batimetria, candidatos, gebco, generar_mapa, waverys, zonas
 from peruvian_wave_analysis.sitio.cli import main, main_final, main_registrar_gebco
-from peruvian_wave_analysis.sitio.final import ConfigFinal, ErrorGate, generar_mapa_final
+from peruvian_wave_analysis.sitio.final import ConfigFinal, ErrorMapaFinal, generar_mapa_final
 
 from .conftest import LAT0
 
@@ -22,11 +24,17 @@ def _fila(df, lat, lon):
 
 # --- Clasificación (ADR-0012) -----------------------------------------------------------------
 
-@pytest.mark.parametrize("cate, clase", [
-    ("Parque Nacional", zonas.EXCLUSION), ("Santuario Nacional", zonas.EXCLUSION),
-    ("Santuario Histórico", zonas.EXCLUSION), ("Reserva Nacional", zonas.COLISION),
-    ("Reserva Paisajística", zonas.COLISION),
-])
+
+@pytest.mark.parametrize(
+    "cate, clase",
+    [
+        ("Parque Nacional", zonas.EXCLUSION),
+        ("Santuario Nacional", zonas.EXCLUSION),
+        ("Santuario Histórico", zonas.EXCLUSION),
+        ("Reserva Nacional", zonas.COLISION),
+        ("Reserva Paisajística", zonas.COLISION),
+    ],
+)
 def test_clasificacion_anp(cate, clase):
     assert zonas._anp_definitiva({"anp_cate": cate}) == clase
 
@@ -49,6 +57,7 @@ def test_zonificacion_solo_proteccion_estricta():
 
 
 # --- Descarga y registro --------------------------------------------------------------------
+
 
 def test_capas_se_registran_y_la_que_falla_queda_no_evaluada(cfg_sintetica):
     raiz = Path(cfg_sintetica.directorio_datos)
@@ -83,10 +92,16 @@ def test_consulta_por_lotes_de_identificadores(monkeypatch):
         if params.get("returnIdsOnly"):
             return Resp({"objectIds": [5, 3, 1, 4, 2]})
         ids = params["objectIds"].split(",")
-        return Resp({"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"id": i}, "geometry": None} for i in ids]})
+        return Resp(
+            {
+                "type": "FeatureCollection",
+                "features": [{"type": "Feature", "properties": {"id": i}, "geometry": None} for i in ids],
+            }
+        )
 
     class Sesion:
         pass
+
     sesion = Sesion()
     sesion.get = get
     monkeypatch.setattr(zonas, "_sesion", lambda: sesion)
@@ -109,10 +124,13 @@ def test_lote_incompleto_es_error(monkeypatch):
     def get(url, params, timeout):
         if params.get("returnIdsOnly"):
             return Resp({"objectIds": [1, 2]})
-        return Resp({"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": None}]})
+        return Resp(
+            {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": None}]}
+        )
 
     class Sesion:
         pass
+
     sesion = Sesion()
     sesion.get = get
     monkeypatch.setattr(zonas, "_sesion", lambda: sesion)
@@ -121,6 +139,7 @@ def test_lote_incompleto_es_error(monkeypatch):
 
 
 # --- Evaluación por celda (ADR-0010) --------------------------------------------------------------
+
 
 @pytest.fixture
 def tabla_con_zonas(cfg_sintetica):
@@ -133,6 +152,7 @@ def tabla_con_zonas(cfg_sintetica):
         cfg_sintetica.resguardo_km = resguardo_km
         df, _ = candidatos.tabla(cfg_sintetica, bat.elevacion, malla, z)
         return df
+
     return hacer
 
 
@@ -170,6 +190,7 @@ def test_hasta_tres_candidatos_fuera_de_exclusion(tabla_con_zonas):
 
 # --- Mapa exploratorio con zonas --------------------------------------------------------------
 
+
 def test_mapa_exploratorio_declara_capas_no_evaluadas(cfg_sintetica):
     r = generar_mapa(cfg_sintetica)
     meta = json.loads(r.salidas["metadatos"].read_text(encoding="utf-8"))
@@ -186,6 +207,7 @@ def test_mapa_exploratorio_declara_capas_no_evaluadas(cfg_sintetica):
 
 
 # --- GEBCO y mapa definitivo --------------------------------------------------------------------
+
 
 @pytest.fixture
 def gebco_descargado(tmp_path):
@@ -218,11 +240,18 @@ def test_mapa_final_publica_y_no_descarga(exploratorio, gebco_descargado, cfg_si
 
     def _sin_descargas(*a, **k):
         raise AssertionError("el mapa definitivo no debe descargar")
+
     monkeypatch.setattr(zonas, "_consultar", _sin_descargas)
 
     c1 = exploratorio.tabla[exploratorio.tabla["candidato"] == 1].iloc[0]
-    r = generar_mapa_final(ConfigFinal(exploratorio=str(exploratorio.salidas["metadatos"]), gebco=str(ruta_gebco),
-                                       nodo_lat=float(c1["lat"]), nodo_lon=float(c1["lon"])))
+    r = generar_mapa_final(
+        ConfigFinal(
+            exploratorio=str(exploratorio.salidas["metadatos"]),
+            gebco=str(ruta_gebco),
+            nodo_lat=float(c1["lat"]),
+            nodo_lon=float(c1["lon"]),
+        )
+    )
     assert "processed" in r.salidas["mapa"].parts
     m = json.loads(r.salidas["manifiesto"].read_text(encoding="utf-8"))
     for nombre, h in m["salidas_sha256"].items():
@@ -258,13 +287,13 @@ def test_gate_falla_si_el_nodo_esta_excluido_y_borra_la_salida_anterior(explorat
     r = generar_mapa_final(ConfigFinal(meta, str(ruta_gebco), float(c1["lat"]), float(c1["lon"])))
     publicado = r.salidas["mapa"].parent
     assert publicado.exists()
-    with pytest.raises(ErrorGate, match="2: zona de exclusión"):
+    with pytest.raises(ErrorMapaFinal, match="2: zona de exclusión"):
         generar_mapa_final(ConfigFinal(meta, str(ruta_gebco), LAT0, -75.4))
     assert not publicado.exists()
 
 
 def test_gebco_sin_registrar_es_error(exploratorio, gebco_descargado):
-    with pytest.raises(ErrorGate, match="registrar-gebco"):
+    with pytest.raises(ErrorMapaFinal, match="registrar-gebco"):
         generar_mapa_final(ConfigFinal(str(exploratorio.salidas["metadatos"]), str(gebco_descargado), -15.2, -75.4))
 
 
@@ -272,9 +301,11 @@ def test_gebco_que_no_cubre_es_error(exploratorio, cfg_sintetica, tmp_path):
     lon = np.arange(-76.0, -75.0, 0.01)
     lat = np.arange(-16.0, -15.0, 0.01)
     p = tmp_path / "chico.nc"
-    xr.Dataset({"elevation": (("lat", "lon"), -np.ones((lat.size, lon.size)))}, coords={"lat": lat, "lon": lon}).to_netcdf(p)
+    xr.Dataset(
+        {"elevation": (("lat", "lon"), -np.ones((lat.size, lon.size)))}, coords={"lat": lat, "lon": lon}
+    ).to_netcdf(p)
     ruta, _ = gebco.registrar(p, Path(cfg_sintetica.directorio_datos), "GEBCO_2025")
-    with pytest.raises(ErrorGate, match="no cubre"):
+    with pytest.raises(ErrorMapaFinal, match="no cubre"):
         generar_mapa_final(ConfigFinal(str(exploratorio.salidas["metadatos"]), str(ruta), -15.2, -75.4))
 
 
@@ -283,14 +314,20 @@ def test_cli_registrar_y_final(exploratorio, gebco_descargado, cfg_sintetica, ca
     assert main_registrar_gebco(["--archivo", str(gebco_descargado), "--version", "GEBCO_2025", "--datos", raiz]) == 0
     ruta = Path(raiz) / "raw" / "batimetria" / "gebco" / gebco_descargado.name
     meta = str(exploratorio.salidas["metadatos"])
-    assert main_final(["--exploratorio", meta, "--gebco", str(ruta), "--nodo-lat", str(LAT0), "--nodo-lon", "-75.4"]) == 1
+    assert (
+        main_final(["--exploratorio", meta, "--gebco", str(ruta), "--nodo-lat", str(LAT0), "--nodo-lon", "-75.4"]) == 1
+    )
     assert "GATE FALLIDO" in capsys.readouterr().err
     c1 = exploratorio.tabla[exploratorio.tabla["candidato"] == 1].iloc[0]
-    assert main_final(["--exploratorio", meta, "--gebco", str(ruta), "--nodo-lat", str(c1["lat"]), "--nodo-lon", str(c1["lon"])]) == 0
+    assert (
+        main_final(
+            ["--exploratorio", meta, "--gebco", str(ruta), "--nodo-lat", str(c1["lat"]), "--nodo-lon", str(c1["lon"])]
+        )
+        == 0
+    )
 
 
 def test_cli_exploratorio_avisa_gebco(cfg_sintetica, capsys, tmp_path):
-    import yaml
 
     p = tmp_path / "cfg.yaml"
     p.write_text(yaml.safe_dump(cfg_sintetica.como_dict(), allow_unicode=True), encoding="utf-8")

@@ -8,11 +8,12 @@ El manifiesto vive en la raíz de ``raw/`` en dos archivos:
 - ``MANIFEST.sha256``: una línea ``<sha256>  <ruta relativa>`` por archivo (verificable con ``sha256sum -c``);
 - ``MANIFEST.json``: los mismos archivos con su origen, parámetros de la consulta y fecha de acceso.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +62,7 @@ def registrar(raiz: Path, ruta: Path, origen: dict[str, Any]) -> dict[str, Any]:
     entrada = {
         "sha256": h,
         "bytes": Path(ruta).stat().st_size,
-        "fecha_acceso_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "fecha_acceso_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         **origen,
     }
     if rel in entradas:  # mismo archivo, mismo hash: se conserva la fecha de acceso original

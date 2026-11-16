@@ -3,6 +3,7 @@
 Geometría: esfera de 6371 km; rayos por gran círculo desde el nodo. La dirección de cada sector es
 la de **donde viene el oleaje**, que coincide con el rumbo del rayo trazado desde el nodo hacia mar adentro.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import shapely
+from scipy import ndimage
 
 R_TIERRA_KM = 6371.0
 N_SECTORES = 16
@@ -78,8 +80,9 @@ class Exposicion:
     sectores: pd.DataFrame  # una fila por sector
 
 
-def calcular(tierra, lat0: float, lon0: float, extension=(-180.0, 180.0, -90.0, 90.0),
-             mascara_modelo=None) -> Exposicion:
+def calcular(
+    tierra, lat0: float, lon0: float, extension=(-180.0, 180.0, -90.0, 90.0), mascara_modelo=None
+) -> Exposicion:
     """Exposición por sectores (§3.1).
 
     ``tierra``: geometría (lon, lat) preparada. ``extension``: (oeste, este, sur, norte) del insumo;
@@ -95,7 +98,9 @@ def calcular(tierra, lat0: float, lon0: float, extension=(-180.0, 180.0, -90.0, 
             rb = (centro + desvio) % 360.0
             la, lo = destino(lat0, lon0, rb, d_loc)
             if not _dentro(extension, la, lo):
-                raise ErrorExposicion(f"El rayo de rumbo {rb:.0f}° sale del insumo {extension} antes de {ALCANCE_KM:g} km.")
+                raise ErrorExposicion(
+                    f"El rayo de rumbo {rb:.0f}° sale del insumo {extension} antes de {ALCANCE_KM:g} km."
+                )
             i = _primer_toque(tierra, la, lo)
             dist = float(d_loc[i]) if i is not None else np.nan
             # Alcance de cuenca: hasta la primera tierra (o 12 000 km).
@@ -108,40 +113,61 @@ def calcular(tierra, lat0: float, lon0: float, extension=(-180.0, 180.0, -90.0, 
             libre = lac[:lim]
             austral = bool((libre <= LAT_OCEANO_AUSTRAL).any())
             norte = bool((libre >= LAT_PACIFICO_NORTE).any())
-            fila = {"sector": k, "nombre_sector": NOMBRES_SECTOR[k], "rumbo": rb, "dist_tierra_km": dist,
-                    "llega_1000_km": i is None, "abierto_oceano_austral": austral, "abierto_pacifico_norte": norte,
-                    "dist_tierra_cuenca_km": float(d_cue[j]) if j is not None else np.nan}
+            fila = {
+                "sector": k,
+                "nombre_sector": NOMBRES_SECTOR[k],
+                "rumbo": rb,
+                "dist_tierra_km": dist,
+                "llega_1000_km": i is None,
+                "abierto_oceano_austral": austral,
+                "abierto_pacifico_norte": norte,
+                "dist_tierra_cuenca_km": float(d_cue[j]) if j is not None else np.nan,
+            }
             if mascara_modelo is not None:
                 es_tierra_modelo, ext_m = mascara_modelo
                 o, e, s, n = ext_m
                 en = (lo >= o) & (lo <= e) & (la >= s) & (la <= n)
                 hasta = int(np.argmin(en)) if not en.all() else en.size
-                tm = np.array([es_tierra_modelo(a, b) for a, b in zip(la[:hasta], lo[:hasta])], bool)
+                tm = np.array([es_tierra_modelo(a, b) for a, b in zip(la[:hasta], lo[:hasta], strict=True)], bool)
                 fila["dist_tierra_modelo_km"] = float(d_loc[int(np.argmax(tm))]) if tm.any() else np.nan
                 fila["extension_malla_km"] = float(d_loc[hasta - 1]) if hasta else 0.0
             filas.append(fila)
     rayos = pd.DataFrame(filas)
     sect = rayos.groupby(["sector", "nombre_sector"], as_index=False).agg(
-        fraccion_rayos_1000_km=("llega_1000_km", "mean"), dist_min_tierra_km=("dist_tierra_km", "min"),
-        abierto_oceano_austral=("abierto_oceano_austral", "any"), abierto_pacifico_norte=("abierto_pacifico_norte", "any"))
+        fraccion_rayos_1000_km=("llega_1000_km", "mean"),
+        dist_min_tierra_km=("dist_tierra_km", "min"),
+        abierto_oceano_austral=("abierto_oceano_austral", "any"),
+        abierto_pacifico_norte=("abierto_pacifico_norte", "any"),
+    )
     sect["centro"] = sect["sector"] * ANCHO_SECTOR
-    sect["clase"] = np.select([sect["fraccion_rayos_1000_km"] == 1.0, sect["fraccion_rayos_1000_km"] == 0.0],
-                              ["abierto", "cerrado"], "parcial")
+    sect["clase"] = np.select(
+        [sect["fraccion_rayos_1000_km"] == 1.0, sect["fraccion_rayos_1000_km"] == 0.0],
+        ["abierto", "cerrado"],
+        "parcial",
+    )
     if mascara_modelo is not None:
-        sect = sect.merge(rayos.groupby("sector", as_index=False).agg(
-            dist_min_tierra_modelo_km=("dist_tierra_modelo_km", "min")), on="sector")
+        sect = sect.merge(
+            rayos.groupby("sector", as_index=False).agg(dist_min_tierra_modelo_km=("dist_tierra_modelo_km", "min")),
+            on="sector",
+        )
     return Exposicion(rayos=rayos, sectores=sect)
 
 
-def obstaculos(elev, tierra_islas, lat0: float, lon0: float, sectores: pd.DataFrame,
-               es_tierra_modelo=None, radio_km: float = RADIO_OBSTACULOS_KM) -> pd.DataFrame:
+def obstaculos(
+    elev,
+    tierra_islas,
+    lat0: float,
+    lon0: float,
+    sectores: pd.DataFrame,
+    es_tierra_modelo=None,
+    radio_km: float = RADIO_OBSTACULOS_KM,
+) -> pd.DataFrame:
     """Islas e islotes a menos de ``radio_km`` del nodo (§3.2).
 
     ``elev``: DataArray (lat, lon) de GEBCO; tierra = elevación > 0. El continente es la componente de
     mayor área del recorte; las demás son islas. ``tierra_islas``: polígonos de islas menores (lista de
     geometrías shapely) que se agregan si no coinciden con una isla de GEBCO.
     """
-    from scipy import ndimage
 
     lat, lon = elev["lat"].values, elev["lon"].values
     t = elev.values > 0
@@ -161,8 +187,16 @@ def obstaculos(elev, tierra_islas, lat0: float, lon0: float, sectores: pd.DataFr
                 continue
             cla, clo = float(lat[ii].mean()), float(lon[jj].mean())
             area = float(ii.size * (dlat * 111.195) * (dlon * 111.195 * np.cos(np.radians(cla))))
-            filas.append({"origen": "GEBCO_2026", "lat": cla, "lon": clo, "area_km2": area,
-                          "dist_min_km": float(d.min()), "rumbo": float(rumbo(lat0, lon0, cla, clo))})
+            filas.append(
+                {
+                    "origen": "GEBCO_2026",
+                    "lat": cla,
+                    "lon": clo,
+                    "area_km2": area,
+                    "dist_min_km": float(d.min()),
+                    "rumbo": float(rumbo(lat0, lon0, cla, clo)),
+                }
+            )
     for g in tierra_islas or []:
         c = g.representative_point()
         d = float(distancia_km(lat0, lon0, c.y, c.x))
@@ -170,12 +204,24 @@ def obstaculos(elev, tierra_islas, lat0: float, lon0: float, sectores: pd.DataFr
             continue
         ya = any(distancia_km(f["lat"], f["lon"], c.y, c.x) < 1.0 for f in filas)
         if not ya:
-            filas.append({"origen": "Natural Earth (islas menores)", "lat": c.y, "lon": c.x, "area_km2": np.nan,
-                          "dist_min_km": d, "rumbo": float(rumbo(lat0, lon0, c.y, c.x))})
+            filas.append(
+                {
+                    "origen": "Natural Earth (islas menores)",
+                    "lat": c.y,
+                    "lon": c.x,
+                    "area_km2": np.nan,
+                    "dist_min_km": d,
+                    "rumbo": float(rumbo(lat0, lon0, c.y, c.x)),
+                }
+            )
     df = pd.DataFrame(filas, columns=["origen", "lat", "lon", "area_km2", "dist_min_km", "rumbo"])
     if df.empty:
-        return df.assign(sector=pd.Series(dtype=int), clase_sector=pd.Series(dtype=str), tierra_en_modelo=pd.Series(dtype=bool))
+        return df.assign(
+            sector=pd.Series(dtype=int), clase_sector=pd.Series(dtype=str), tierra_en_modelo=pd.Series(dtype=bool)
+        )
     df["sector"] = sector_de(df["rumbo"])
     df["clase_sector"] = df["sector"].map(sectores.set_index("sector")["clase"])
-    df["tierra_en_modelo"] = [bool(es_tierra_modelo(a, b)) if es_tierra_modelo else np.nan for a, b in zip(df["lat"], df["lon"])]
+    df["tierra_en_modelo"] = [
+        bool(es_tierra_modelo(a, b)) if es_tierra_modelo else np.nan for a, b in zip(df["lat"], df["lon"], strict=True)
+    ]
     return df.sort_values("dist_min_km").reset_index(drop=True)

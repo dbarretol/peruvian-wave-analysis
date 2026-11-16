@@ -4,6 +4,7 @@ GEBCO no ofrece un servicio para pedir un recuadro desde el código. El recorte 
 https://download.gebco.net/ (formato NetCDF) y esta función lo copia a
 ``WAVE-DATA/raw/batimetria/gebco/`` y lo registra en el manifiesto con su hash.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -34,14 +35,18 @@ def registrar(archivo: str | Path, raiz_datos: Path, version: str) -> tuple[Path
         return destino, manifiesto.verificar(raiz_raw, destino)
     destino.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(origen, destino)
-    entrada = manifiesto.registrar(raiz_raw, destino, {
-        "fuente": FUENTE_GEBCO,
-        "producto": version,
-        "servicio": f"{URL_DESCARGA} (descarga manual)",
-        "archivo_original": origen.name,
-        "variable": var,
-        "recuadro_oeste_este_sur_norte": [float(lon.min()), float(lon.max()), float(lat.min()), float(lat.max())],
-        "atributos": atributos,
-        "modulo": "peruvian_wave_analysis.sitio.gebco",
-    })
+    entrada = manifiesto.registrar(
+        raiz_raw,
+        destino,
+        {
+            "fuente": FUENTE_GEBCO,
+            "producto": version,
+            "servicio": f"{URL_DESCARGA} (descarga manual)",
+            "archivo_original": origen.name,
+            "variable": var,
+            "recuadro_oeste_este_sur_norte": [float(lon.min()), float(lon.max()), float(lat.min()), float(lat.max())],
+            "atributos": atributos,
+            "modulo": "peruvian_wave_analysis.sitio.gebco",
+        },
+    )
     return destino, entrada

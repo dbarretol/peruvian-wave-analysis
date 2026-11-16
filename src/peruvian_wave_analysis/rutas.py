@@ -1,4 +1,5 @@
 """Ubicación del directorio de datos (WAVE-DATA), fuera del repositorio de código."""
+
 from __future__ import annotations
 
 import os

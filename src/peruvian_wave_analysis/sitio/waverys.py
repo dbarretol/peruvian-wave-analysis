@@ -4,6 +4,7 @@ Las coordenadas de los nodos se leen de un archivo del producto; no se suponen
 (analysis/04 §3.2). Un nodo es válido si tiene dato en el paso de tiempo descargado;
 los enmascarados como tierra quedan como no válidos.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ import numpy as np
 import xarray as xr
 
 from .. import manifiesto, rutas
-from .batimetria import _fmt, _primer_nombre, _NOMBRES_LAT, _NOMBRES_LON
+from .batimetria import _NOMBRES_LAT, _NOMBRES_LON, _fmt, _primer_nombre
 from .config import PASO_WAVERYS, ConfigMapa
 
 PRODUCTO_WAVERYS = "GLOBAL_MULTIYEAR_WAV_001_032"
@@ -41,20 +42,25 @@ def _descargar(cfg: ConfigMapa, raiz_raw: Path) -> tuple[Path, dict]:
     w = cfg.waverys
     fecha = w.fecha.replace(":", "").replace("-", "")
     destino = (
-        raiz_raw / "waverys" / "malla"
+        raiz_raw
+        / "waverys"
+        / "malla"
         / f"waverys_{w.variable}_{fecha}_lat{_fmt(s)}_{_fmt(n)}_lon{_fmt(o)}_{_fmt(e)}.nc"
     )
     if destino.exists():
         return destino, manifiesto.verificar(raiz_raw, destino)
     destino.parent.mkdir(parents=True, exist_ok=True)
-    import copernicusmarine  # importación diferida: es pesada y solo hace falta al descargar
+    import copernicusmarine  # noqa: PLC0415 (importación diferida: copernicusmarine es pesado y solo hace falta al descargar)
 
     params = dict(
         dataset_id=w.dataset_id,
         variables=[w.variable],
-        minimum_longitude=o, maximum_longitude=e,
-        minimum_latitude=s, maximum_latitude=n,
-        start_datetime=w.fecha, end_datetime=w.fecha,
+        minimum_longitude=o,
+        maximum_longitude=e,
+        minimum_latitude=s,
+        maximum_latitude=n,
+        start_datetime=w.fecha,
+        end_datetime=w.fecha,
         coordinates_selection_method="outside",
     )
     try:
@@ -66,7 +72,10 @@ def _descargar(cfg: ConfigMapa, raiz_raw: Path) -> tuple[Path, dict]:
     if not destino.exists():
         raise RuntimeError(f"copernicusmarine no creó {destino}.")
     with xr.open_dataset(destino) as ds:
-        atributos = {k: str(ds.attrs.get(k, "")) for k in ("title", "product_version", "version", "source", "copernicusmarine_version")}
+        atributos = {
+            k: str(ds.attrs.get(k, ""))
+            for k in ("title", "product_version", "version", "source", "copernicusmarine_version")
+        }
     origen = {
         "fuente": "Copernicus Marine Service",
         "producto": PRODUCTO_WAVERYS,
@@ -79,7 +88,9 @@ def _descargar(cfg: ConfigMapa, raiz_raw: Path) -> tuple[Path, dict]:
     return destino, manifiesto.registrar(raiz_raw, destino, origen)
 
 
-def leer_malla(ruta: Path, variable: str, recuadro: tuple[float, float, float, float]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def leer_malla(
+    ruta: Path, variable: str, recuadro: tuple[float, float, float, float]
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Lee (lat, lon, valido) de un archivo de WAVERYS, recortado al recuadro dado."""
     with xr.open_dataset(ruta) as ds:
         da = ds[variable]
@@ -114,6 +125,8 @@ def obtener(cfg: ConfigMapa, raiz_datos: Path) -> Malla:
     paso = float(np.median(pasos)) if pasos.size else PASO_WAVERYS
     if pasos.size and not np.allclose(pasos, paso, atol=1e-3):
         raise ValueError(f"La malla de {ruta} no es regular (pasos {np.unique(pasos.round(4))}).")
-    etiqueta = (f"Malla WAVERYS ({paso:.1f}°), {cfg.waverys.variable} {cfg.waverys.fecha[:10]},\n"
-                f"  acceso {origen['fecha_acceso_utc'][:10]}")
+    etiqueta = (
+        f"Malla WAVERYS ({paso:.1f}°), {cfg.waverys.variable} {cfg.waverys.fecha[:10]},\n"
+        f"  acceso {origen['fecha_acceso_utc'][:10]}"
+    )
     return Malla(lat=lat, lon=lon, valido=valido, paso=paso, origen={"ruta": str(ruta), **origen}, etiqueta=etiqueta)
