@@ -14,7 +14,7 @@ from .. import estilo
 
 def _lineas(ax, fechas: Sequence[pd.Timestamp], anual: bool) -> None:
     for f in fechas:
-        x = f.year + (f.dayofyear - 1) / 365.25 if anual else f
+        x = f.year + (f.day_of_year - 1) / 365.25 if anual else f
         ax.axvline(x, color="0.6", lw=0.7, ls="--")
 
 

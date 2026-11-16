@@ -338,7 +338,7 @@ def homogeneidad(
 
         # --- 2. Potencia (§3.6), antes de cualquier estadístico observado -------------------------
         filas_pot: list[dict] = []
-        previo: dict = {"procesos": procesos_n}
+        previo: dict = {}
         dr = {n: pr.delta_rel(n) for n in C.CONTRASTES}
         previo["delta_rel"] = {n: asdict(d) for n, d in dr.items()}
 
@@ -350,11 +350,16 @@ def homogeneidad(
         n_sets = 3 + len(multiplos)
         proyectado_h = seg * replicas * n_sets * len(C.CONTRASTES) / procesos_n / 3600.0
         B_pot = B if proyectado_h <= C.HORAS_MAX_POTENCIA else min(B, C.B_REDUCIDO)
-        previo["cronometro"] = {
-            "segundos_por_replica": seg,
-            "proyectado_h": proyectado_h,
-            "B_replicas": B_pot,
-            "B_reducido": B_pot < B,
+        # el cronometraje varía entre corridas: va a la consola, no a las salidas (G7)
+        print(
+            f"Cronómetro: {seg:.2f} s por réplica; potencia proyectada {proyectado_h:.2f} h con {procesos_n} "
+            f"procesos; B de las réplicas = {B_pot}",
+            flush=True,
+        )
+        previo["B_replicas"] = {
+            "B": B_pot,
+            "reducido": B_pot < B,
+            "regla": "§3.6: si la potencia proyectada pasa de 8 h, B = 999 en las réplicas (no en la prueba observada)",
         }
 
         reglas_A: dict[str, familias.ReglaDependencia] = {}
