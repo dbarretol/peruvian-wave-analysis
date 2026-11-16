@@ -11,7 +11,7 @@ Fase 2 (biblioteca común) completa:
 - `extremos/`: ajuste GPD, niveles de retorno, IC por perfil de verosimilitud, estratos, declustering, tasas, prueba de Poisson por reescalado de tiempo y bootstrap por años.
 - `verificacion-f2`: estudio de verificación por simulación de todo lo anterior.
 
-Fase 3 (datos: ingesta, control de calidad e integridad) en cierre, en dos etapas:
+Fase 3 (datos: ingesta, control de calidad e integridad) cerrada, en dos etapas:
 - `datos-candidatos`: ingesta contra el gate de la serie, particiones ausentes, centinelas y acumulaciones, período saturado, límites físicos, peralte, coherencia, calibración de k con series sintéticas, detector bilateral de picos, dipolo, los 20 mayores máximos independientes y una figura por máximo y por candidato.
 - `datos-serie`: aplica las resoluciones versionadas en `config/f03_resoluciones.yaml` y publica la serie del nodo con una columna por regla y `valido`, la cobertura, las marcas por año y por regla, Tp largo con la razón de asomeramiento y la lista de registros dudosos para la sensibilidad de los niveles de retorno.
 
