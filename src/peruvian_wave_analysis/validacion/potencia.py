@@ -92,13 +92,13 @@ def replica(
     boot = S.sortear_errores(claves, punto.factor_cal, rng, size=Bboot)
     med, reps, reps_lado = {}, {}, {}
     for n, L in lados.items():
-        o = S.verdadero(L, r[n], punto.rho, rng)
+        m, o = S.par(L, r[n], punto.rho, rng)
         if inyeccion and n in inyeccion:
             o = o * np.exp(-inyeccion[n])
         o = S.aplicar_calibracion(L, o, {k: v for k, v in verdad.items() if not k.startswith("lado_")})
         sig = S.sigma_ruido(L, o, punto.factor_cal)
         o_obs = o + sig * rng.standard_normal(L.n)
-        med[n] = S.medir(L, o_obs, sig, Bboot, rng)
+        med[n] = S.medir(L, o_obs, sig, Bboot, rng, m=m)
         reps[n] = S.con_calibracion(L, med[n], boot, lado_boya=False)
         reps_lado[n] = S.con_calibracion(L, med[n], boot, lado_boya=True)
     out = {

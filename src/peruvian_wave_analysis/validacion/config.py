@@ -138,3 +138,7 @@ SI_NOMINAL = {"asimilado": 0.12, "T0": 0.16}
 SI_REJILLA = {"asimilado": (0.09, 0.12, 0.16), "T0": (0.12, 0.16, 0.20)}
 RHO_NOMINAL, RHO_REJILLA = 0.8, (0.5, 0.8)
 FACTOR_CAL_REJILLA = (0.5, 1.0, 2.0)
+
+# Representatividad (§3.5 y §20): si la varianza de la función de estructura a 20–50 km supera el 25 % de la del ruido
+# de 1 Hz, los máximos salen de B_cola, de B_alta (que pasa a ser el P99) y de V3a. V1 y V2 los conservan.
+UMBRAL_REPRESENTATIVIDAD = 0.25

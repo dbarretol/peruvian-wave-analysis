@@ -4,11 +4,12 @@
 (año y mes), su unidad de muestreo (pasada o día), su número de puntos o registros, su tramo de calibración, su
 época y su año.
 
-**Generador (§5).** Cópula que conserva la marginal del modelo en el lado (con peso mensual):
-o = F_m⁻¹(Φ(r·z_m + √(1 − r²)·z)), z = √ρ·η_unidad + √(1 − ρ)·ε. Después, el sesgo inyectado, la calibración
+**Generador (§5, simétrico desde §20).** Cópula que conserva la marginal del modelo en el lado (con peso mensual):
+m* y o* = F_m⁻¹(Φ(a·z_L + √(1 − a²)·z)), con z independiente para cada columna, z = √ρ·η_unidad + √(1 − ρ)·ε, y z_L
+las puntuaciones normales del modelo real. Después, en o*, el sesgo inyectado, la calibración
 (un error por tramo, por época y por año de boya, con su forma lineal a·Hs + b) y el ruido de muestreo:
 0.10 m + 5 % de Hs por punto de 1 Hz (σ/√n en la superobservación) o 6 % por registro de boya (σ/√k).
-``r`` se calibra para que el SI de o frente a m sea el supuesto.
+``a`` se calibra para que el SI de o* frente a m* sea el supuesto.
 
 **Estadístico (§3.4).** B(q) = log(Q_modelo/Q_obs) con cuantiles con peso mensual (P50, P90, P99, P99.9) y la media
 de máximos mensuales; descontado con SIMEX (λ ∈ {0.5, 1, 1.5, 2}, extrapolación cuadrática a λ = −1).
@@ -106,24 +107,32 @@ def _z(L: LadoSim, rho: float, rng: np.random.Generator) -> np.ndarray:
     return np.sqrt(rho) * eta + np.sqrt(1 - rho) * rng.standard_normal(L.n)
 
 
-def verdadero(L: LadoSim, r: float, rho: float, rng: np.random.Generator) -> np.ndarray:
-    """Hs «verdadera» con la marginal del modelo y la correlación r con él (sin sesgo, calibración ni ruido)."""
-    zm = st.norm.ppf(L.u_modelo())
-    return L.F_inv(st.norm.cdf(r * zm + np.sqrt(1 - r * r) * _z(L, rho, rng)))
+def par(L: LadoSim, a: float, rho: float, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """(m*, o*): **generador simétrico** (contrato §20). Las dos columnas son perturbaciones independientes de la
+    misma variable latente, las puntuaciones normales del modelo real z_L, con la misma estructura de pasadas:
+    m* = F_m⁻¹(Φ(a·z_L + √(1 − a²)·z₁)), o* = F_m⁻¹(Φ(a·z_L + √(1 − a²)·z₂)). Con b = 0 y antes de la calibración y
+    el ruido son intercambiables, así que E[B] = 0 para cualquier estadístico. La correlación latente entre ellas es a².
+    """
+    zl = st.norm.ppf(L.u_modelo())
+    c = np.sqrt(1 - a * a)
+    m = L.F_inv(st.norm.cdf(a * zl + c * _z(L, rho, rng)))
+    o = L.F_inv(st.norm.cdf(a * zl + c * _z(L, rho, rng)))
+    return m, o
 
 
-def si(L: LadoSim, o: np.ndarray) -> float:
+def si(L: LadoSim, o: np.ndarray, m: np.ndarray | None = None) -> float:
     """SI = RMS(o − m) / media(m), con peso mensual."""
+    m = L.m if m is None else m
     w = L.w / L.w.sum()
-    return float(np.sqrt(np.sum(w * (o - L.m) ** 2)) / np.sum(w * L.m))
+    return float(np.sqrt(np.sum(w * (o - m) ** 2)) / np.sum(w * m))
 
 
 def calibrar_r(L: LadoSim, si_objetivo: float, rho: float, semilla: int, n_rep: int = 20) -> float:
-    """r tal que el SI medio de ``verdadero`` sea el supuesto (bisección con números aleatorios fijos)."""
+    """a tal que el SI medio entre o* y m* de ``par`` sea el supuesto (bisección con números aleatorios fijos)."""
 
-    def si_de(r):
+    def si_de(a):
         rng = np.random.default_rng(semilla)
-        return np.mean([si(L, verdadero(L, r, rho, rng)) for _ in range(n_rep)])
+        return np.mean([si(L, *par(L, a, rho, rng)[::-1]) for _ in range(n_rep)])
 
     lo, hi = 0.0, 1.0
     if si_de(hi - 1e-9) > si_objetivo:
@@ -265,8 +274,11 @@ class Medida:
     Qobs: np.ndarray  # (5,) descontados
 
 
-def medir(L: LadoSim, o: np.ndarray, sigma: np.ndarray, Bboot: int, rng: np.random.Generator) -> Medida:
-    L.boot.series = np.vstack([L.m, o])
+def medir(
+    L: LadoSim, o: np.ndarray, sigma: np.ndarray, Bboot: int, rng: np.random.Generator, m: np.ndarray | None = None
+) -> Medida:
+    """B(q) = log(Q_m/Q_o) del lado; ``m`` es la columna del modelo (m* en la simulación; el modelo real si falta)."""
+    L.boot.series = np.vstack([L.m if m is None else m, o])
     punt = E.puntual(L.boot)  # (2, 5) bruto
     reps = E.replicas(L.boot, Bboot, rng)  # (Bboot, 2, 5)
     Qs = simex(L, o, sigma, rng)

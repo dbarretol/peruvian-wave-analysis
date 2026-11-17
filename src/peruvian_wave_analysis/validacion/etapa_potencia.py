@@ -37,6 +37,9 @@ ETAPA_POTENCIA = orquestador.Etapa("validacion-potencia", ETAPA_MODELO.codigo, P
 TROZO = 25  # réplicas por tarea
 REPLICAS_NULIDAD = 200
 REPLICAS_VALIDACION = 200
+# Validación del desplazamiento (§20): el nominal y un punto fuera de la rejilla, el más ruidoso (solo para validar)
+PUNTO_RUIDOSO = P.Punto("validacion_SI0.16-0.2_cal2_rho0.5", 0.16, 0.20, 0.5, 2.0)
+VALIDACIONES = (("V1a", "A", C.ALFA_FUENTE), ("V1b", "T1b", C.ALFA_FUENTE), ("V3a", "A", C.ALFA_FAMILIA))
 HALLAZGO_ESCENARIOS = (
     "Con esta muestra, la F5 no puede retirar escenarios (contrato §19): el traslado al nodo sale «dudoso» en todas "
     "las comparaciones. V1 y V2 informan a la F8, pero no deciden; E0, E1 y E2 siguen activos."
@@ -167,9 +170,7 @@ def potencia_etapa(
         p_nul = P.Punto("nulidad_SI0.16", 0.16, 0.16, 0.8, 1.0)
         r_nul = P.calibrar(lados, p_nul)
         t1 = time.time()
-        reps_nul = correr(
-            ruta_alt, ruta_boy, p_nul, r_nul, REPLICAS_NULIDAD if not previo else 2 * procesos_, procesos_
-        )
+        reps_nul = correr(ruta_alt, ruta_boy, p_nul, r_nul, REPLICAS_NULIDAD, procesos_)
         nul = P.nulidad_generador(reps_nul)
         seg_rep = (time.time() - t1) / len(reps_nul) * procesos_
         nul_ok = all(abs(v["media"]) <= 3 * v["ee_mc"] for k, v in nul.items() if k in ("B_P90", "B_P99"))
@@ -195,7 +196,9 @@ def potencia_etapa(
             "replicas_por_punto": replicas,
             "B_bootstrap_potencia": C.B_POTENCIA,
             "aproximaciones_declaradas": [
-                "Potencia por desplazamiento con réplicas de b = 0, validada con inyección explícita en el nominal.",
+                "Potencia por desplazamiento con réplicas de b = 0 (§20), validada con inyección explícita en el "
+                "nominal y en el punto más ruidoso.",
+                "Generador simétrico (§20): m* y o* son perturbaciones independientes del modelo real.",
                 "Calibración linealizada sobre el estadístico en el bootstrap (exacta en el generador).",
                 "SIMEX como desplazamiento fijo de las réplicas bootstrap (no se repite dentro de cada réplica).",
                 "Ruido de 1 Hz generado a nivel de superobservación (σ/√n), equivalente a la media de n puntos iid.",
@@ -263,28 +266,34 @@ def potencia_etapa(
             filas_rep += [f for i, rp in enumerate(reps) for f in _fila_replica(punto.nombre, i, rp)]
         tabla = pd.concat(tablas, ignore_index=True)
 
-        # 5b. Validación del desplazamiento con inyección explícita (nominal)
-        nominal = next(p for p in P.rejilla() if p.nombre == P.NOMINAL)
-        r_nom = P.calibrar(lados, nominal)
+        # 5b. Validación del desplazamiento con inyección explícita (§20): el nominal y el punto más ruidoso
         valid = []
-        for prueba, lado, alfa in (("V1b", "T1b", C.ALFA_FUENTE), ("V3a", "A", C.ALFA_FAMILIA)):
-            for mu in (1.0, 3.0):
-                b = mu * efectos[prueba]
-                reps_i = correr(ruta_alt, ruta_boy, nominal, r_nom, REPLICAS_VALIDACION, procesos_, {lado: b})
-                p_iny = P.potencia(reps_i, prueba, 0.0, alfa)
-                p_des = P.potencia(reps_nominal[:REPLICAS_VALIDACION], prueba, b, alfa)
-                ee = np.sqrt(max(p_des * (1 - p_des), 0.01) / REPLICAS_VALIDACION)
-                valid.append(
-                    {
-                        "prueba": prueba,
-                        "multiplo": mu,
-                        "b": b,
-                        "potencia_inyeccion": p_iny,
-                        "potencia_desplazamiento": p_des,
-                        "diferencia": p_iny - p_des,
-                        "dentro_de_3_ee": bool(abs(p_iny - p_des) <= 3 * np.sqrt(2) * ee),
-                    }
-                )
+        for punto_v in (next(p for p in P.rejilla() if p.nombre == P.NOMINAL), PUNTO_RUIDOSO):
+            r_v = P.calibrar(lados, punto_v)
+            if punto_v.nombre == P.NOMINAL:
+                reps0 = reps_nominal[:REPLICAS_VALIDACION]
+            else:
+                reps0 = correr(ruta_alt, ruta_boy, punto_v, r_v, REPLICAS_VALIDACION, procesos_)
+            for prueba, lado, alfa in VALIDACIONES:
+                for mu in (1.0, 3.0):
+                    b = mu * efectos[prueba]
+                    reps_i = correr(ruta_alt, ruta_boy, punto_v, r_v, REPLICAS_VALIDACION, procesos_, {lado: b})
+                    p_iny = P.potencia(reps_i, prueba, 0.0, alfa)
+                    p_des = P.potencia(reps0, prueba, b, alfa)
+                    ee = np.sqrt(max(p_des * (1 - p_des), 0.01) / REPLICAS_VALIDACION)
+                    valid.append(
+                        {
+                            "punto": punto_v.nombre,
+                            "prueba": prueba,
+                            "multiplo": mu,
+                            "b": b,
+                            "potencia_inyeccion": p_iny,
+                            "potencia_desplazamiento": p_des,
+                            "diferencia": p_iny - p_des,
+                            "dentro_de_3_ee": bool(abs(p_iny - p_des) <= 3 * np.sqrt(2) * ee),
+                        }
+                    )
+            print(f"Validación del desplazamiento en {punto_v.nombre}: hecha", flush=True)
 
         tabla.to_csv(st / "potencia.csv", index=False, float_format="%.6g", lineterminator="\n")
         pd.DataFrame(mde).to_csv(st / "efecto_minimo.csv", index=False, float_format="%.6g", lineterminator="\n")
