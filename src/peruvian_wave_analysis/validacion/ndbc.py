@@ -30,6 +30,8 @@ from .. import manifiesto
 URL_STDMET = "https://www.ndbc.noaa.gov/data/historical/stdmet/{estacion}h{anio}.txt.gz"
 AGENTE = "Mozilla/5.0 (compatible; research-client)"  # NDBC responde 403 sin un agente de navegador
 CENTINELAS = (99.0, 999.0, 9999.0)  # valores de dato ausente de NDBC (contrato §3.3)
+CENTINELAS_TEXTO = frozenset({"MM", "99", "99.0", "99.00", "999", "999.0", "9999", "9999.0"})  # igual, como texto
+_NUMERO = r"-?\d+(?:\.\d+)?|MM"  # forma de un campo de datos válido
 VARIABLES_F5 = ("WVHT", "DPD", "APD")
 _ALIAS = {"WD": "WDIR", "BAR": "PRES"}
 BORDE = pd.Timedelta(hours=1)  # tolerancia en los bordes del año (registros de las hh:50)
@@ -176,8 +178,13 @@ def _encabezado(lineas: list[str], nombre: str) -> tuple[list[str], int, str]:
     return cols, saltar, formato
 
 
-def _leer(ruta: Path) -> tuple[pd.DataFrame, str]:
-    """Tiempo (UTC, sin zona) y columnas numéricas, centinelas como NaN. **Lee valores:** solo etapa 3 y pruebas."""
+def _leer_texto(ruta: Path, validar: bool = True) -> tuple[pd.DatetimeIndex, pd.DataFrame, str]:
+    """(tiempo, columnas de datos como **texto**, formato). Solo las columnas de tiempo se convierten a número.
+
+    Las columnas de datos no se convierten. Con ``validar``, un campo que no tiene forma de número (comparación de
+    texto con una expresión regular) es un error, y el mensaje no lo cita (G4). ``presencia`` no valida: funciona
+    aunque los valores sean ilegibles (contrato §8).
+    """
     nombre = Path(ruta).name.removesuffix(".parcial")
     lineas = _lineas(ruta)
     cols, saltar, formato = _encabezado(lineas, nombre)
@@ -187,25 +194,26 @@ def _leer(ruta: Path) -> tuple[pd.DataFrame, str]:
         raise ErrorNDBC(
             f"{nombre}: {len(malas)} líneas con un número de campos distinto del encabezado (primera: {malas[0]})."
         )
+    texto = pd.DataFrame(filas, columns=cols, dtype=object) if filas else pd.DataFrame(columns=cols, dtype=object)
+    tcols = [c for c in _TIEMPO if c in texto]
+    datos = texto.drop(columns=tcols)
+    if validar and len(datos) and not datos.apply(lambda c: c.str.fullmatch(_NUMERO)).all().all():
+        raise ErrorNDBC(f"{nombre}: hay campos no numéricos.")
     try:
-        datos = np.array(filas, dtype=float) if filas else np.empty((0, len(cols)))
-    except ValueError:
-        raise ErrorNDBC(f"{nombre}: hay campos no numéricos.") from None  # sin el texto del campo (G4)
-    df = pd.DataFrame(datos, columns=cols)
-    anio = df["YYYY"] if "YYYY" in df else 1900 + df["YY"]
-    try:
+        t = texto[tcols].astype(int)
+        anio = t["YYYY"] if "YYYY" in t else 1900 + t["YY"]
         tiempo = pd.to_datetime(
-            dict(
-                year=anio.astype(int),
-                month=df["MM"].astype(int),
-                day=df["DD"].astype(int),
-                hour=df["hh"].astype(int),
-                minute=df["mm"].astype(int) if "mm" in df else 0,
-            )
+            dict(year=anio, month=t["MM"], day=t["DD"], hour=t["hh"], minute=t["mm"] if "mm" in t else 0)
         )
     except (ValueError, OverflowError):
         raise ErrorNDBC(f"{nombre}: fechas inválidas.") from None
-    df = df.drop(columns=[c for c in _TIEMPO if c in df])
+    return pd.DatetimeIndex(tiempo), datos.reset_index(drop=True), formato
+
+
+def _leer(ruta: Path) -> tuple[pd.DataFrame, str]:
+    """Tiempo (UTC, sin zona) y columnas numéricas, centinelas como NaN. **Lee valores:** solo etapa 3 y pruebas."""
+    tiempo, datos, formato = _leer_texto(ruta)
+    df = datos.replace("MM", np.nan).astype(float)
     df = df.mask(df.isin(CENTINELAS))
     df.insert(0, "tiempo", tiempo.to_numpy())
     return df, formato
@@ -219,12 +227,11 @@ def estructura(ruta: Path, anio_esperado: int | None = None) -> dict:
     anterior (hora 00 del año del archivo). Esos registros de borde pueden repetirse entre archivos contiguos; los
     duplicados entre archivos se resuelven al unir la serie, no aquí.
     """
-    df, formato = _leer(ruta)
+    t, datos, formato = _leer_texto(ruta)
     nombre = Path(ruta).name.removesuffix(".parcial")
-    faltan = [v for v in VARIABLES_F5 if v not in df]
+    faltan = [v for v in VARIABLES_F5 if v not in datos]
     if faltan:
         raise ErrorNDBC(f"{nombre}: faltan las columnas {faltan}.")
-    t = pd.DatetimeIndex(df["tiempo"])
     if anio_esperado is not None and len(t):
         desde = pd.Timestamp(f"{anio_esperado}-01-01") - BORDE
         hasta = pd.Timestamp(f"{anio_esperado + 1}-01-01") + BORDE
@@ -234,8 +241,8 @@ def estructura(ruta: Path, anio_esperado: int | None = None) -> dict:
     return {
         "archivo": nombre,
         "formato": formato,
-        "columnas": [c for c in df.columns if c != "tiempo"],
-        "registros": int(len(df)),
+        "columnas": list(datos.columns),
+        "registros": int(len(datos)),
         "duplicados": int(t.duplicated().sum()),
         "inicio": str(t.min()) if len(t) else None,
         "fin": str(t.max()) if len(t) else None,
@@ -243,9 +250,12 @@ def estructura(ruta: Path, anio_esperado: int | None = None) -> dict:
 
 
 def presencia(ruta: Path, variables=VARIABLES_F5) -> pd.DataFrame:
-    """Tiempo y, por variable, True si hay dato (no centinela). **Nunca el valor** (etapa 2; contrato §2)."""
-    df, _ = _leer(ruta)
-    out = pd.DataFrame({"tiempo": df["tiempo"]})
+    """Tiempo y, por variable, True si hay dato. **Nunca el valor** (etapa 2; contrato §2).
+
+    El campo se compara **como texto** con los centinelas (``CENTINELAS_TEXTO``); no se convierte a número.
+    """
+    t, datos, _ = _leer_texto(ruta, validar=False)
+    out = pd.DataFrame({"tiempo": t})
     for v in variables:
-        out[v] = df[v].notna() if v in df else False
+        out[v] = (~datos[v].isin(CENTINELAS_TEXTO)).to_numpy() if v in datos else False
     return out
