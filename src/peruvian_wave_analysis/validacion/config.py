@@ -104,3 +104,37 @@ COMPARACIONES = (
 # Efecto del nodo por familia (§4.4): de pruebas_cambio.json de la F4, δ_rel corregido, familia A.
 # V1: C1, lado 1 (T0, +9 %); V2: C2, lado 1 (T1, +3 %). El código los lee; estas son las rutas.
 EFECTO_NODO_RUTA = {"V1": ("A", "C1", "lado1"), "V2": ("A", "C2", "lado1")}
+
+# --- Potencia (§5) y errores de la observación (§3.5) ---------------------------------------------------------
+
+# Calibración por tramo (§3.5): (σ_a, σ_b en m). Ribal y Young (2019), tabla «Online-only» 2, límites del 95 % / 3.92.
+# HY-2B: supuesto de P8, 2 % de pendiente.
+CALIBRACION = {
+    "GEOSAT": (0.0186, 0.045),
+    "ERS-1": (0.0143, 0.033),
+    "TOPEX": (0.0084, 0.015),
+    "HY-2A_1": (0.0084, 0.017),
+    "HY-2A_2": (0.0043, 0.0087),
+    "HY-2B": (0.02, 0.0),
+}
+SIGMA_ESTADO_MAR = 0.01  # mínimo por tramo de calibración (S-16)
+SIGMA_RED_EPOCA = 0.01  # red de boyas de referencia por época (1985–1992 y 2011–2026)
+SIGMA_BOYA_ANIO = 0.02  # factor por año de calendario de las boyas 32302 y 32012
+SIGMA_BOYA_LADO = 0.02  # término por lado de las boyas (sensibilidad obligatoria, S-14)
+RUIDO_1HZ = (0.10, 0.05)  # σ de 1 Hz del generador: 0.10 m + 5 % de Hs
+RUIDO_BOYA_REL = 0.06  # σ relativa de muestreo por registro horario (Donelan y Pierson, 1983)
+
+SIMEX_LAMBDAS = (0.5, 1.0, 1.5, 2.0)
+SIMEX_REPLICAS = 200
+B_POTENCIA = 999
+REPLICAS_POTENCIA = 1_000
+ALFA_FUENTE = 0.025  # Bonferroni por fuente (P12)
+ALFA_FAMILIA = 0.05
+MULTIPLOS_EFECTO = (0.5, 1.0, 1.5, 2.0, 3.0)  # y de signo contrario (§5)
+EFECTO_V3 = 0.019802627296179712  # log(1.02), §4.4
+
+# Rejilla de supuestos (§5, P9): SI del lado asimilado / de T0, ρ y factor de calibración y ruido.
+SI_NOMINAL = {"asimilado": 0.12, "T0": 0.16}
+SI_REJILLA = {"asimilado": (0.09, 0.12, 0.16), "T0": (0.12, 0.16, 0.20)}
+RHO_NOMINAL, RHO_REJILLA = 0.8, (0.5, 0.8)
+FACTOR_CAL_REJILLA = (0.5, 1.0, 2.0)
