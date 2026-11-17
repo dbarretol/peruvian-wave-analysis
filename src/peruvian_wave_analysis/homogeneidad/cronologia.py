@@ -189,6 +189,20 @@ def cobertura_altimetria(
                 "clase": clase,
             }
         )
+    if len(loc):
+        ultimo = pd.Timestamp(pd.to_datetime(loc["fin"]).max())
+        filas.append(
+            {
+                "mision": "todas",
+                "asimilada_desde": "",
+                "asimilada_hasta": "",
+                "datos_locales_desde": "",
+                "datos_locales_hasta": str(ultimo.date()),
+                "pasadas": 0,
+                "huecos_de_exposicion": f"exposición incompleta después del último dato local ({ultimo})",
+                "clase": "hueco de exposición (§3.4 punto 2; §21, K-10)",
+            }
+        )
     for nombre, inicio in sin_datos.items():
         filas.append(
             {

@@ -226,15 +226,17 @@ class ReglaDependencia:
     recalibrable: bool = True  # falso si más del α de las réplicas cae en el menor p posible con ese B
 
 
-def aplicar_regla(simular_nula, alfa: float, maximo: float) -> ReglaDependencia:
+def aplicar_regla(simular_nula, alfa: float, maximo: float, desde: str = "anios") -> ReglaDependencia:
     """``simular_nula(esquema, etiqueta)`` → p (mínimos) de réplicas AR(1) sin cambio. Regla de §3.5:
     ≤ máximo → años; si no, bloques de dos años; si sigue alto, valor crítico recalibrado (con bloques) y
-    verificación con réplicas independientes."""
+    verificación con réplicas independientes. ``desde = "bloques2"`` empieza en bloques (familia D cuando A en C2
+    ya usa bloques; §21, K-05)."""
     medidos = {}
-    p_anios = simular_nula("anios", "tipo-I")
-    medidos["anios"] = float(np.mean(p_anios <= alfa))
-    if medidos["anios"] <= maximo:
-        return ReglaDependencia("anios", alfa, False, medidos)
+    if desde == "anios":
+        p_anios = simular_nula("anios", "tipo-I")
+        medidos["anios"] = float(np.mean(p_anios <= alfa))
+        if medidos["anios"] <= maximo:
+            return ReglaDependencia("anios", alfa, False, medidos)
     p_b = simular_nula("bloques2", "tipo-I")
     medidos["bloques2"] = float(np.mean(p_b <= alfa))
     if medidos["bloques2"] <= maximo:

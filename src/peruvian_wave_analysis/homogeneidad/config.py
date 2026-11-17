@@ -109,8 +109,7 @@ RHO_AR1 = 0.3  # supuesto, no estimación (v7)
 TIPO_I_MAX = 0.07  # regla de §3.5
 POTENCIA_MIN = 0.80
 REPLICAS = 1_000  # réplicas de potencia y de error de tipo I (§3.6)
-HORAS_MAX_POTENCIA = 8.0  # si la potencia proyectada pasa de 8 h, se reduce B en las réplicas (§3.6) y se declara
-B_REDUCIDO = 999
+B_REPLICAS = 999  # B fijo en las réplicas de potencia y de error de tipo I (§21, K-01; sustituye la regla de §3.6)
 
 # Efecto relevante (ADR-0006, §3.5)
 CAMBIO_RL = 0.02
@@ -147,3 +146,9 @@ ROTULO_POSTERIOR = (
 ESTABLECIDO, DESCARTADO, NO_CONCLUYENTE = "establecido", "descartado", "no concluyente"
 SIN_RAIZ = "sin raíz"
 SENAL = "señal"
+SENAL_INVERSA = "señal de signo contrario (cociente < 1)"  # §21, K-08
+ROTULO_K03 = (
+    "δ_rel y pendiente relevante originales: no interpretables (defecto K-03, §21). El modelo provisional reajustaba "
+    "la GPD a los picos escalados con u y eventos fijos, y su RL no respondía al escalado. Los corregidos escalan la "
+    "distribución de cada pico sin reajustar la GPD; son los que cuentan (decidido después de ver los datos)."
+)

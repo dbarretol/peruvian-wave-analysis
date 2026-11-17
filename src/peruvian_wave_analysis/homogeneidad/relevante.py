@@ -12,6 +12,14 @@ número de eventos no cambia y RL(δ) es continua.
 recorriendo los dos lados y los dos signos. Si nada llega al 2 %, el contraste queda **sin raíz**.
 
 El RL del modelo provisional no se publica: solo δ_rel, su lado, su signo y su período de retorno.
+
+**Defecto K-03 y versión corregida (contrato §21, posterior a ver datos).** Con u y eventos fijos, volver a ajustar
+la GPD a los picos escalados no responde al escalado: los excesos 0 (lado negativo) y el hueco entre 0 y el menor
+exceso (lado positivo) cambian la forma ajustada. Escalar todos los picos un −3 % sube el RL100 un 65 %. El δ_rel
+original se publica rotulado «no interpretable». La versión corregida (``niveles_mezcla``) ajusta la GPD **una sola
+vez**, a los picos sin escalar, y escala la distribución de cada pico: la tasa de excedencia es
+R(x) = (λ/N)·Σᵢ S(x/fᵢ), con S la supervivencia del pico sin escalar (1 bajo u), y RL_T es la raíz de R(x) = 1/T.
+Es monótona en δ y, con un mismo factor f en todos los picos, RL_T(f) = f·RL_T(1) exactamente.
 """
 
 from __future__ import annotations
@@ -21,6 +29,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import brentq
 
 from ..extremos import decluster, gpd, retorno
 
@@ -49,6 +58,44 @@ def niveles(modelo: ModeloProvisional, factores: np.ndarray, periodos: Sequence[
         return np.full(len(periodos), np.nan)
     tasa = exc.size / modelo.anios
     return np.array([retorno.nivel_retorno(modelo.u, aj.xi, aj.sigma, tasa, T).valor for T in periodos])
+
+
+def niveles_mezcla(
+    modelo: ModeloProvisional, factores: np.ndarray, periodos: Sequence[float], ajuste=None
+) -> np.ndarray:
+    """RL_T de la mezcla de picos escalados, sin reajustar la GPD (K-03, contrato §21). ``ajuste``: la GPD de los
+    excesos sin escalar; si falta, se ajusta aquí."""
+    exc = modelo.picos - modelo.u
+    aj = ajuste if ajuste is not None else gpd.ajustar_gpd(np.maximum(exc, 0.0))
+    if not aj.valido:
+        return np.full(len(periodos), np.nan)
+    f = np.broadcast_to(np.asarray(factores, float), exc.shape).astype(float)
+    lam = exc.size / modelo.anios
+
+    def tasa(x: float) -> float:
+        return float(lam * np.mean(gpd.supervivencia(x / f - modelo.u, aj.xi, aj.sigma)))
+
+    fin = modelo.u + (-aj.sigma / aj.xi if aj.xi < 0 else np.inf)
+    out = []
+    for T in periodos:
+        objetivo = 1.0 / T
+        lo = modelo.u * float(f.min())
+        if tasa(lo) <= objetivo:
+            out.append(np.nan)
+            continue
+        if np.isfinite(fin):
+            hi = fin * float(f.max())
+        else:
+            hi = modelo.u * float(f.max()) * 2.0
+            while tasa(hi) > objetivo:
+                hi *= 2.0
+        out.append(float(brentq(lambda x, o=objetivo: tasa(x) - o, lo, hi, xtol=1e-12, rtol=1e-12, maxiter=500)))
+    return np.array(out)
+
+
+def ajuste_base(modelo: ModeloProvisional):
+    """GPD de los excesos sin escalar, para ``niveles_mezcla``."""
+    return gpd.ajustar_gpd(np.maximum(modelo.picos - modelo.u, 0.0))
 
 
 @dataclass(frozen=True)
@@ -91,15 +138,17 @@ def delta_relevante(
     periodos: Sequence[float],
     cambio: float,
     deltas: np.ndarray,
+    niveles_fn: Callable = niveles,
 ) -> DeltaRel:
-    """``lados``: nombre → máscara booleana sobre los picos del modelo (qué picos escala ese lado)."""
+    """``lados``: nombre → máscara booleana sobre los picos del modelo (qué picos escala ese lado).
+    ``niveles_fn(modelo, factores, periodos)``: ``niveles`` (original) o ``niveles_mezcla`` (corregido, K-03)."""
     por_lado = {}
     mejor = None
     for nombre, mascara in lados.items():
         m = np.asarray(mascara, bool)
 
         def rl(d: float, m=m) -> np.ndarray:
-            return niveles(modelo, np.where(m, 1.0 + d, 1.0), periodos)
+            return niveles_fn(modelo, np.where(m, 1.0 + d, 1.0), periodos)
 
         r = raiz_en_rejilla(rl, deltas, cambio) if m.any() else None
         por_lado[nombre] = None if r is None else {"delta": r[0], "periodo": periodos[r[1]], "cambio": r[2]}

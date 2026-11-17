@@ -92,10 +92,18 @@ def mediana_vecinas(vecinas: pd.DataFrame, nodo: str, paso: float = 0.2) -> pd.S
     return vecinas[cols].median(axis=1, skipna=True).rename("Hs_vecinas_mediana")
 
 
-def anuales_hs(hs: pd.Series) -> pd.DataFrame:
-    """Por año calendario: P50 y P99 con peso mensual, máximo, meses con dato."""
+def anuales_hs(hs: pd.Series, excluir: tuple[str, str] | None = None) -> pd.DataFrame:
+    """Por año calendario: P50 y P99 con peso mensual, máximo, meses con dato.
+
+    ``excluir``: intervalo de días [a, b] que no entra en los estadísticos (el mes de transición 1993-01, §3.2;
+    §21, K-06). ``meses`` sigue contando los meses con dato del registro, así que el año no deja de ser completo."""
     filas = []
-    for a, g in hs.groupby(hs.index.year):
+    fuera = np.zeros(len(hs), bool)
+    if excluir is not None:
+        a0, b0 = pd.Timestamp(excluir[0]), pd.Timestamp(excluir[1]) + pd.Timedelta(days=1)
+        fuera = np.asarray((hs.index >= a0) & (hs.index < b0))
+    meses_reg = hs.dropna().groupby(hs.dropna().index.year).apply(lambda g: g.index.month.nunique())
+    for a, g in hs[~fuera].groupby(hs[~fuera].index.year):
         g = g.dropna()
         if g.empty:
             continue
@@ -106,7 +114,7 @@ def anuales_hs(hs: pd.Series) -> pd.DataFrame:
                 "hs_p50": float(q[0]),
                 "hs_p99": float(q[1]),
                 "hs_max": float(g.max()),
-                "meses": int(g.index.month.nunique()),
+                "meses": int(meses_reg.get(a, g.index.month.nunique())),
             }
         )
     return pd.DataFrame(filas).set_index("anio")
@@ -117,9 +125,10 @@ def indicadores_anuales(
     excursiones: pd.DataFrame,
     candidatos: pd.DataFrame,
     marcas_anio: pd.DataFrame,
+    excluir: tuple[str, str] | None = None,
 ) -> pd.DataFrame:
     hs = serie["VHM0"]
-    out = anuales_hs(hs)
+    out = anuales_hs(hs, excluir)
     out["completo"] = out["meses"] == 12
     out["excursiones_k_rev"] = excursiones.groupby("anio").size().reindex(out.index, fill_value=0)
     det = candidatos[candidatos["regla"].isin(["detector", "detector_revision"])]

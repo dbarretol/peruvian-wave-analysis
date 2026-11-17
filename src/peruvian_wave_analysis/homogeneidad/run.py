@@ -16,8 +16,8 @@ Uso::
 from __future__ import annotations
 
 import argparse
+import functools
 import sys
-import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from .. import manifiesto, rutas
-from ..comun import etapa, json_estricto, orquestador, procesos, semillas
+from ..comun import etapa, json_estricto, orquestador, semillas
 from ..comun.errores import GateFallido
 from ..datos import carga
 from ..datos import detector as D
@@ -173,20 +173,22 @@ class Pruebas:
         self.deltas = relevante.rejilla(*C.REJILLA_DELTA)
 
     # δ_rel de A y pendiente relevante de B (§3.5)
-    def delta_rel(self, nombre: str) -> relevante.DeltaRel:
+    def delta_rel(self, nombre: str, niveles_fn=relevante.niveles) -> relevante.DeltaRel:
         (a1, b1), (a2, b2) = self.lados_t[nombre]
         tp = self.modelo.t_picos
         lados = {"lado1": _en(tp, a1, b1), "lado2": _en(tp, a2, b2)}
-        return relevante.delta_relevante(self.modelo, lados, C.PERIODOS_RETORNO, C.CAMBIO_RL, self.deltas)
+        return relevante.delta_relevante(
+            self.modelo, lados, C.PERIODOS_RETORNO, C.CAMBIO_RL, self.deltas, niveles_fn=niveles_fn
+        )
 
-    def pendiente_relevante(self) -> dict:
+    def pendiente_relevante(self, niveles_fn=relevante.niveles) -> dict:
         a, b = _rango(("T1",))
         tp = self.modelo.t_picos
         m = _en(tp, a, b)
         frac = np.clip((tp - pd.Timestamp(a)) / (_fin(b) - pd.Timestamp(a)), 0, 1).to_numpy(float)
 
         def rl(d: float) -> np.ndarray:
-            return relevante.niveles(self.modelo, np.where(m, 1.0 + d * frac, 1.0), C.PERIODOS_RETORNO)
+            return niveles_fn(self.modelo, np.where(m, 1.0 + d * frac, 1.0), C.PERIODOS_RETORNO)
 
         r = relevante.raiz_en_rejilla(rl, self.deltas, C.CAMBIO_RL)
         n = C.ANIOS_T1[1] - C.ANIOS_T1[0] + 1
@@ -270,7 +272,11 @@ class Pruebas:
             out.append({"nombre": nombre, "expuesto": x, "pasos": pasos, "epoca": alt["epoca_principal"]})
         nombre, a, b, anios = C.PLACEBO_T0
         x = A.calendario_desplazado(expo["asimilada:c"], a, b, anios, t)
-        out.append({"nombre": nombre, "expuesto": x, "pasos": alt["t0"].copy(), "epoca": np.zeros(len(t), int)})
+        # solo los pasos de T0 que cubre el calendario desplazado (§21, K-07)
+        a_d = (pd.Timestamp(a) - pd.DateOffset(years=anios)).date()
+        b_d = (pd.Timestamp(b) - pd.DateOffset(years=anios)).date()
+        pasos = alt["t0"] & _en(t, str(a_d), str(b_d))
+        out.append({"nombre": nombre, "expuesto": x, "pasos": pasos, "epoca": np.zeros(len(t), int)})
         return out
 
     def estrato(self, alt: dict, epoca: np.ndarray, pasos: np.ndarray, ok: np.ndarray, nivel=None) -> np.ndarray:
@@ -340,37 +346,24 @@ def homogeneidad(
         previo: dict = {}
         dr = {n: pr.delta_rel(n) for n in C.CONTRASTES}
         previo["delta_rel"] = {n: asdict(d) for n, d in dr.items()}
+        # §21, K-03: δ_rel corregido (mezcla de picos escalados sin reajustar la GPD); el original queda rotulado
+        mezcla = functools.partial(relevante.niveles_mezcla, ajuste=relevante.ajuste_base(pr.modelo))
+        dr_c = {n: pr.delta_rel(n, mezcla) for n in C.CONTRASTES}
+        previo["delta_rel_corregido"] = {n: asdict(d) for n, d in dr_c.items()}
+        previo["rotulo_K03"] = C.ROTULO_K03
 
         # avance guardado: clave = huella del código + hashes de los insumos (avance.py)
         clave = avance._clave([orquestador.huella_etapa(ETAPA), hashes_insumos, nombre])
         av = avance.Avance(rutas.interim(raiz, "F04-homogeneidad", "avance"), clave, lambda m: print(m, flush=True))
 
-        # cronometraje en paralelo y B de las réplicas (§3.6): procesos_n tareas de 2 réplicas a la vez
-        c1 = pr.contrastes["C1"]
-        t_ini = time.perf_counter()
-        crono_t = [
-            (c1, "anios", B, 0.0, 1, False, C.RHO_AR1, ("f04", "cronometro"), 2 * i, 2 * i + 2)
-            for i in range(procesos_n)
-        ]
-        if procesos_n <= 1:
-            [familias._tarea_A(t) for t in crono_t]
-        else:
-            procesos.mapear(familias._tarea_A, crono_t, procesos=procesos_n)
-        vel = 2 * procesos_n / (time.perf_counter() - t_ini)  # réplicas por segundo, en paralelo
-        n_sets = 3 + len(multiplos)  # peor caso: tres simulaciones de error de tipo I por contraste
-        proyectado_h = replicas * n_sets * len(C.CONTRASTES) / vel / 3600.0
-        B_pot = B if proyectado_h <= C.HORAS_MAX_POTENCIA else min(B, C.B_REDUCIDO)
-        # el cronometraje varía entre corridas: va a la consola, no a las salidas (G7)
-        print(
-            f"Cronómetro en paralelo: {vel * 3600:.0f} réplicas/h con {procesos_n} procesos; potencia de la familia "
-            f"A proyectada en {proyectado_h:.2f} h (peor caso, B = {B}); B de las réplicas = {B_pot}. "
-            f"Avance guardado en {av.dir}",
-            flush=True,
-        )
+        # B de las réplicas fijo (§21, K-01): ya no depende de un cronómetro, que podía romper G7
+        B_pot = min(B, C.B_REPLICAS)
+        print(f"B de las réplicas = {B_pot} (fijo, contrato §21). Avance guardado en {av.dir}", flush=True)
         previo["B_replicas"] = {
             "B": B_pot,
             "reducido": B_pot < B,
-            "regla": "§3.6: si la potencia proyectada pasa de 8 h, B = 999 en las réplicas (no en la prueba observada)",
+            "regla": "§21 (K-01): B = 999 fijo en las réplicas de potencia y de error de tipo I; la prueba observada "
+            "usa B = 9 999. Sustituye la regla de §3.6, que decidía con un cronómetro.",
         }
 
         reglas_A: dict[str, familias.ReglaDependencia] = {}
@@ -458,17 +451,53 @@ def homogeneidad(
                     }
                 )
             pot_rel = pots[list(multiplos).index(1.0)] if (d.delta is not None and 1.0 in multiplos) else None
+            # §21, K-03: potencia en el δ_rel corregido, simulada en ese punto
+            dc = dr_c[n]
+            pot_c = None
+            if dc.delta is not None:
+                p = familias.simular_A(
+                    c,
+                    regla.esquema,
+                    B_pot,
+                    replicas,
+                    dc.delta,
+                    0 if dc.lado == "lado1" else 1,
+                    regla.dependencia_en_potencia,
+                    C.RHO_AR1,
+                    ("f04", "A", n, "potencia-corregida", f"{dc.delta:.6f}", str(dc.lado)),
+                    procesos_n,
+                    avance=av,
+                )
+                pot_c = float(np.mean(p <= regla.critico))
+                filas_pot.append(
+                    {
+                        "prueba": "A",
+                        "contraste": n,
+                        "efecto": f"delta corregido (K-03), {dc.lado}",
+                        "valor": dc.delta,
+                        "tasa": pot_c,
+                        "replicas": replicas,
+                        "B": B_pot,
+                        "esquema": regla.esquema,
+                        "critico": regla.critico,
+                        "dependencia": regla.dependencia_en_potencia,
+                    }
+                )
             pot_A[n] = {
                 "efectos": efectos,
                 "potencias": pots,
                 "potencia_delta_rel": pot_rel,
+                "potencia_delta_rel_rotulo": "en el δ_rel original: no interpretable, defecto K-03 (§21)",
+                "potencia_delta_rel_corregido": pot_c,
                 "mde_80": _mde(efectos, pots, C.POTENCIA_MIN),
             }
 
         # Familia B (§3.5 y §19, D1): Mann-Kendall sin corrección con p de Monte Carlo frente a una nula AR(1)
         # (ρ = 0.3, supuesto), calibrada aparte para cada número de años; potencia con años AR(1)
         pend = pr.pendiente_relevante()
+        pend_c = pr.pendiente_relevante(mezcla)  # §21, K-03
         previo["pendiente_relevante"] = pend
+        previo["pendiente_relevante_corregida"] = pend_c
         n_B = {"principal": C.ANIOS_T1[1] - C.ANIOS_T1[0] + 1, "sin_1993_1997": C.ANIOS_T1[1] - C.SIN_PRIMEROS[1]}
         nulas_B = {
             k: tendencia.nula_mk(n, C.RHO_AR1, C.R_NULA_MK, semillas.generador("f04", "B", "nula", str(n)))
@@ -496,28 +525,31 @@ def homogeneidad(
                         "dependencia": True,
                     }
                 )
-        pot_B = {"efectos": [], "potencias": [], "potencia_relevante": None, "mde_80": None, "tipo_I": tipoI_B}
-        if pend["pendiente_relativa_por_anio"] is not None:
-            hs_t1 = pr.hs[_en(pr.t, f"{C.ANIOS_T1[0]}-01-01", f"{C.ANIOS_T1[1]}-12-31")]
-            # valores anuales de T1 reasignados con la cópula AR(1) en cada réplica: su orden observado no se usa
-            base = descriptivos.anuales_hs(hs_t1)[["hs_p99", "hs_max"]].to_numpy(float)
-            efs = [m * pend["pendiente_relativa_por_anio"] for m in multiplos]
-            for e in efs:
-                rng = semillas.generador("f04", "B", "potencia", f"{e:.8f}")
+        hs_t1 = pr.hs[_en(pr.t, f"{C.ANIOS_T1[0]}-01-01", f"{C.ANIOS_T1[1]}-12-31")]
+        # valores anuales de T1 (sin el mes de transición, §21, K-06) reasignados con la cópula AR(1) en cada
+        # réplica: su orden observado no se usa
+        base_B = descriptivos.anuales_hs(hs_t1, C.MES_TRANSICION)[["hs_p99", "hs_max"]].to_numpy(float)
+
+        def potencia_B(pend_x: dict, semilla: str, etiqueta: str) -> dict:
+            out = {"efectos": [], "potencias": [], "potencia_relevante": None, "mde_80": None}
+            if pend_x["pendiente_relativa_por_anio"] is None:
+                return out
+            for e in [m * pend_x["pendiente_relativa_por_anio"] for m in multiplos]:
+                rng = semillas.generador("f04", "B", semilla, f"{e:.8f}")
                 rech = 0
                 for _ in range(replicas):
-                    y = base[P.orden_ar1(base[:, 1], C.RHO_AR1, rng)]
+                    y = base_B[P.orden_ar1(base_B[:, 1], C.RHO_AR1, rng)]
                     y = y * (1.0 + e * np.arange(y.shape[0]))[:, None]
                     zs = tendencia.z_mk_lote(y.T)
                     ps = [tendencia.p_monte_carlo(z, nulas_B["principal"]) for z in zs]
                     rech += P.holm(ps).min() <= C.ALFA
-                pot_B["efectos"].append(e)
-                pot_B["potencias"].append(rech / replicas)
+                out["efectos"].append(e)
+                out["potencias"].append(rech / replicas)
                 filas_pot.append(
                     {
                         "prueba": "B",
                         "contraste": "T1",
-                        "efecto": "pendiente relativa por año",
+                        "efecto": etiqueta,
                         "valor": e,
                         "tasa": rech / replicas,
                         "replicas": replicas,
@@ -527,39 +559,60 @@ def homogeneidad(
                         "dependencia": True,
                     }
                 )
-            pot_B["potencia_relevante"] = pot_B["potencias"][list(multiplos).index(1.0)] if 1.0 in multiplos else None
-            pot_B["mde_80"] = _mde(pot_B["efectos"], pot_B["potencias"], C.POTENCIA_MIN)
+            out["potencia_relevante"] = out["potencias"][list(multiplos).index(1.0)] if 1.0 in multiplos else None
+            out["mde_80"] = _mde(out["efectos"], out["potencias"], C.POTENCIA_MIN)
+            return out
+
+        pot_B_orig = potencia_B(pend, "potencia", "pendiente relativa por año")
+        pot_B = potencia_B(pend_c, "potencia-corregida", "pendiente relativa por año, corregida (K-03)")
+        pot_B["tipo_I"] = tipoI_B
+        pot_B["original"] = {**pot_B_orig, "rotulo": "pendiente relevante original: no interpretable, K-03 (§21)"}
 
         # Familia D: mismas unidades que A en C2; error de tipo I AR(1) y potencia frente a 0.3 s
         picos, ev = pr.eventos_tp()
         esq_D = reglas_A["C2"].esquema
 
-        def nula_D(etiqueta: str) -> np.ndarray:
+        def nula_D(esquema: str, etiqueta: str) -> np.ndarray:
+            nombres = ("f04", "D", etiqueta) if esquema == esq_D else ("f04", "D", etiqueta, esquema)
             return familias.simular_D(
-                ev, esq_D, B_pot, replicas, 0.0, True, C.RHO_AR1, ("f04", "D", etiqueta), procesos_n, avance=av
+                ev, esquema, B_pot, replicas, 0.0, True, C.RHO_AR1, nombres, procesos_n, avance=av
             )
 
-        p_nula_D = nula_D("tipo-I")
-        tipoI_D = float(np.mean(p_nula_D <= C.ALFA))
-        critico_D, dep_D, tipoI_D_v = C.ALFA, esq_D != "anios", None
-        if tipoI_D > C.TIPO_I_MAX:
-            critico_D = P.valor_critico_recalibrado(p_nula_D, C.ALFA)
-            tipoI_D_v = float(np.mean(nula_D("verificacion") <= critico_D))
-            dep_D = True
-        filas_pot.append(
-            {
-                "prueba": "D",
-                "contraste": "C2",
-                "efecto": "tipo I AR(1)",
-                "valor": 0.0,
-                "tasa": tipoI_D,
-                "replicas": replicas,
-                "B": B_pot,
-                "esquema": esq_D,
-                "critico": C.ALFA,
-                "dependencia": True,
-            }
-        )
+        # la misma regla de §3.5, empezando por el esquema de A en C2 (§21, K-05)
+        regla_D = familias.aplicar_regla(nula_D, C.ALFA, C.TIPO_I_MAX, desde=esq_D)
+        tipoI_D = regla_D.tipo_I[esq_D]
+        critico_D, dep_D, tipoI_D_v = regla_D.critico, regla_D.dependencia_en_potencia, regla_D.tipo_I_tras_recalibrar
+        for esq, err in regla_D.tipo_I.items():
+            filas_pot.append(
+                {
+                    "prueba": "D",
+                    "contraste": "C2",
+                    "efecto": "tipo I AR(1)",
+                    "valor": 0.0,
+                    "tasa": err,
+                    "replicas": replicas,
+                    "B": B_pot,
+                    "esquema": esq,
+                    "critico": C.ALFA,
+                    "dependencia": True,
+                }
+            )
+        if tipoI_D_v is not None:
+            filas_pot.append(
+                {
+                    "prueba": "D",
+                    "contraste": "C2",
+                    "efecto": "tipo I AR(1) tras recalibrar",
+                    "valor": 0.0,
+                    "tasa": tipoI_D_v,
+                    "replicas": replicas,
+                    "B": B_pot,
+                    "esquema": regla_D.esquema,
+                    "critico": critico_D,
+                    "dependencia": True,
+                }
+            )
+        esq_D = regla_D.esquema
         pot_D = {"efectos": [], "potencias": []}
         for m in multiplos:
             e = m * C.EFECTO_TP_S
@@ -705,8 +758,10 @@ def homogeneidad(
             regla = reglas_A[n]
             r = familias.prueba_A(c, regla.esquema, B, "f04", "A", n, "observada")
             rechaza = r.p_min <= regla.critico
-            d = dr[n]
-            cat = familias.resultado_adr0005(rechaza, pot_A[n]["potencia_delta_rel"], C.POTENCIA_MIN, d.sin_raiz)
+            d, dc = dr[n], dr_c[n]
+            cat = familias.resultado_adr0005(
+                rechaza, pot_A[n]["potencia_delta_rel_corregido"], C.POTENCIA_MIN, dc.sin_raiz
+            )
             res_A[n] = {
                 "estadisticos": list(P.NOMBRES_A),
                 "log_cociente": r.T.tolist(),
@@ -723,9 +778,11 @@ def homogeneidad(
                 "potencia_dependiente": regla.dependencia_en_potencia,
                 "rechaza": bool(rechaza),
                 "delta_rel": asdict(d),
+                "delta_rel_rotulo": "no interpretable, defecto K-03 (§21)",
+                "delta_rel_corregido": asdict(dc),
                 "potencia": pot_A[n],
                 "resultado": cat,
-                "cambia_periodo": cat in (C.ESTABLECIDO, C.NO_CONCLUYENTE) and not d.sin_raiz,
+                "cambia_periodo": cat in (C.ESTABLECIDO, C.NO_CONCLUYENTE) and not dc.sin_raiz,
             }
             if not regla.recalibrable:
                 res_A[n]["rotulo"] = (
@@ -748,12 +805,18 @@ def homogeneidad(
 
         # Familia B
         orden.exigir_potencia()
-        an_all = descriptivos.anuales_hs(pr.hs)
+        an_all = descriptivos.anuales_hs(pr.hs, C.MES_TRANSICION)  # §3.2; §21, K-06
+        an_enero = descriptivos.anuales_hs(pr.hs)
         res_B = {}
-        for etiqueta, desde in (("principal", C.ANIOS_T1[0]), ("sin_1993_1997", C.SIN_PRIMEROS[1] + 1)):
-            g = an_all.loc[desde : C.ANIOS_T1[1]]
-            r99 = tendencia.mk_calibrado(g["hs_p99"].to_numpy(), nulas_B[etiqueta])
-            rmx = tendencia.mk_calibrado(g["hs_max"].to_numpy(), nulas_B[etiqueta])
+        for etiqueta, desde, an_x in (
+            ("principal", C.ANIOS_T1[0], an_all),
+            ("sin_1993_1997", C.SIN_PRIMEROS[1] + 1, an_all),
+            ("sensibilidad_con_enero_1993", C.ANIOS_T1[0], an_enero),
+        ):
+            g = an_x.loc[desde : C.ANIOS_T1[1]]
+            nula = nulas_B["sin_1993_1997" if etiqueta == "sin_1993_1997" else "principal"]
+            r99 = tendencia.mk_calibrado(g["hs_p99"].to_numpy(), nula)
+            rmx = tendencia.mk_calibrado(g["hs_max"].to_numpy(), nula)
             ph = P.holm([r99["p"], rmx["p"]])
             res_B[etiqueta] = {
                 "anios": [int(g.index.min()), int(g.index.max())],
@@ -769,8 +832,12 @@ def homogeneidad(
                 },
                 "rechaza": bool(ph.min() <= C.ALFA),
             }
-        sin_raiz_B = pend["pendiente_relativa_por_anio"] is None
-        res_B["pendiente_relevante"] = pend
+        res_B["sensibilidad_con_enero_1993"]["rotulo"] = (
+            "con enero de 1993 (mes de transición) dentro: sensibilidad. Vale el principal, sin enero (§21, K-06)"
+        )
+        sin_raiz_B = pend_c["pendiente_relativa_por_anio"] is None
+        res_B["pendiente_relevante"] = pend_c
+        res_B["pendiente_relevante_original"] = {**pend, "rotulo": "no interpretable, defecto K-03 (§21)"}
         res_B["potencia"] = pot_B
         res_B["resultado"] = familias.resultado_adr0005(
             res_B["principal"]["rechaza"], pot_B["potencia_relevante"], C.POTENCIA_MIN, sin_raiz_B
@@ -824,6 +891,9 @@ def homogeneidad(
             ],
             "potencia": pot_D,
         }
+        res_D["recalibrable"] = regla_D.recalibrable
+        if not regla_D.recalibrable:
+            res_D["rotulo"] = "no concluyente por construcción: el valor crítico no se pudo recalibrar (§19)"
         res_D["resultado"] = familias.resultado_adr0005(r_D.p <= critico_D, pot_D["potencia_relevante"], C.POTENCIA_MIN)
 
         # Altímetros
@@ -834,7 +904,13 @@ def homogeneidad(
             return A.mantel_haenszel(evento, expuesto, est, nivel_conf)
 
         principal = mh(ev_p, ok_p, alt["principal"], x_p, alt["epoca_principal"])
-        lect = C.SENAL if principal.excluye_1() else C.DESCARTADO if pot_alt >= C.POTENCIA_MIN else C.NO_CONCLUYENTE
+        # §21, K-08: «señal» solo con el IC por encima de 1; por debajo, se rotula aparte
+        if np.isfinite(principal.lo) and principal.lo > 1:
+            lect = C.SENAL
+        elif np.isfinite(principal.hi) and principal.hi < 1:
+            lect = C.SENAL_INVERSA
+        else:
+            lect = C.DESCARTADO if pot_alt >= C.POTENCIA_MIN else C.NO_CONCLUYENTE
         m_cuentan = len(cuentan)
         res_pl = []
         invalida = False
@@ -969,6 +1045,7 @@ def homogeneidad(
             pd.read_csv(insumos["excursiones_k_rev"]),
             pd.read_csv(insumos["candidatos"]),
             pd.read_csv(insumos["marcas_por_anio"], index_col="anio"),
+            C.MES_TRANSICION,
         )
         _csv(ind, st / "indicadores_anuales.csv", index=True)
         orden.registrar("indicadores_anuales.csv")
@@ -1019,7 +1096,14 @@ def homogeneidad(
         motivos = gate_f04(crono, cob, res_A, res_B, res_D, res_alt, resumen)
         gate = etapa.Gate(
             not motivos,
-            {"alfa": C.ALFA, "potencia_min": C.POTENCIA_MIN, "B": B, "replicas": replicas, "B_replicas": B_pot},
+            {
+                "alfa": C.ALFA,
+                "potencia_min": C.POTENCIA_MIN,
+                "B": B,
+                "replicas": replicas,
+                "B_replicas": B_pot,
+                "control_de_placebo": res_alt["control_de_placebo"],
+            },
             motivos,
         )
         return etapa.publicar(
@@ -1113,6 +1197,8 @@ def decision(res_A, res_B, res_C, res_D, res_alt, observaciones_T0: str = "GEOSA
             "B": res_B["resultado"],
             "D": res_D["resultado"],
             "altimetros": res_alt["resultado"],
+            "altimetros_control_de_placebo": res_alt["control_de_placebo"],
+            "altimetros_placebos_que_cuentan": res_alt["placebos_que_cuentan"],
         },
         "cuerpo_estable_y_cola_cambia": {n: res_A[n]["cuerpo_p50"]["cuerpo_estable_y_cola_cambia"] for n in res_A},
         "a_la_F8": {"fechas_de_cambio": f8, "hipotesis_rotuladas": hip},
@@ -1135,7 +1221,10 @@ def decision(res_A, res_B, res_C, res_D, res_alt, observaciones_T0: str = "GEOSA
             if res_alt["resultado"] == C.SENAL
             else None,
         },
-        "a_la_F9": {"sensibilidad_sin_saltos_coincidentes": res_alt["resultado"] == C.SENAL},
+        "a_la_F9": {
+            "sensibilidad_sin_saltos_coincidentes": res_alt["resultado"] == C.SENAL,
+            "control_de_placebo": res_alt["control_de_placebo"],
+        },
         "G8": "pendiente de la aceptación del usuario",
     }
 
@@ -1163,7 +1252,11 @@ def posteriores(res_A, res_B, res_C, res_D, res_alt, anuales: pd.DataFrame, por_
         "con_ic_95_que_excluye_1": fallan,
         "con_pasos": len(con_pasos),
         "lectura": f"{len(fallan)} de {len(con_pasos)} placebos con pasos tienen un IC del 95 % que excluye el 1. "
-        "La etiqueta formal no cambia: ninguno alcanza la potencia que pide la regla para contar.",
+        + (
+            "La etiqueta formal no cambia: ninguno alcanza la potencia que pide la regla para contar."
+            if res_alt["placebos_que_cuentan"] == 0
+            else f"Cuentan {res_alt['placebos_que_cuentan']}; la etiqueta formal es «{res_alt['control_de_placebo']}»."
+        ),
         "tasa_de_salto_con_pasada": tasas,
     }
 
@@ -1294,8 +1387,8 @@ def posteriores(res_A, res_B, res_C, res_D, res_alt, anuales: pd.DataFrame, por_
 
     # Lectura de la potencia
     pot = {
-        "A_C1": res_A["C1"]["potencia"]["potencia_delta_rel"],
-        "A_C2": res_A["C2"]["potencia"]["potencia_delta_rel"],
+        "A_C1": res_A["C1"]["potencia"]["potencia_delta_rel_corregido"],
+        "A_C2": res_A["C2"]["potencia"]["potencia_delta_rel_corregido"],
         "B": res_B["potencia"]["potencia_relevante"],
         "D": res_D["potencia"]["potencia_relevante"],
     }
@@ -1329,8 +1422,8 @@ def gate_f04(crono, cob, res_A, res_B, res_D, res_alt, resumen) -> list[str]:
     for n, r in res_A.items():
         if r["resultado"] not in (C.ESTABLECIDO, C.DESCARTADO, C.NO_CONCLUYENTE, C.SIN_RAIZ):
             motivos.append(f"G5: familia A {n} sin resultado")
-        sin_pot = r["potencia"]["potencia_delta_rel"] is None
-        if not r["rechaza"] and sin_pot and r["delta_rel"]["delta"] is not None:
+        sin_pot = r["potencia"]["potencia_delta_rel_corregido"] is None
+        if not r["rechaza"] and sin_pot and r["delta_rel_corregido"]["delta"] is not None:
             motivos.append(f"G5: familia A {n} no rechaza sin potencia al lado")
     for nombre, r in (("B", res_B), ("D", res_D)):
         if r["resultado"] not in (C.ESTABLECIDO, C.DESCARTADO, C.NO_CONCLUYENTE, C.SIN_RAIZ):
