@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from peruvian_wave_analysis.homogeneidad import altimetros as A
 from peruvian_wave_analysis.homogeneidad import config as C
+from peruvian_wave_analysis.homogeneidad import descriptivos as DS
 from peruvian_wave_analysis.homogeneidad import familias as F
 from peruvian_wave_analysis.homogeneidad import permutacion as P
 from peruvian_wave_analysis.homogeneidad import relevante as R
@@ -186,7 +189,8 @@ def _res(cociente_mm_c1, resultado_c1=C.NO_CONCLUYENTE):
         }
 
     res_A = {"C1": a(cociente_mm_c1, resultado_c1), "C2": a(1.0, C.DESCARTADO)}
-    return res_A, {"resultado": C.DESCARTADO}, {}, {"resultado": C.DESCARTADO}, {"resultado": C.DESCARTADO}
+    alt = {"resultado": C.DESCARTADO, "control_de_placebo": "sin control de placebo", "placebos_que_cuentan": 0}
+    return res_A, {"resultado": C.DESCARTADO}, {}, {"resultado": C.DESCARTADO}, alt
 
 
 def test_signo_de_E1_elige_la_forma():
@@ -537,3 +541,90 @@ def test_esperados_con_cociente_1_para_grupos_sin_eventos():
     # estrato 0: n1 = 2, b = 1, n0 = 3; estrato 1: n1 = 1, b = 2, n0 = 4
     assert A.esperados_con_cociente_1(ev, x, est) == pytest.approx(2 / 3 + 2 / 4)
     assert not A.mantel_haenszel(ev, x, est).excluye_1()
+
+
+# --- §21: K-03, K-04 y K-06 ---------------------------------------------------------------------
+
+
+def _modelo_gpd(u=3.0, xi=0.05, sigma=0.4, n=200, anios=40.0, semilla=5):
+    rng = np.random.default_rng(semilla)
+    e = sigma / xi * (rng.random(n) ** (-xi) - 1.0)
+    t = pd.date_range("1980-01-01", periods=n, freq="73D")
+    return R.ModeloProvisional(u, u + e, t, anios)
+
+
+def test_niveles_mezcla_escala_con_el_factor_y_es_monotona():
+    """K-03: con u > 0, un mismo factor en todos los picos escala el RL exactamente; con un lado escalado, el RL
+    crece con δ. (La versión original reajustaba la GPD y no cumplía ninguna de las dos.)"""
+    m = _modelo_gpd()
+    aj = R.ajuste_base(m)
+    base = R.niveles_mezcla(m, np.ones(m.picos.size), C.PERIODOS_RETORNO, aj)
+    for f in (0.97, 0.985, 1.015, 1.03):
+        r = R.niveles_mezcla(m, np.full(m.picos.size, f), C.PERIODOS_RETORNO, aj)
+        assert np.allclose(r / base, f, rtol=1e-9)
+    lado = np.arange(m.picos.size) % 3 == 0
+    rl = [
+        R.niveles_mezcla(m, np.where(lado, 1 + d, 1.0), C.PERIODOS_RETORNO, aj)[-1]
+        for d in (-0.06, -0.03, 0, 0.03, 0.06)
+    ]
+    assert np.all(np.diff(rl) > 0)
+
+
+def test_delta_rel_corregido_de_un_lado_que_lleva_casi_todos_los_picos():
+    """Si un lado lleva casi todos los picos, su δ_rel corregido ronda el 2 % (un poco más, por el otro lado)."""
+    m = _modelo_gpd()
+    lados = {"lado1": np.arange(m.picos.size) < 10, "lado2": np.arange(m.picos.size) >= 10}
+    fn = functools.partial(R.niveles_mezcla, ajuste=R.ajuste_base(m))
+    d = R.delta_relevante(m, lados, C.PERIODOS_RETORNO, 0.02, R.rejilla(-0.3, 0.3, 0.005), niveles_fn=fn)
+    assert d.lado == "lado2" and d.delta == pytest.approx(-0.025)
+
+
+def _nula_falsa(tasas: dict, registro: list):
+    """p mínimos sintéticos con una tasa de rechazo al 5 % dada por (esquema, etiqueta)."""
+
+    def f(esquema, etiqueta):
+        registro.append((esquema, etiqueta))
+        t = tasas[(esquema, etiqueta)]
+        if t == "min":  # 20 % de las réplicas en el menor p posible: no recalibrable
+            return np.concatenate([np.full(200, 0.001), np.linspace(0.06, 1, 800)])
+        k = int(round(t * 1000))
+        return np.concatenate([np.linspace(0.001, 0.05, k), np.linspace(0.051, 1, 1000 - k)])
+
+    return f
+
+
+def test_regla_de_dependencia_recorre_sus_ramas():
+    """K-04: años si basta; si no, bloques; si no, recalibrar con verificación; y la marca de no recalibrable."""
+    reg = []
+    r = F.aplicar_regla(_nula_falsa({("anios", "tipo-I"): 0.05}, reg), 0.05, 0.07)
+    assert (r.esquema, r.critico, r.dependencia_en_potencia) == ("anios", 0.05, False)
+    r = F.aplicar_regla(_nula_falsa({("anios", "tipo-I"): 0.15, ("bloques2", "tipo-I"): 0.06}, reg), 0.05, 0.07)
+    assert (r.esquema, r.critico, r.dependencia_en_potencia) == ("bloques2", 0.05, True)
+    t = {("anios", "tipo-I"): 0.15, ("bloques2", "tipo-I"): 0.10, ("bloques2", "verificacion"): 0.05}
+    r = F.aplicar_regla(_nula_falsa(t, reg), 0.05, 0.07)
+    assert r.esquema == "bloques2" and r.critico < 0.05 and r.recalibrable and r.tipo_I_tras_recalibrar is not None
+    reg.clear()
+    t = {("bloques2", "tipo-I"): "min", ("bloques2", "verificacion"): 0.05}
+    r = F.aplicar_regla(_nula_falsa(t, reg), 0.05, 0.07, desde="bloques2")
+    assert not r.recalibrable
+    assert ("anios", "tipo-I") not in reg  # K-05: la familia D empieza en bloques si A en C2 usa bloques
+
+
+def test_resultado_adr0005():
+    """K-04: las cuatro categorías."""
+    assert F.resultado_adr0005(True, None, 0.8) == C.ESTABLECIDO
+    assert F.resultado_adr0005(True, 0.1, 0.8, sin_raiz=True) == C.ESTABLECIDO
+    assert F.resultado_adr0005(False, 0.9, 0.8) == C.DESCARTADO
+    assert F.resultado_adr0005(False, 0.5, 0.8) == C.NO_CONCLUYENTE
+    assert F.resultado_adr0005(False, None, 0.8) == C.NO_CONCLUYENTE
+    assert F.resultado_adr0005(False, 0.9, 0.8, sin_raiz=True) == C.SIN_RAIZ
+
+
+def test_anuales_sin_el_mes_de_transicion():
+    """K-06: enero de 1993 no entra en los estadísticos, y el año sigue contando como completo."""
+    t = pd.date_range("1992-01-01", "1994-12-31 21:00", freq="3h")
+    hs = pd.Series(1.0, index=t)
+    hs[(t >= "1993-01-01") & (t < "1993-02-01")] = 9.0
+    a = DS.anuales_hs(hs, C.MES_TRANSICION)
+    assert a.loc[1993, "hs_max"] == 1.0 and a.loc[1993, "meses"] == 12
+    assert DS.anuales_hs(hs).loc[1993, "hs_max"] == 9.0

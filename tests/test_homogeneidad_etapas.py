@@ -122,11 +122,22 @@ def _sembrar(raiz, paso: float):
 
 
 @pytest.mark.lento
-def test_escalon_en_1993_queda_establecido_sin_atribuir(tmp_path):
+def test_escalon_en_1993_queda_establecido_sin_atribuir(tmp_path, monkeypatch):
     raiz = tmp_path / "WAVE-DATA"
     raiz.mkdir()
     _sembrar(raiz, paso=0.30)
+    # K-04: la guarda de G4 se ejecuta antes de cada uno de los 8 bloques observados
+    llamadas = []
+    original = run.OrdenEscritura.exigir_potencia
+
+    def contar(self):
+        llamadas.append(1)
+        return original(self)
+
+    monkeypatch.setattr(run.OrdenEscritura, "exigir_potencia", contar)
     salida = run.homogeneidad(raiz, NOMBRE, procesos_n=1, B=99, replicas=20, multiplos=(1.0,), B_ic=19)
+    assert len(llamadas) == 8
+    monkeypatch.undo()
     man = etapa.exigir_publicada(salida)
     orden = man["extra"]["orden_de_escritura"]
     assert orden.index("potencia.csv") < orden.index("cuantiles_por_tramo.csv") < orden.index("figuras")
@@ -146,6 +157,10 @@ def test_escalon_en_1993_queda_establecido_sin_atribuir(tmp_path):
         post
     )
     assert r["a_la_F5"]["C1"]["observaciones"]["T0"] == "GEOSAT (sin datos locales)"
+    # §21: calificador de placebos en el resumen y en el gate (K-02); δ_rel corregido con su potencia (K-03)
+    assert r["resultados"]["altimetros_control_de_placebo"] == man["gate"]["criterios"]["control_de_placebo"]
+    assert "delta_rel_corregido" in pc["A"]["C1"] and "rotulo_K03" in pc["previo"]
+    assert pc["B"]["sensibilidad_con_enero_1993"]["rotulo"]
     pm = pd.read_csv(salida / "altimetros_por_mision_anio.csv")
     assert {"GFO", "SARAL", "HY-2"} <= set(pm["mision"])
     pa = json_estricto.leer(salida / "prueba_altimetros.json")
