@@ -44,27 +44,29 @@ def test_simex_descuenta_el_ruido_y_no_cambia_sin_ruido():
 
 def test_generador_conserva_la_marginal_y_alcanza_el_si():
     L = _lado(n=3000)
-    r = S.calibrar_r(L, 0.16, 0.8, semilla=3)
-    o = S.verdadero(L, r, 0.8, np.random.default_rng(4))
-    assert S.si(L, o) == pytest.approx(0.16, abs=0.02)
+    a = S.calibrar_r(L, 0.16, 0.8, semilla=3)
+    m, o = S.par(L, a, 0.8, np.random.default_rng(4))
+    assert S.si(L, o, m) == pytest.approx(0.16, abs=0.02)
     q = [0.5, 0.9, 0.99]
-    assert np.quantile(o, q) == pytest.approx(np.quantile(L.m, q), rel=0.05)
+    for x in (m, o):
+        assert np.quantile(x, q) == pytest.approx(np.quantile(L.m, q), rel=0.05)
 
 
 def test_nulidad_del_generador():
-    """§8: b = 0, SI = 0.16, ρ = 0.8: B(P90) y B(P99) descontados con media dentro del error de Monte Carlo de 0."""
+    """§8 (generador simétrico, §20): b = 0, SI = 0.16, ρ = 0.8. B(P90), B(P99) y B(máx) descontados, sin centrar,
+    con media dentro del error de Monte Carlo de 0. El generador asimétrico daba B(máx) ≈ −0.06 a −0.10."""
     L = _lado(n=2500)
-    r = S.calibrar_r(L, 0.16, 0.8, semilla=5)
-    b90, b99 = [], []
-    for i in range(40):
+    a = S.calibrar_r(L, 0.16, 0.8, semilla=5)
+    B = []
+    for i in range(60):
         rng = np.random.default_rng(100 + i)
-        o = S.verdadero(L, r, 0.8, rng)
+        m, o = S.par(L, a, 0.8, rng)
         sig = S.sigma_ruido(L, o, 1.0)
-        med = S.medir(L, o + sig * rng.standard_normal(L.n), sig, 49, rng)
-        b90.append(med.B[S.IDX["P90"]])
-        b99.append(med.B[S.IDX["P99"]])
-    for x in (np.array(b90), np.array(b99)):
-        assert abs(x.mean()) <= 3 * x.std(ddof=1) / np.sqrt(x.size)
+        B.append(S.medir(L, o + sig * rng.standard_normal(L.n), sig, 49, rng, m=m).B)
+    B = np.array(B)
+    for e in ("P90", "P99", "max"):
+        x = B[:, S.IDX[e]]
+        assert abs(x.mean()) <= 3 * x.std(ddof=1) / np.sqrt(x.size), e
 
 
 def test_piso_de_calibracion_no_baja_con_n():
