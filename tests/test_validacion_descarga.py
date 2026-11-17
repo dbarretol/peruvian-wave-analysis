@@ -40,6 +40,7 @@ YYYY_CON_MIN = """YYYY MM DD hh mm  WD  WSPD GST  WVHT  DPD   APD  MWD  BAR    A
 
 ACTUAL = """#YY  MM DD hh mm WDIR WSPD GST  WVHT   DPD   APD MWD   PRES  ATMP  WTMP  DEWP  VIS  TIDE
 #yr  mo dy hr mn degT m/s  m/s     m   sec   sec degT   hPa  degC  degC  degC  nmi    ft
+2015 12 31 23 50 999 99.0 99.0  2.10 12.50  7.60 999 9999.0 999.0  22.4 999.0 99.0 99.00
 2016 01 01 00 50 999 99.0 99.0  7.77 13.31  8.88 999 9999.0 999.0  22.4 999.0 99.0 99.00
 2016 01 01 01 50 999 99.0 99.0 99.00 99.00 99.00 999 9999.0 999.0  22.4 999.0 99.0 99.00
 2016 12 31 23 50 999 99.0 99.0  2.10 12.50  7.60 999 9999.0 999.0  22.4 999.0 99.0 99.00
@@ -64,16 +65,17 @@ def _sin_valores(texto):
         (YY_SIN_MIN, "YY sin minutos", 1986, 3, "1986-01-01 00:00:00", "1986-12-31 23:00:00"),
         (YYYY_SIN_MIN, "YYYY sin minutos", 2003, 2, "2003-01-01 00:00:00", "2003-06-01 00:00:00"),
         (YYYY_CON_MIN, "YYYY con minutos", 2006, 1, "2006-01-01 00:50:00", "2006-01-01 00:50:00"),
-        (ACTUAL, "#YY con minutos y unidades", 2016, 4, "2016-01-01 00:50:00", "2017-01-01 00:50:00"),
+        (ACTUAL, "#YY con minutos y unidades", 2016, 5, "2015-12-31 23:50:00", "2017-01-01 00:50:00"),
     ],
 )
 def test_estructura_de_cada_formato_sin_valores(tmp_path, texto, formato, anio, registros, inicio, fin):
     if formato.startswith("#YY"):
-        # el 1 de enero siguiente a las 00:50 no es «00 h»: se admite solo exactamente a las 00:00
-        with pytest.raises(ndbc.ErrorNDBC, match="fuera del año"):
-            ndbc.estructura(_gz(tmp_path / f"x{anio}.txt.gz", texto), anio_esperado=anio)
-        texto = texto.replace("2017 01 01 00 50", "2017 01 01 00 00")
-        fin = "2017-01-01 00:00:00"
+        # como en los archivos reales desde 2009: el 31 de diciembre anterior a las 23:50 y el 1 de enero siguiente a
+        # las 00:50 se admiten (una hora de borde); más allá, no
+        for fuera in ("2017 01 01 01 50", "2015 12 31 22 50"):
+            malo = texto.replace("2017 01 01 00 50" if fuera.startswith("2017") else "2015 12 31 23 50", fuera)
+            with pytest.raises(ndbc.ErrorNDBC, match="1 registros fuera del año"):
+                ndbc.estructura(_gz(tmp_path / f"x{anio}.txt.gz", malo), anio_esperado=anio)
     e = ndbc.estructura(_gz(tmp_path / f"b{anio}.txt.gz", texto), anio_esperado=anio)
     assert e["formato"] == formato
     assert e["registros"] == registros
@@ -93,7 +95,7 @@ def test_lector_interpreta_valores_y_centinelas(tmp_path):
     assert df["MWD"].isna().all()  # 999
     df, _ = ndbc._leer(_gz(tmp_path / "b.txt.gz", ACTUAL))
     assert df["PRES"].isna().all()  # 9999.0
-    assert df["tiempo"].iloc[0] == pd.Timestamp("2016-01-01 00:50")
+    assert df["tiempo"].iloc[1] == pd.Timestamp("2016-01-01 00:50")
 
 
 def test_presencia_devuelve_solo_mascara(tmp_path):
@@ -179,7 +181,7 @@ def test_comparar_hashes(tmp_path, monkeypatch):
 
 
 def test_cli_ndbc_no_imprime_valores(tmp_path, monkeypatch, capsys):
-    textos = {1986: YY_SIN_MIN, 2016: ACTUAL.replace("2017 01 01 00 50", "2017 01 01 00 00")}
+    textos = {1986: YY_SIN_MIN, 2016: ACTUAL}
     monkeypatch.setattr(ndbc, "_bajar", _bajar_falso([], textos))
     raiz = tmp_path / "WAVE-DATA"
     raiz.mkdir()

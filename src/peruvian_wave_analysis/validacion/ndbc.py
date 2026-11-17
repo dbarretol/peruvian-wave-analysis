@@ -32,6 +32,7 @@ AGENTE = "Mozilla/5.0 (compatible; research-client)"  # NDBC responde 403 sin un
 CENTINELAS = (99.0, 999.0, 9999.0)  # valores de dato ausente de NDBC (contrato §3.3)
 VARIABLES_F5 = ("WVHT", "DPD", "APD")
 _ALIAS = {"WD": "WDIR", "BAR": "PRES"}
+BORDE = pd.Timedelta(hours=1)  # tolerancia en los bordes del año (registros de las hh:50)
 _TIEMPO = ("YY", "YYYY", "MM", "DD", "hh", "mm")
 
 
@@ -213,8 +214,10 @@ def _leer(ruta: Path) -> tuple[pd.DataFrame, str]:
 def estructura(ruta: Path, anio_esperado: int | None = None) -> dict:
     """Formato, columnas, registros y fechas extremas. **Sin valores observados** (G4).
 
-    Falla si faltan las columnas de la F5 (WVHT, DPD, APD) o si hay registros de un año ajeno al archivo (se admite
-    el 1 de enero a las 00 h del año siguiente).
+    Falla si faltan las columnas de la F5 (WVHT, DPD, APD) o si hay registros de un año ajeno al archivo. Se admite
+    una hora en cada borde: desde 2009, los archivos de NDBC empiezan con el registro de las 23:50 del 31 de diciembre
+    anterior (hora 00 del año del archivo). Esos registros de borde pueden repetirse entre archivos contiguos; los
+    duplicados entre archivos se resuelven al unir la serie, no aquí.
     """
     df, formato = _leer(ruta)
     nombre = Path(ruta).name.removesuffix(".parcial")
@@ -223,8 +226,9 @@ def estructura(ruta: Path, anio_esperado: int | None = None) -> dict:
         raise ErrorNDBC(f"{nombre}: faltan las columnas {faltan}.")
     t = pd.DatetimeIndex(df["tiempo"])
     if anio_esperado is not None and len(t):
-        siguiente = pd.Timestamp(f"{anio_esperado + 1}-01-01")
-        ajenos = int(((t.year != anio_esperado) & (t != siguiente)).sum())
+        desde = pd.Timestamp(f"{anio_esperado}-01-01") - BORDE
+        hasta = pd.Timestamp(f"{anio_esperado + 1}-01-01") + BORDE
+        ajenos = int(((t < desde) | (t > hasta)).sum())
         if ajenos:
             raise ErrorNDBC(f"{nombre}: {ajenos} registros fuera del año {anio_esperado}.")
     return {
