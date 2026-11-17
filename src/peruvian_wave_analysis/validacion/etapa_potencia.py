@@ -20,16 +20,16 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from .. import manifiesto, rutas
-from ..comun import etapa, json_estricto, orquestador, procesos, semillas
+from ..comun import etapa, json_estricto, orquestador, semillas
 from ..comun.errores import GateFallido
 from ..datos.run import ruta_serie
 from . import config as C
 from . import geometria as G
 from . import potencia as P
+from . import reanudable
 from .modelo import ETAPA_MODELO, ruta_modelo
 
 NOMBRE = "marcona-200m"
@@ -37,9 +37,25 @@ ETAPA_POTENCIA = orquestador.Etapa("validacion-potencia", ETAPA_MODELO.codigo, P
 TROZO = 25  # réplicas por tarea
 REPLICAS_NULIDAD = 200
 REPLICAS_VALIDACION = 200
-# Validación del desplazamiento (§20): el nominal y un punto fuera de la rejilla, el más ruidoso (solo para validar)
-PUNTO_RUIDOSO = P.Punto("validacion_SI0.16-0.2_cal2_rho0.5", 0.16, 0.20, 0.5, 2.0)
-VALIDACIONES = (("V1a", "A", C.ALFA_FUENTE), ("V1b", "T1b", C.ALFA_FUENTE), ("V3a", "A", C.ALFA_FAMILIA))
+# Validación del desplazamiento (§20.2): el nominal y el punto más ruidoso de la rejilla (ρ = 0.8, SI 0.16/0.20,
+# calibración y ruido × 2; S-22), con los dos signos. V3b con inyección que crece con el nivel (S-20).
+PUNTO_RUIDOSO = "SI0.16-0.2_cal2_rho0.8"
+VALIDACIONES = (
+    ("V1a", "A", C.ALFA_FUENTE, "constante"),
+    ("V1b", "T1b", C.ALFA_FUENTE, "constante"),
+    ("V3a", "A", C.ALFA_FAMILIA, "constante"),
+    ("V3b", "A", C.ALFA_FAMILIA, "nivel"),
+)
+PRUEBAS = (
+    ("V1a", C.ALFA_FUENTE),
+    ("V1b", C.ALFA_FUENTE),
+    ("V1b_lado", C.ALFA_FUENTE),
+    ("V2a", C.ALFA_FUENTE),
+    ("V3a", C.ALFA_FAMILIA),
+    ("V3b", C.ALFA_FAMILIA),
+    ("V3a_sinmax", C.ALFA_FAMILIA),
+    ("V3b_sinmax", C.ALFA_FAMILIA),
+)
 HALLAZGO_ESCENARIOS = (
     "Con esta muestra, la F5 no puede retirar escenarios (contrato §19): el traslado al nodo sale «dudoso» en todas "
     "las comparaciones. V1 y V2 informan a la F8, pero no deciden; E0, E1 y E2 siguen activos."
@@ -106,17 +122,33 @@ def _trabajo(args) -> list[dict]:
     return [P.replica(lados, r, punto, i, inyeccion=inyeccion) for i in indices]
 
 
+AVANCE: dict = {"dir": None}  # directorio de avance de la corrida en curso (lo fija ``potencia_etapa``)
+
+
+def ruta_avance(raiz: Path, nombre: str = NOMBRE) -> Path:
+    return Path(raiz) / "interim" / "F05-validacion-externa" / "potencia-avance" / nombre
+
+
+def _nombre_tarea(punto, indices, inyeccion) -> str:
+    iny = "nula" if not inyeccion else reanudable.clave(sorted((k, v) for k, v in inyeccion.items()))
+    return f"{punto.nombre}__{iny}__{indices[0]:05d}-{indices[-1]:05d}"
+
+
 def correr(ruta_alt, ruta_boy, punto, r, n, procesos_, inyeccion=None, desde: int = 0) -> list[dict]:
-    tareas = [
-        (ruta_alt, ruta_boy, punto, r, list(range(a, min(a + TROZO, desde + n))), inyeccion)
-        for a in range(desde, desde + n, TROZO)
-    ]
-    return [x for parte in procesos.mapear(_trabajo, tareas, procesos=procesos_) for x in parte]
+    """Réplicas ``desde`` … ``desde + n − 1`` de un punto, en tareas de ``TROZO`` réplicas, **reanudables**: cada
+    tarea se guarda al terminar en el directorio de avance y no se repite al relanzar la etapa."""
+    tareas = []
+    for a in range(desde, desde + n, TROZO):
+        indices = list(range(a, min(a + TROZO, desde + n)))
+        tareas.append((_nombre_tarea(punto, indices, inyeccion), (ruta_alt, ruta_boy, punto, r, indices, inyeccion)))
+    aviso = lambda t: print(f"  {punto.nombre}{' (inyección)' if inyeccion else ''}: {t}", flush=True)  # noqa: E731
+    partes = reanudable.ejecutar(_trabajo, tareas, AVANCE["dir"], procesos_, aviso)
+    return [x for parte in partes for x in parte]
 
 
 def _fila_replica(punto: str, i: int, rp: dict) -> list[dict]:
     out = []
-    for k in ("V1a", "V1b", "V1b_lado", "V2a", "V3a", "V3b"):
+    for k, _ in PRUEBAS:
         pr = rp[k]
         fila = {"punto": punto, "replica": i, "prueba": k, "p": pr.p}
         fila |= {f"est_{j}": v for j, v in enumerate(pr.est)} | {f"ee_{j}": v for j, v in enumerate(pr.ee)}
@@ -138,6 +170,7 @@ def _efectos_fuente(esc: pd.DataFrame, efectos_nodo: dict[str, float]) -> dict[s
         "V3b": C.EFECTO_V3,
     }
     ef["V1b_lado"] = ef["V1b"]
+    ef["V3a_sinmax"] = ef["V3b_sinmax"] = C.EFECTO_V3
     return ef
 
 
@@ -146,10 +179,14 @@ def potencia_etapa(
 ) -> Path:
     raiz = rutas.directorio_datos(raiz_datos)
     ins, esp = insumos(raiz, nombre)
-    etapa.exigir_insumos(ins, esp)  # G2
+    hashes = etapa.exigir_insumos(ins, esp)  # G2
     salida = ruta_previo(raiz, nombre) if previo else ruta_potencia(raiz, nombre)
     raices = orquestador.rutas_codigo(ETAPA_POTENCIA)
     P.FACTORES.clear()
+    # Avance reanudable: la clave cambia si cambia el código de la etapa o cualquier insumo
+    clave = reanudable.clave(orquestador.huella_etapa(ETAPA_POTENCIA), hashes, C.B_POTENCIA, TROZO)
+    AVANCE["dir"] = ruta_avance(raiz, nombre) / clave
+    print(f"Avance reanudable en {AVANCE['dir']}", flush=True)
     with etapa.staging_protegido(salida, raices) as st:
         t0 = time.time()
         alt, boy, qc, efectos_nodo = geometria(ins, raiz)
@@ -165,16 +202,29 @@ def potencia_etapa(
         lados_res = {n: G.resumen_lado(G.colocaciones_de_lado(alt, boy, n)) for n in C.LADOS}
         print(f"Geometría y escalón del modelo: {time.time() - t0:.0f} s", flush=True)
 
-        # 3. Nulidad del generador, antes de ninguna potencia (§8)
+        # 3. Antes de ninguna potencia (§8 y §20.5): nulidad del generador solo (gate) y sesgo del estimador completo
         lados = P.preparar_lados(alt, boy)
         p_nul = P.Punto("nulidad_SI0.16", 0.16, 0.16, 0.8, 1.0)
         r_nul = P.calibrar(lados, p_nul)
+        pura = P.nulidad_pura(lados, r_nul, p_nul.rho, REPLICAS_NULIDAD, p_nul.nombre)
+        nul_ok = P.nulidad_cumple(pura)
+        for lado, v in pura.items():
+            txt = ", ".join(f"{e} {v[e]['media']:+.4f} (ee {v[e]['ee_mc']:.4f})" for e in ("P90", "P99", "max"))
+            print(f"Nulidad del generador (sin ruido ni calibración), {lado}: {txt}", flush=True)
+        print(f"Nulidad del generador: {'cumple' if nul_ok else 'NO CUMPLE'}", flush=True)
         t1 = time.time()
         reps_nul = correr(ruta_alt, ruta_boy, p_nul, r_nul, REPLICAS_NULIDAD, procesos_)
-        nul = P.nulidad_generador(reps_nul)
         seg_rep = (time.time() - t1) / len(reps_nul) * procesos_
-        nul_ok = all(abs(v["media"]) <= 3 * v["ee_mc"] for k, v in nul.items() if k in ("B_P90", "B_P99"))
-        print(f"Nulidad del generador: {nul} → {'cumple' if nul_ok else 'NO CUMPLE'}", flush=True)
+        nul_original = P.nulidad_generador(reps_nul)
+        sesgo = P.sesgo_estimador(reps_nul, efectos)
+        for lado, v in sesgo["lados"].items():
+            txt = ", ".join(
+                f"{e} {v[e]['media']:+.4f}{'' if v[e]['estimable'] else ' (no estimable)'}"
+                for e in ("P90", "P99", "max")
+            )
+            print(f"Sesgo del estimador (ruido, SIMEX y calibración), {lado}: {txt}", flush=True)
+        for h in sesgo["hallazgos"]:
+            print(f"Hallazgo: {h}", flush=True)
         n_puntos = len(P.rejilla())
         est_h = seg_rep * replicas * n_puntos / procesos_ / 3600
         print(
@@ -183,14 +233,28 @@ def potencia_etapa(
         )
         resumen = {
             "valores_observados_leidos": False,
-            "hallazgos": [HALLAZGO_ESCENARIOS],
+            "hallazgos": [HALLAZGO_ESCENARIOS, *[f"{h} (§20.5; no se corrige)" for h in sesgo["hallazgos"]]],
             "efectos_nodo": efectos_nodo,
             "efectos_por_fuente": efectos,
             "atribuye": esc[esc["estadistico"] == "P90"].set_index("comparacion")["atribuye"].dropna().to_dict(),
             "traslado_p90": esc[esc["estadistico"] == "P90"].set_index("comparacion")["traslado"].dropna().to_dict(),
             "lados": lados_res,
             "pesos_hy2": G.pesos_hy2(alt),
-            "nulidad_generador": {"replicas": len(reps_nul), "resultado": nul, "cumple": nul_ok},
+            "nulidad_generador": {
+                "criterio": "§20.5: generador solo, sin ruido ni calibración, sin centrar; |media| ≤ 3 EE de MC en "
+                "P90, P99 y máx de los seis lados",
+                "replicas": REPLICAS_NULIDAD,
+                "resultado": pura,
+                "cumple": nul_ok,
+            },
+            "prueba_original_s8": {
+                "criterio": "§8 tal como se aceptó: con ruido, calibración y SIMEX, dentro del error de MC de 0",
+                "replicas": len(reps_nul),
+                "resultado": nul_original,
+                "cumple": P.nulidad_cumple(nul_original),
+                "nota": "No se usa como gate (§20.5): mide el sesgo del estimador, no el del generador.",
+            },
+            "sesgo_estimador": sesgo,
             "segundos_por_replica": seg_rep,
             "estimacion_horas_rejilla": est_h,
             "replicas_por_punto": replicas,
@@ -202,7 +266,8 @@ def potencia_etapa(
                 "Calibración linealizada sobre el estadístico en el bootstrap (exacta en el generador).",
                 "SIMEX como desplazamiento fijo de las réplicas bootstrap (no se repite dentro de cada réplica).",
                 "Ruido de 1 Hz generado a nivel de superobservación (σ/√n), equivalente a la media de n puntos iid.",
-                "V3b: B(P99) − B(P50) se desplaza en el efecto (sesgo creciente con el nivel).",
+                "V3b: B(P99) − B(P50) se desplaza en el efecto; validado con inyección que crece con el nivel.",
+                "Término por lado de la boya en la verdad: desplazamiento exacto (el ruido de la boya es relativo).",
             ],
         }
         if previo:
@@ -221,22 +286,14 @@ def potencia_etapa(
 
         # 4–5. Rejilla
         tablas, filas_rep, mde, tipo1, subida = [], [], [], [], {}
-        reps_nominal = None
+        potencias_v3, reps_por_punto = {}, {}
         for punto in P.rejilla():
             r = P.calibrar(lados, punto)
             t2 = time.time()
             reps = correr(ruta_alt, ruta_boy, punto, r, replicas, procesos_)
             print(f"{punto.nombre}: {len(reps)} réplicas en {(time.time() - t2) / 60:.1f} min", flush=True)
             if punto.nombre == P.NOMINAL:
-                reps_nominal = reps
-                for prueba, alfa in (
-                    ("V1a", C.ALFA_FUENTE),
-                    ("V1b", C.ALFA_FUENTE),
-                    ("V1b_lado", C.ALFA_FUENTE),
-                    ("V2a", C.ALFA_FUENTE),
-                    ("V3a", C.ALFA_FAMILIA),
-                    ("V3b", C.ALFA_FAMILIA),
-                ):
+                for prueba, alfa in PRUEBAS:
                     rc = P.recalibrar(reps, prueba, alfa)
                     tipo1.append(rc)
                     if rc["recalibrado"]:
@@ -250,8 +307,7 @@ def potencia_etapa(
                     }
                 )
             tablas.append(P.tabla_potencia(reps, punto, efectos))
-            for prueba in ("V1a", "V1b", "V1b_lado", "V2a", "V3a", "V3b"):
-                alfa = C.ALFA_FAMILIA if prueba.startswith("V3") else C.ALFA_FUENTE
+            for prueba, alfa in PRUEBAS:
                 mde.append(
                     {
                         "punto": punto.nombre,
@@ -260,54 +316,58 @@ def potencia_etapa(
                         "efecto_minimo_80": P.efecto_minimo(reps, prueba, alfa, efectos[prueba]),
                     }
                 )
-            pv3a = P.potencia(reps, "V3a", efectos["V3a"], C.ALFA_FAMILIA)
-            pv3b = P.potencia(reps, "V3b", efectos["V3b"], C.ALFA_FAMILIA)
-            subida[punto.nombre] = P.subida_esperada(reps, pv3a, pv3b)
+            potencias_v3[punto.nombre] = {
+                suf: (
+                    P.potencia(reps, f"V3a{suf}", C.EFECTO_V3, C.ALFA_FAMILIA),
+                    P.potencia(reps, f"V3b{suf}", C.EFECTO_V3, C.ALFA_FAMILIA),
+                )
+                for suf in ("", "_sinmax")
+            }
+            reps_por_punto[punto.nombre] = reps
             filas_rep += [f for i, rp in enumerate(reps) for f in _fila_replica(punto.nombre, i, rp)]
         tabla = pd.concat(tablas, ignore_index=True)
 
-        # 5b. Validación del desplazamiento con inyección explícita (§20): el nominal y el punto más ruidoso
+        # 5b. Validación del desplazamiento con inyección explícita (§20.2): dos puntos, los dos signos, error pareado
         valid = []
-        for punto_v in (next(p for p in P.rejilla() if p.nombre == P.NOMINAL), PUNTO_RUIDOSO):
+        for nombre_v in (P.NOMINAL, PUNTO_RUIDOSO):
+            punto_v = next(p for p in P.rejilla() if p.nombre == nombre_v)
             r_v = P.calibrar(lados, punto_v)
-            if punto_v.nombre == P.NOMINAL:
-                reps0 = reps_nominal[:REPLICAS_VALIDACION]
-            else:
-                reps0 = correr(ruta_alt, ruta_boy, punto_v, r_v, REPLICAS_VALIDACION, procesos_)
-            for prueba, lado, alfa in VALIDACIONES:
-                for mu in (1.0, 3.0):
+            reps0 = reps_por_punto[nombre_v][:REPLICAS_VALIDACION]
+            for prueba, lado, alfa, forma in VALIDACIONES:
+                for mu in (1.0, -1.0, 3.0, -3.0):
                     b = mu * efectos[prueba]
-                    reps_i = correr(ruta_alt, ruta_boy, punto_v, r_v, REPLICAS_VALIDACION, procesos_, {lado: b})
-                    p_iny = P.potencia(reps_i, prueba, 0.0, alfa)
-                    p_des = P.potencia(reps0, prueba, b, alfa)
-                    ee = np.sqrt(max(p_des * (1 - p_des), 0.01) / REPLICAS_VALIDACION)
-                    valid.append(
-                        {
-                            "punto": punto_v.nombre,
-                            "prueba": prueba,
-                            "multiplo": mu,
-                            "b": b,
-                            "potencia_inyeccion": p_iny,
-                            "potencia_desplazamiento": p_des,
-                            "diferencia": p_iny - p_des,
-                            "dentro_de_3_ee": bool(abs(p_iny - p_des) <= 3 * np.sqrt(2) * ee),
-                        }
-                    )
-            print(f"Validación del desplazamiento en {punto_v.nombre}: hecha", flush=True)
+                    iny = {lado: b if forma == "constante" else (b, "nivel")}
+                    reps_i = correr(ruta_alt, ruta_boy, punto_v, r_v, REPLICAS_VALIDACION, procesos_, iny)
+                    valid.append(P.comparar_desplazamiento(reps_i, reps0, prueba, b, alfa) | {"punto": nombre_v})
+            print(f"Validación del desplazamiento en {nombre_v}: hecha", flush=True)
+        ok_v = {prueba: all(v["coincide"] for v in valid if v["prueba"] == prueba) for prueba, *_ in VALIDACIONES}
+        v3b_validado = ok_v["V3b"]
+        for nombre_p, reps in reps_por_punto.items():
+            subida[nombre_p] = {
+                ("con_maximos" if suf == "" else "sin_maximos"): P.subida_esperada(
+                    reps, *potencias_v3[nombre_p][suf], suf=suf, v3b_validado=v3b_validado
+                )
+                for suf in ("", "_sinmax")
+            }
 
         tabla.to_csv(st / "potencia.csv", index=False, float_format="%.6g", lineterminator="\n")
         pd.DataFrame(mde).to_csv(st / "efecto_minimo.csv", index=False, float_format="%.6g", lineterminator="\n")
         pd.DataFrame(filas_rep).to_parquet(st / "replicas_potencia.parquet")
-        nom = subida[P.NOMINAL]
-        if nom["supera_2_por_ciento"]:
+        for config, nom in subida[P.NOMINAL].items():
+            if nom["supera_2_por_ciento"]:
+                resumen["hallazgos"].append(
+                    f"La subida esperada de la regla de variantes con sesgo nulo ({config.replace('_', ' ')}) es "
+                    f"{100 * nom['subida_media']:.2f} %, mayor que el 2 % de ADR-0006 (ADR-0024, punto 2)."
+                )
+        if not v3b_validado:
             resumen["hallazgos"].append(
-                f"La subida esperada de la regla de variantes con sesgo nulo es {100 * nom['subida_media']:.2f} %, "
-                "mayor que el 2 % de ADR-0006 (ADR-0024, punto 2)."
+                "La potencia por desplazamiento de V3b no quedó validada: V3b no puede salir «descartada» (S-20)."
             )
         resumen |= {
             "error_tipo_I": tipo1,
             "factores_recalibrados": dict(P.FACTORES),
             "validacion_desplazamiento": valid,
+            "validacion_por_prueba": ok_v,
             "subida_esperada": subida,
             "rejilla": [asdict(p) for p in P.rejilla()],
             "nominal": P.NOMINAL,
@@ -317,11 +377,12 @@ def potencia_etapa(
             f.unlink()
         motivos = []
         if not nul_ok:
-            motivos.append("§8: el generador no es nulo")
-        if not all(v["dentro_de_3_ee"] for v in valid):
-            motivos.append("la potencia por desplazamiento no coincide con la inyección explícita")
+            motivos.append("§20.5: el generador no es nulo")
+        malas = [k for k, v in ok_v.items() if not v and k != "V3b"]
+        if malas:
+            motivos.append(f"§20.2: la potencia por desplazamiento no coincide con la inyección en {malas}")
         criterios = {"replicas": replicas, "puntos": n_puntos, "nulidad": nul_ok}
-        return etapa.publicar(
+        publicada = etapa.publicar(
             st,
             salida,
             etapa.Gate(not motivos, criterios, motivos),
@@ -330,6 +391,8 @@ def potencia_etapa(
             raiz,
             semillas.semilla("f05", "potencia"),
         )
+        reanudable.limpiar(AVANCE["dir"])  # solo si se publicó: un gate fallido lanza antes y conserva el avance
+        return publicada
 
 
 def main(argv=None) -> int:
@@ -340,6 +403,9 @@ def main(argv=None) -> int:
     ap.add_argument("--replicas", type=int, default=C.REPLICAS_POTENCIA)
     ap.add_argument("--previo", action="store_true", help="Geometría, escalón, nulidad y cronometraje; sin rejilla.")
     a = ap.parse_args(argv)
+    for flujo in (sys.stdout, sys.stderr):  # consolas de Windows en cp1252: sin caída por un carácter
+        if hasattr(flujo, "reconfigure"):
+            flujo.reconfigure(errors="replace")
     try:
         salida = potencia_etapa(a.datos, a.nombre, a.procesos, a.replicas, a.previo)
     except GateFallido as exc:
