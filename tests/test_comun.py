@@ -308,6 +308,25 @@ def test_cierre_de_importaciones(proyecto):
     assert "src/peruvian_wave_analysis/comunes.py" in rel_b
 
 
+def test_cierre_atributo_del_paquete_no_mete_el_paquete_entero(proyecto):
+    """``from .. import __version__`` importa un atributo, no un submódulo: solo entra ``__init__.py``."""
+    raiz, paquete, datos, crudo, (a, b) = proyecto
+    (paquete / "__init__.py").write_text('__version__ = "0"\n', encoding="utf-8")
+    c = orquestador.Etapa("c", paquete / "etapas" / "c.py", datos / "processed" / "c")
+    (paquete / "etapas" / "c.py").write_text("from .. import __version__\n", encoding="utf-8")
+    rel = {p.relative_to(raiz).as_posix() for p in orquestador.rutas_codigo(c, paquete, raiz)}
+    assert "src/peruvian_wave_analysis/__init__.py" in rel
+    assert "src/peruvian_wave_analysis/suelto.py" not in rel
+    assert "src/peruvian_wave_analysis/comunes.py" not in rel
+    # un submódulo sí entra, y la importación con estrella del paquete sigue metiéndolo entero
+    (paquete / "etapas" / "c.py").write_text("from .. import comunes\n", encoding="utf-8")
+    rel = {p.relative_to(raiz).as_posix() for p in orquestador.rutas_codigo(c, paquete, raiz)}
+    assert "src/peruvian_wave_analysis/comunes.py" in rel and "src/peruvian_wave_analysis/suelto.py" not in rel
+    (paquete / "etapas" / "c.py").write_text("from peruvian_wave_analysis import *\n", encoding="utf-8")
+    rel = {p.relative_to(raiz).as_posix() for p in orquestador.rutas_codigo(c, paquete, raiz)}
+    assert "src/peruvian_wave_analysis/suelto.py" in rel
+
+
 def test_estados_por_codigo_insumo_y_dependencia(proyecto):
     raiz, paquete, datos, crudo, (a, b) = proyecto
     kw = {"raiz": paquete, "proyecto": raiz}

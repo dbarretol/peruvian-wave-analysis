@@ -67,6 +67,8 @@ def _archivos_de_modulo(nombre: str, raiz: Path) -> tuple[list[Path], bool]:
             es_paquete = False
             break
         else:
+            # No es submódulo: es un atributo del último módulo hallado (``from .. import __version__``).
+            es_paquete = False
             break
     return out, es_paquete
 
