@@ -153,3 +153,32 @@ def test_recalibracion_del_critico_lleva_la_tasa_a_alfa():
 def test_rejilla_tiene_el_nominal():
     nombres = [p.nombre for p in P.rejilla()]
     assert P.NOMINAL in nombres and len(nombres) == 10
+
+
+def test_nulidad_pura_del_generador_simetrico():
+    """§20.5: el generador solo (sin ruido ni calibración) no fabrica sesgo en ningún lado."""
+    lados = {"A": _lado("A", n=1500, seed=1), "T0b": _lado("T0b", n=1500, seed=2, boya="32302")}
+    r = {k: S.calibrar_r(L, 0.16, 0.8, semilla=7) for k, L in lados.items()}
+    nul = P.nulidad_pura(lados, r, 0.8, 80, "prueba")
+    assert P.nulidad_cumple(nul)
+
+
+def test_sesgo_del_estimador_por_lado_y_en_diferencias():
+    def rp(bA, bT0):
+        B = {
+            "T0": [0, 0, bT0, 0, 0],
+            "A": [0, 0.0, bA, -0.002, 0],
+            "A1": [0] * 5,
+            "A2": [0] * 5,
+            "T0b": [0] * 5,
+            "T1b": [0] * 5,
+        }
+        est = {k: [True, True, k == "A", False, True] for k in B}
+        return {"B_lados": B, "estimable": est}
+
+    rng = np.random.default_rng(0)
+    reps = [rp(-0.01 + rng.normal(0, 0.001), 0.006) for _ in range(50)]
+    s = P.sesgo_estimador(reps, {"V3a": np.log(1.02), "V1a": 0.041, "V1b": 0.086, "V2a": 0.0296})
+    assert s["lados"]["A"]["P99"]["supera_cuarto"]  # −0.010 > ¼ de log(1.02)
+    assert not s["diferencias"]["V1a"]["P99"]["estimable"]  # P99 no estimable en T0: no entra
+    assert len(s["hallazgos"]) == 1
