@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import math
 
@@ -15,6 +16,7 @@ from peruvian_wave_analysis.comun import orquestador
 from peruvian_wave_analysis.comun.errores import GateFallido
 from peruvian_wave_analysis.validacion import config as CV
 from peruvian_wave_analysis.validacion import potencia as P
+from peruvian_wave_analysis.validacion import reanudable
 from peruvian_wave_analysis.validacion import simulacion as S
 from peruvian_wave_analysis.validacion.etapa_potencia import _fila_replica
 from peruvian_wave_analysis.validacion_obs import complementos, lectura, notas, ruido
@@ -484,10 +486,10 @@ def _boy_periodos(shift2: float):
 def test_periodos_desplazamiento_del_producto_y_del_clima():
     per = complementos.periodos(_boy_periodos(1.0), 199)
     fila = per[(per["boya"] == "32302") & (per["lectura"] == "principal") & (per["lado"] == "T1b − T0b")]
-    assert fila["clase"].iloc[0].startswith("desplazamiento de Tp del producto")
+    assert fila["clase"].iloc[0].startswith("desplazamiento del período medio (Tm02) del producto")
     per0 = complementos.periodos(_boy_periodos(0.0), 199)
     fila0 = per0[(per0["boya"] == "32302") & (per0["lectura"] == "principal") & (per0["lado"] == "T1b − T0b")]
-    assert fila0["clase"].iloc[0].startswith("desplazamiento de Tp del clima")
+    assert fila0["clase"].iloc[0].startswith("desplazamiento del período medio (Tm02) del clima")
 
 
 def test_saltos_con_pasada_a_hora_y_media():
@@ -596,14 +598,42 @@ def _comp(rech, p, p2, rech2, p90):
     }
 
 
-def test_nota_discrepancia_v1_solo_si_una_fuente_rechaza():
-    comps = {"V1a": _comp(True, 0.003, 0.10, False, 0.092), "V1b": _comp(False, 0.12, 0.32, False, 0.006)}
-    pot = {"V1a": 0.091, "V1b_lado": 0.527}
-    s_mod = {"V1a": 0.041, "V1b": 0.089}
+def _comp4(rech, p, p2, rech2, est):
+    return {
+        "principal": {"rechaza": rech, "p": p, "decide": "P50", "estimado": est, "ic95": {e: [0, 1] for e in est}},
+        "calibracion_x2": {"rechaza": rech2, "p": p2},
+    }
+
+
+def test_nota_v1_evidencia_mixta_cuerpo_frente_a_cola():
+    """§20.9 (S-28): los cuatro estadísticos de las dos fuentes; ni «clima» ni «artefacto»."""
+    comps = {
+        "V1a": _comp4(True, 0.003, 0.10, False, {"P50": 0.136, "P90": 0.092, "P99": None, "max": 0.117}),
+        "V1b": _comp4(False, 0.12, 0.32, False, {"P50": 0.006, "P90": 0.006, "P99": 0.036, "max": 0.050}),
+        "V1b_hasta_1992": {"principal": {"p": 0.030, "rechaza": False}},
+    }
+    pot = {"V1a": 0.091, "V1b_lado": 0.527, "V1b": 0.986}
+    s_mod = {
+        "V1a": {"P50": 0.095, "P90": 0.041, "P99": 0.06, "max": 0.089},
+        "V1b": {"P50": 0.048, "P90": 0.089, "P99": 0.045, "max": 0.103},
+    }
     n = notas.discrepancia_v1(comps, pot, s_mod, {"fuentes_que_rechazan": ["a"]})
-    assert "discrepan" in n["texto"] and "2.2 veces" in n["texto"] and "no se sostiene" in n["texto"]
-    assert n["rotulo"].startswith("Posterior a los datos")
+    t = n["texto"]
+    assert "mixta" in t and "ni como «clima» ni como «artefacto" in t
+    assert "0.99 sin el término por lado y 0.53 con él" in t
+    assert "En el cuerpo (P50 y P90), la boya ve 7%–12%" in t and "en la cola (P99 y máximos), 49%–80%" in t
+    assert "P99 n/d frente a 0.060" in t  # un estadístico no estimable no rompe la nota (C-04)
     assert notas.discrepancia_v1(comps, pot, s_mod, {"fuentes_que_rechazan": ["a", "b"]}) is None
+
+
+def test_nota_v1_no_falla_con_valores_ausentes():
+    """§20.9 (C-04): con p, potencias o escalones ausentes, la nota escribe «n/d» en lugar de fallar."""
+    comps = {
+        "V1a": _comp4(True, None, None, False, {"P50": None, "P90": float("nan"), "P99": None, "max": None}),
+        "V1b": _comp4(False, None, None, False, {"P50": None, "P90": None, "P99": None, "max": None}),
+    }
+    n = notas.discrepancia_v1(comps, {}, {}, {"fuentes_que_rechazan": ["a"]})
+    assert "n/d" in n["texto"]
 
 
 def test_nota_serie_corregida_frente_al_dos_por_ciento():
@@ -616,9 +646,10 @@ def test_nota_serie_corregida_frente_al_dos_por_ciento():
          "S_sin_corregir": -0.0216, "S_corregida": -0.0233, "agranda": True},
     ]  # fmt: skip
     n = notas.hallazgo_serie_corregida(filas)
-    assert n["aumento_maximo"] == pytest.approx(0.018) and not n["llega_al_efecto_relevante"]
+    assert n["aumento_maximo"] == pytest.approx(0.018) and n["umbral_elegido_despues_de_los_datos"]
+    assert "91 %" in n["texto"].replace("91%", "91 %") and "después de ver el aumento" in n["texto"]
     e0 = [m for m in n["marcas_para_la_F9"] if m["cambio"] == "1993-02"][0]
-    assert e0["marca"] == "agranda el escalón de 1993-02 en 0.018 en P90"
+    assert e0["marca"] == "toda la serie (E0): agranda el escalón de 1993-02 en 0.018 en P90"
     assert notas.hallazgo_serie_corregida([dict(filas[0], agranda=False)]) is None
 
 
@@ -632,3 +663,117 @@ def test_nota_linea_448_y_hallazgo_20_6_con_la_configuracion_elegida():
     }
     t = D.hallazgo_20_6(r, "sin_maximos")
     assert "2.25 a 3.14 %" in t and "sin máximos; × 2 de 2.57 a 2.80 %" in t and "1.69–2.80 %" in t
+
+
+# --- Revisiones de cierre (§20.9) ----------------------------------------------------------------------------------
+
+
+def test_cola_combinada_con_maximos_no_estimables_no_es_nan():
+    """§20.9 (C-03): con los máximos no estimables (NaN), B_cola combina P90 y P99 sin volverse NaN."""
+    lo = _medir("A", _df_alt(si=0.08))
+    errores = PR.errores_calibracion({"A": lo}, B_PRUEBA)
+    k = S.IDX["max"]
+    lo.med["principal"].estimable[k] = False
+    lo.med["principal"].B[k] = np.nan
+    lo.med["principal"].reps[:, k] = np.nan
+    v = PR.v3(lo, "principal", errores, True, {})
+    assert v["B_cola"]["estimado"] is not None and np.isfinite(v["B_cola"]["estimado"])
+    assert all(np.isfinite(v["B_cola"]["ic95"]))
+
+
+def test_g6_revisa_v3b_y_todas_las_configuraciones():
+    """§20.9 (C-06)."""
+    v3 = {"V3b": {"estimado": {"P99−P50": -0.2}, "ic95": {"P99−P50": [-0.15, -0.03]}}}
+    comps = {"V1a": {"calibracion_x2": {"estimado": {"P50": 0.5}, "ic95": {"P50": [0.0, 0.1]}}}}
+    fuera = EO.dentro_de_ic(pd.DataFrame(columns=["lado", "estadistico", "estimable", "R_descontado"]), comps, v3)
+    assert set(fuera) == {"V1a calibracion_x2 P50", "V3 V3b P99−P50"}
+
+
+def test_6_1_descartado_o_no_concluyente_con_rechazo_de_a_no_retiran_e0():
+    """§20.9 (C-11 b): la tabla de §6.1 solo retira E0 con V1 establecido en la altimetría sin marcas."""
+    for cat in (D.DESCARTADO, D.NO_CONCLUYENTE):
+        e = D.escenarios(_fam(cat, ("a",)), _fam(D.NO_CONCLUYENTE), D.ESTABLECIDO, True)
+        assert e["E0"] == "activo" and e["E1"] == "activo"
+
+
+def test_e0_con_v1_establecido_y_marcas_recibe_la_variante_de_toda_la_serie():
+    """§20.9 (S-32): con V1 establecido y marcas, E0 sigue activo y recibe la variante de toda la serie."""
+    con_marcas = D.escenarios(
+        _fam(D.ESTABLECIDO, ("a",), (), (D.M_TRASLADO,)), _fam(D.NO_CONCLUYENTE), D.NO_CONCLUYENTE, None
+    )
+    assert EO.e0_es_diseno(con_marcas)
+    sin_marcas = D.escenarios(_fam(D.ESTABLECIDO, ("a",)), _fam(D.NO_CONCLUYENTE), D.NO_CONCLUYENTE, None)
+    assert not EO.e0_es_diseno(sin_marcas)
+    assert notas.lectura_linea_448("establecido", con_marcas["E0"], True) is not None
+
+
+def test_marca_de_forma_no_coherente_entre_misiones():
+    """§20.9 (S-29): marca si V3b es establecido y la forma solo excluye el 0 en una misión."""
+    r = {
+        "HY-2A": {"estimado": {"P99−P50": -0.144}, "ic95": {"P99−P50": [-0.19, -0.09]}},
+        "HY-2B": {"estimado": {"P99−P50": -0.033}, "ic95": {"P99−P50": [-0.09, 0.02]}},
+    }
+    n = notas.forma_por_mision(r, True)
+    assert n["marca"] == "forma no coherente entre misiones" and "Solo HY-2A" in n["texto"]
+    assert notas.forma_por_mision(r, False)["marca"] is None
+    r["HY-2B"]["ic95"]["P99−P50"] = [-0.09, -0.01]
+    assert notas.forma_por_mision(r, True)["marca"] is None
+
+
+def test_el_previo_de_boyas_no_lee_valores(tmp_path, monkeypatch):
+    """§20.9 (C-11 a): el --previo usa la máscara de presencia; con valores ilegibles funciona y nunca llama al
+    lector de valores."""
+
+    def prohibido(*a, **k):
+        raise AssertionError("el previo leyó valores de la boya")
+
+    monkeypatch.setattr(lectura.ndbc, "_leer", prohibido)
+    texto = """#YY  MM DD hh mm WDIR WSPD GST  WVHT   DPD   APD MWD   PRES  ATMP  WTMP  DEWP  VIS  TIDE
+#yr  mo dy hr mn degT m/s  m/s     m   sec   sec degT   hPa  degC  degC  degC  nmi    ft
+1990 01 01 00 50 999 99.0 99.0  ##### ##### ##### 999 9999.0 999.0  ##### 999.0 99.0 99.00
+1990 01 01 01 50 999 99.0 99.0  ##### ##### ##### 999 9999.0 999.0  ##### 999.0 99.0 99.00
+1990 01 01 02 50 999 99.0 99.0 99.00 99.00 99.00 999 9999.0 999.0  ##### 999.0 99.0 99.00
+"""
+    r = tmp_path / "32302h1990.txt.gz"
+    with gzip.open(r, "wt", encoding="ascii") as fh:
+        fh.write(texto)
+    mb = pd.DataFrame(
+        {"tiempo": pd.date_range("1990-01-01", periods=4, freq="3h"), "boya": "32302", "VHM0": 2.0, "VTM02": 8.0,
+         "VTPK": 12.0}
+    )  # fmt: skip
+    regs = lectura.sintetico_boyas({"boyas/ndbc/32302/32302h1990.txt.gz": r}, mb, np.random.default_rng(0))
+    x = regs["32302"]
+    assert x["WVHT"].notna().tolist() == [True, True, False]  # presencia, sin abrir el valor
+    assert x["WVHT"].dropna().between(1.0, 4.0).all()  # valores del modelo, no del archivo
+
+
+def _geometria_minima():
+    filas_alt, filas_boy = [], []
+    rng = np.random.default_rng(0)
+    for mision, ini, tramo in (("GEOSAT", "1985-04-01", "GEOSAT"), ("HY-2A", "2012-01-01", "HY-2A_2"),
+                               ("HY-2A", "2016-03-02", "HY-2A_2"), ("HY-2B", "2019-01-01", "HY-2B")):  # fmt: skip
+        t = pd.Timestamp(ini) + pd.to_timedelta(np.sort(rng.uniform(0, 700, 160)), unit="D")
+        filas_alt.append(pd.DataFrame({"mision": mision, "tiempo": t, "n": 4, "tramo_cal": tramo, "costa_min_km": 50.0,
+                                       "hs_mod": rng.lognormal(0.6, 0.3, t.size),
+                                       "unidad": [f"{mision}{ini}-{i // 3}" for i in range(t.size)]}))  # fmt: skip
+    for ini in ("1987-01-01", "1993-03-01"):
+        t = pd.Timestamp(ini) + pd.to_timedelta(np.sort(rng.uniform(0, 700, 160)), unit="D")
+        filas_boy.append(pd.DataFrame({"boya": "32302", "tiempo": t, "k": 3, "hs_mod": rng.lognormal(0.7, 0.3, t.size),
+                                       "unidad": [f"b{ini}-{i // 4}" for i in range(t.size)]}))  # fmt: skip
+    return pd.concat(filas_alt, ignore_index=True), pd.concat(filas_boy, ignore_index=True)
+
+
+def test_replicas_iguales_con_0_y_2_procesos(tmp_path, monkeypatch):
+    """§20.9 (C-11 c), G7: las réplicas de la etapa 3 no dependen del número de procesos."""
+    alt, boy = _geometria_minima()
+    ra, rb = tmp_path / "alt.parquet", tmp_path / "boy.parquet"
+    alt.to_parquet(ra)
+    boy.to_parquet(rb)
+    punto = next(p for p in P.rejilla() if p.nombre == P.NOMINAL)
+    r = {n: 0.95 for n in P.LADOS_SIM}
+    monkeypatch.setattr(SO, "TROZO", 1)
+    tar = SO.tareas(ra, rb, punto, r, 2, "prueba-procesos", None)
+    a = reanudable.ejecutar(SO.trabajo, tar, tmp_path / "av0", 0)
+    b = reanudable.ejecutar(SO.trabajo, tar, tmp_path / "av2", 2)
+    for x, y in zip(a, b, strict=True):
+        assert x[0]["B_lados"] == y[0]["B_lados"]
