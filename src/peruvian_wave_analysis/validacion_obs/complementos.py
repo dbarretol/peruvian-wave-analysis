@@ -90,6 +90,8 @@ def periodos(boy: pd.DataFrame, B: int) -> pd.DataFrame:
                     clase = "indeterminado (el IC corta ±0.3 s)"
                 if lectura == "descriptivo":
                     clase = f"descriptivo; resolución de banda no disponible ({clase})"
+                else:  # §20.9 (S-30): APD frente a VTM02 mide el período medio, no Tp (rótulo posterior a los datos)
+                    clase = clase.replace("de Tp", "del período medio (Tm02)")
                 filas.append(
                     {
                         "boya": estacion,

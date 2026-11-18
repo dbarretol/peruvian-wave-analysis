@@ -134,8 +134,13 @@ def v3(lA: LadoObs, var: str, errores: dict, con_max: bool, factores: dict[str, 
     ests = P.ESTS_V3A if con_max else ("P90", "P99")
     i3 = P._idx(ests)
     ok = mA.estimable[i3]
-    w = np.where(ok & (np.var(rA[:, i3], axis=0, ddof=1) > 0), 1.0 / np.var(rA[:, i3], axis=0, ddof=1), 0.0)
-    cola_reps = rA[:, i3] @ w / w.sum() if w.sum() > 0 else np.full(len(rA), np.nan)
+    var3 = np.var(rA[:, i3], axis=0, ddof=1)
+    w = np.where(ok & np.isfinite(var3) & (var3 > 0), 1.0 / np.where(var3 > 0, var3, 1.0), 0.0)
+    # §20.9 (C-03): un estadístico no estimable (NaN) pesa 0 y no contamina la suma (NaN·0 = NaN)
+    B3 = np.where(w > 0, mA.B[i3], 0.0)
+    R3 = np.where(w[None, :] > 0, rA[:, i3], 0.0)
+    cola = float(np.sum(w * B3) / w.sum()) if w.sum() > 0 else np.nan
+    cola_reps = R3 @ w / w.sum() if w.sum() > 0 else np.full(len(rA), np.nan)
     orden = ("max", "P99", "P90") if con_max else ("P99", "P90")
     alta = next((e for e in orden if mA.estimable[S.IDX[e]]), None)
     reserva = "max" if con_max else "P90"
@@ -145,7 +150,7 @@ def v3(lA: LadoObs, var: str, errores: dict, con_max: bool, factores: dict[str, 
         "V3a": resultado(v3a, rA[:, i3], ests, CV.ALFA_FAMILIA, factores.get(f"V3a{suf}", 1.0)),
         "V3b": resultado(v3b, dr[:, None], (f"{alto_b}−P50",), CV.ALFA_FAMILIA, factores.get(f"V3b{suf}", 1.0)),
         "B_cola": {
-            "estimado": sub["B_cola"] if np.isfinite(sub["B_cola"]) else None,
+            "estimado": cola if np.isfinite(cola) else None,
             "ic95": ic(cola_reps) if w.sum() > 0 else None,
             "pesos": {e: float(w[k] / w.sum()) if w.sum() > 0 else 0.0 for k, e in enumerate(ests)},
         },
@@ -155,6 +160,7 @@ def v3(lA: LadoObs, var: str, errores: dict, con_max: bool, factores: dict[str, 
             "ic95": ic(rA[:, S.IDX[alta]]) if alta else None,
         },
         "B_q": {e: (float(mA.B[S.IDX[e]]) if mA.estimable[S.IDX[e]] else None) for e in ESTS[:4]},
+        "ic95_B_q": {e: (ic(rA[:, S.IDX[e]]) if mA.estimable[S.IDX[e]] else None) for e in ESTS[:4]},
     }
 
 

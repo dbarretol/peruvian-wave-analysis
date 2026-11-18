@@ -73,6 +73,11 @@ def ruta_avance(raiz: Path, nombre: str = NOMBRE) -> Path:
     return Path(raiz) / "interim" / "F05-validacion-externa" / "validacion-avance" / nombre
 
 
+def ruta_tiempos(raiz: Path, nombre: str = NOMBRE, previo: bool = False) -> Path:
+    carpeta = "validacion-previo-tiempos" if previo else "validacion-tiempos"
+    return Path(raiz) / "interim" / "F05-validacion-externa" / carpeta / nombre
+
+
 def ruta_gate_fallido(raiz: Path, nombre: str = NOMBRE, previo: bool = False) -> Path:
     carpeta = "validacion-previo-gate-fallido" if previo else "validacion-gate-fallido"
     return Path(raiz) / "interim" / "F05-validacion-externa" / carpeta / nombre
@@ -151,9 +156,10 @@ def _lado_df(so: pd.DataFrame, boy: pd.DataFrame, nombre: str) -> pd.DataFrame:
         base = CV.LADOS[nombre[:-3]]
         x = so[so["costa_min_km"] == CV.COSTA_MIN_SENS_KM]
         return x[K.en_lado(x, base, "mision")]
-    if nombre == C.LADO_ERS1_TOPEX.nombre:
+    if nombre == C.LADO_ERS1_TOPEX.nombre or nombre in C.LADOS_MISION_A:
+        lado = C.LADOS_MISION_A.get(nombre, C.LADO_ERS1_TOPEX)
         x = so[so["costa_min_km"] == CV.COSTA_MIN_KM]
-        return x[K.en_lado(x, C.LADO_ERS1_TOPEX, "mision")]
+        return x[K.en_lado(x, lado, "mision")]
     lado = CV.LADOS[nombre]
     if lado.fuente == "altimetría":
         x = so[so["costa_min_km"] == CV.COSTA_MIN_KM]
@@ -177,7 +183,7 @@ def _sigmas(df: pd.DataFrame, alt: bool, tabla: dict, v_rep: float | None) -> di
 
 
 def medir_lados(so, boy, tabla, v_rep, B) -> dict[str, PR.LadoObs]:
-    nombres = [*LADOS_ALT, C.LADO_ERS1_TOPEX.nombre, *(f"{n}@25" for n in LADOS_ALT25), *LADOS_BOYA]
+    nombres = [*LADOS_ALT, C.LADO_ERS1_TOPEX.nombre, *(f"{n}@25" for n in LADOS_ALT25), *C.LADOS_MISION_A, *LADOS_BOYA]
     out = {}
     for n in nombres:
         df = PR.ordenar(_lado_df(so, boy, n))
@@ -356,22 +362,33 @@ def tabla_sesgo(lados: dict[str, PR.LadoObs], errores: dict, con_max: bool) -> p
     return pd.DataFrame(filas)
 
 
-def dentro_de_ic(tabla: pd.DataFrame, comps: dict) -> list[str]:
-    """G6: cada estimado puntual dentro de su IC (los estimables)."""
+def dentro_de_ic(tabla: pd.DataFrame, comps: dict, v3: dict | None = None) -> list[str]:
+    """G6: cada estimado puntual dentro de su IC (los estimables): tabla de sesgos, cada configuración de cada
+    comparación y V3a y V3b (§20.9, C-06)."""
     malos = []
     t = tabla[tabla["estimable"].astype(bool)]
     for r in t.itertuples():
         if np.isfinite(r.R_ic95_lo) and not (r.R_ic95_lo - 1e-12 <= r.R_descontado <= r.R_ic95_hi + 1e-12):
             malos.append(f"{r.lado} {r.estadistico}")
-    for nombre, c in comps.items():
-        p = c.get("principal")
-        if not p:
-            continue
+    bloques = [
+        (f"{n} {conf}", r) for n, c in comps.items() for conf, r in c.items() if isinstance(r, dict) and "ic95" in r
+    ]
+    bloques += [(f"V3 {k}", (v3 or {}).get(k)) for k in ("V3a", "V3b") if (v3 or {}).get(k)]
+    for nombre, p in bloques:
         for e, v in p["estimado"].items():
-            lo_hi = p["ic95"][e]
+            lo_hi = p["ic95"].get(e)
             if v is not None and lo_hi and not (lo_hi[0] - 1e-12 <= v <= lo_hi[1] + 1e-12):
                 malos.append(f"{nombre} {e}")
     return malos
+
+
+def e0_es_diseno(escenarios: dict) -> bool:
+    """§6.2 y §20.8.4: la variante corregida de toda la serie se aplica a E0 mientras E0 siga siendo escenario de
+    diseño, es decir, si no pasó a sensibilidad (V1 establecido en la altimetría sin marcas)."""
+    return escenarios["E0"] != "sensibilidad"
+
+
+PRINCIPALES_OBLIGATORIOS = ("T0", "A", "A1", "A2", "T0b", "T1b")
 
 
 def _csv(df: pd.DataFrame, ruta: Path) -> None:
@@ -445,6 +462,9 @@ def validacion_etapa(
 
         # 3. Lados y pruebas
         lados = medir_lados(so, boy, tabla_s, v_rep, B)
+        faltan = [n for n in PRINCIPALES_OBLIGATORIOS if n not in lados]
+        if faltan:  # §20.9 (C-08): sin un lado principal no hay prueba que hacer
+            raise GateFallido(f"Lados principales sin colocaciones suficientes: {faltan}")
         errores = PR.errores_calibracion(lados, B)
         factores = pj["factores_recalibrados"]
         comps = comparaciones(lados, errores, factores)
@@ -453,6 +473,15 @@ def validacion_etapa(
             v3conf[var] = PR.v3(lados["A"], var, errores, con_max, factores) | {"con_maximos": con_max}
         v3_otra = PR.v3(lados["A"], "principal", errores, not con_max, factores) | {"con_maximos": not con_max}
         v3_cal2 = PR.v3(lados["A"], "principal", PR.escalar(errores, 2.0), con_max, factores)
+        # §20.9 (S-34, S-29), posteriores a los datos y descriptivos: sensibilidades del lado A y forma por misión
+        v3_sens = {
+            n: PR.v3(lados[n], "principal", errores, con_max, factores) for n in ("A_hasta_2026", "A@25") if n in lados
+        }
+        v3_mision = {
+            m: PR.v3(lados[n], "principal", errores, con_max, {})["V3b"]
+            for m, n in (("HY-2A", "A_HY2A"), ("HY-2B", "A_HY2B"))
+            if n in lados
+        }
         coher = (
             PR.coherencia_t0(lados["T0"], lados["ERS1+TOPEX"], errores, C.ESTADISTICOS_COHERENCIA)
             if "ERS1+TOPEX" in lados
@@ -522,6 +551,7 @@ def validacion_etapa(
                     dec["familias"]["V1"], dec["familias"]["V2"], dec["V3a"], absorbe["absorbe"]
                 )
                 dec["correccion"]["marcas"] = [D.M_REPRESENTATIVIDAD]
+        dec["correccion"].setdefault("marcas", [])  # §20.9 (C-09): la clave va siempre
         rango = D.rango_subida(pj)
         conf = "con_maximos" if con_max else "sin_maximos"
         mde_v3a = mde[(mde["punto"] == P.NOMINAL) & (mde["prueba"] == ("V3a" if con_max else "V3a_sinmax"))]
@@ -537,7 +567,8 @@ def validacion_etapa(
         sel_asim = ts >= pd.Timestamp(C.INICIO_ASIMILADO)
         corregida = pd.DataFrame({"VHM0": hs}, index=ts)
         prueba_serie = []
-        e0_diseno = dec["escenarios"]["E0"] != "sensibilidad"
+        e0_diseno = e0_es_diseno(dec["escenarios"])
+        efecto_t0 = None
         for v in dec["correccion"]["variantes"]:
             if v["tipo"] == "sin corrección":
                 continue
@@ -547,6 +578,8 @@ def validacion_etapa(
                 prueba_serie.append({"variante": v["nombre"], "alcance": "tramo asimilado (E1, E2)"} | f)
             if e0_diseno:
                 ct = D.corregir(ts, hs, v, np.isfinite(hs))
+                if v["tipo"] == "corrección por cuantiles":
+                    efecto_t0 = notas.efecto_cuerpo_t0(ts, hs, ct)
                 corregida[f"VHM0_{v['nombre']}_toda"] = ct
                 for f in complementos.escalones_serie(ts, hs, ct):
                     prueba_serie.append({"variante": v["nombre"], "alcance": "toda la serie (E0)"} | f)
@@ -624,6 +657,11 @@ def validacion_etapa(
                 "representatividad": v3conf["representatividad"] if regla_activa else None,
                 "categorias": {"V3a": dec["V3a"], "V3b": dec["V3b"]},
                 "V3b_puede_descartarse": bool(pj["validacion_por_prueba"]["V3b"]),
+                "sensibilidades_lado_A": {
+                    "rotulo": "Posteriores a los datos y descriptivas (§20.9, S-34): no pueden mover ninguna decisión.",
+                    "lados": v3_sens,
+                },
+                "forma_por_mision": v3_mision,
             },
             "coherencia_T0": coher,
             "absorcion_V2": absorbe,
@@ -649,20 +687,61 @@ def validacion_etapa(
                 "traslado_p90_escalon_modelo": pj["traslado_p90"],
             },
         )
-        json_estricto.escribir(st / "correccion.json", dec["correccion"] | {"prueba_serie_corregida": prueba_serie})
         if corregida.shape[1] > 1:
             corregida.to_parquet(st / "serie_corregida.parquet")
         agranda = [f for f in prueba_serie if f["agranda"]]
         hallazgos = list(pj["hallazgos"]) + [D.hallazgo_20_6(rango, conf)]
-        s_mod_p90 = {c: _s_mod(esc, c).get("P90") for c in pj["atribuye"]}
-        nota_v1 = notas.discrepancia_v1(comps, p_fin, s_mod_p90, dec["familias"]["V1"])
+        s_mod_todos = {c: _s_mod(esc, c) for c in pj["atribuye"]}
+        nota_v1 = notas.discrepancia_v1(comps, p_fin, s_mod_todos, dec["familias"]["V1"])
+        nota_forma = notas.forma_por_mision(v3_mision, dec["V3b"] == D.ESTABLECIDO)
+        nota_per = notas.periodos_para_f10(per)
+        nota_eq = notas.equivariancia(dec["correccion"]["variantes"])
+        nota_sigma = notas.limitaciones_sigma(sig, ruido.correlacion_rezago1(puntos))
         nota_serie = notas.hallazgo_serie_corregida(prueba_serie)
         nota_448 = notas.lectura_linea_448(
             dec["familias"]["V1"]["categoria"],
             dec["escenarios"]["E0"],
             any(f["alcance"].startswith("toda") for f in prueba_serie),
         )
-        notas_posteriores = {"discrepancia_V1": nota_v1, "serie_corregida": nota_serie, "linea_448": nota_448}
+        notas_posteriores = {
+            "discrepancia_V1": nota_v1,
+            "serie_corregida": nota_serie,
+            "linea_448": nota_448,
+            "efecto_E0_en_T0": efecto_t0,
+            "forma_por_mision": nota_forma,
+            "periodos": nota_per,
+            "equivariancia": nota_eq,
+            "limitaciones_sigma": nota_sigma,
+        }
+        if nota_forma["marca"]:
+            dec["correccion"]["marcas"].append(nota_forma["marca"])
+            hallazgos.append(f"Marca descriptiva «{nota_forma['marca']}» en la corrección (§20.9, S-29).")
+        if sesgo_medido:  # §20.9 (C-05): el hallazgo del sesgo con el σ medido, descriptivo
+            hallazgos += [
+                f"{h} (con el σ de 1 Hz medido; descriptivo, §20.5, punto 3)"
+                for h in sesgo_medido["sesgo"]["hallazgos"]
+            ]
+        json_estricto.escribir(st / "correccion.json", dec["correccion"] | {"prueba_serie_corregida": prueba_serie})
+        # §20.9 (S-27, S-35): la fila lleva el parámetro de cola de la variante que se aplica, con su IC
+        b99 = (sesgo_medido or {}).get("sesgo", {}).get("lados", {}).get("A", {}).get("P99", {}).get("media")
+        b99_e2 = pj["sesgo_estimador"]["lados"]["A"]["P99"]["media"]
+        fila |= {
+            "B_q": v3conf["principal"]["B_q"],
+            "ic95_B_q": v3conf["principal"]["ic95_B_q"],
+            "ic95_B_q_calibracion_x2": v3_cal2["ic95_B_q"],
+            "nota_B_q": (
+                "Parámetros de la variante por cuantiles: su factor de cola sale de B en el cuantil estimable más "
+                "alto, y su IC es el del factor que se aplica (para esa variante, la F12 no debe usar el IC de "
+                f"B_cola). Incluye el sesgo del estimador en el P99 del lado A (etapa 2: {b99_e2:+.4f}; con el σ "
+                f"medido: {notas.f(b99, '+.4f')}); la F12 no lo suma otra vez (§20.5, punto 4). Posterior a los datos "
+                "(§20.9, S-27)."
+            ),
+        }
+        if "B_P90_23km" in fila:
+            fila["nota_B_P90_23km"] = (
+                "Extrapolado fuera del rango observado (las colocaciones están a 50 km o más de la costa); solo P90, "
+                "mientras que la variante por cuantiles usa el P99 (§20.9, S-35)."
+            )
         if agranda:
             hallazgos.append(f"La serie corregida agranda el escalón en {len(agranda)} estadísticos (§6.2).")
         resumen = {
@@ -678,6 +757,7 @@ def validacion_etapa(
             "correccion": {
                 "variantes": dec["correccion"]["variantes"],
                 "mas_desfavorable": dec["correccion"]["mas_desfavorable"],
+                "marcas": dec["correccion"]["marcas"],
             },
             "configuracion_maximos": conf,
             "fila_fuente": fila,
@@ -708,22 +788,36 @@ def validacion_etapa(
                     "texto": "V1 y V2 con sus marcas; descriptivos de §19 (C2 en la cuenca; cola de C1 en 32302).",
                     "discrepancia_V1": nota_v1,
                 },
+                "F7": {"equivariancia": nota_eq},
                 "F9": {
                     "texto": "Sesgo de T0 como dato (P7); saltos_validados.csv; sensibilidad sin corregir.",
                     "marcas_serie_corregida": (nota_serie or {}).get("marcas_para_la_F9", []),
+                    "marcas_correccion": dec["correccion"]["marcas"],
+                    "efecto_E0_en_T0": efecto_t0,
+                    "equivariancia": nota_eq,
+                    "forma_por_mision": nota_forma,
                 },
-                "F10": "periodos.csv; la serie corregida no cumple la coherencia ni el peralte de la F3 (§6.2).",
-                "F12": "Fila de la fuente (§6.3) y rango de la subida (§20.6), separada del sesgo de profundidad.",
+                "F10": {
+                    "texto": "periodos.csv; la serie corregida no cumple la coherencia ni el peralte de la F3 (§6.2).",
+                    "periodos": nota_per,
+                },
+                "F12": {
+                    "texto": "Fila de la fuente (§6.3) y rango de la subida (§20.6); aparte del sesgo de profundidad.",
+                    "forma_por_mision": nota_forma,
+                },
             },
-            "tiempos_s": tiempos,
         }
         json_estricto.escribir(st / "resumen_f05.json", resumen)
+        # §20.9 (C-01): los tiempos van a interim/, fuera de las salidas publicadas (idénticas byte a byte)
+        dt = ruta_tiempos(raiz, nombre, previo)
+        dt.mkdir(parents=True, exist_ok=True)
+        json_estricto.escribir(dt / "tiempos.json", tiempos)
         for f in (ruta_alt, ruta_boy):
             f.unlink()
         motivos = []
         if not geometria_igual:
             motivos.append("Las superobservaciones antes del filtro de Hs no coinciden con la geometría de la etapa 2.")
-        fuera = dentro_de_ic(sesgo, comps)
+        fuera = dentro_de_ic(sesgo, comps, v3conf["principal"])
         if fuera:
             motivos.append(f"G6: estimados fuera de su IC: {fuera[:5]}")
         criterios = {"g4": True, "geometria_igual": geometria_igual, "B": B, "previo": previo}

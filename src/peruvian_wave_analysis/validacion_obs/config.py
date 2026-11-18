@@ -60,6 +60,11 @@ REPLICAS_SESGO = 200
 LADO_ERS1_TOPEX = CV.Lado(
     "ERS1+TOPEX", "altimetría", (("ERS-1", "1991-01-01", "1992-12-31"), ("TOPEX", "1991-01-01", "1992-12-31"))
 )
+# §20.9 (S-29), posterior a los datos y descriptivo: la forma de V3b por misión en el lado A
+LADOS_MISION_A = {
+    "A_HY2A": CV.Lado("A_HY2A", "altimetría", (("HY-2A", "2011-10-11", "2018-06-05"),)),
+    "A_HY2B": CV.Lado("A_HY2B", "altimetría", (("HY-2B", "2018-11-24", "2023-03-31"),)),
+}
 ESTADISTICOS_COHERENCIA = ("P50", "P90", "max")  # precisión (§20.7): los de T0 que se esperan estimables (§3.4)
 
 # --- Inventario de observaciones (§3.1) ---------------------------------------------------------------------
@@ -144,7 +149,7 @@ OBSERVACIONES = (
         "independencia_directa": "independiente (las boyas no se asimilan en WAVERYS)",
         "independencia_indirecta": "ídem",
         "clase": "principal de C2 en boyas; no atribuye C2 por la regla del ⅓ (§19)",
-        "causa": "Fondeo Stratus de WHOI, con recambios periódicos. Posiblemente vista en la v2 (§0.1)",
+        "causa": "Fondeo Stratus de WHOI, con recambios periódicos. Pudo haber sido vista antes del contrato (§0.1)",
         "cita": "Página de estación de NDBC guardada el 2026-11-17",
         "licencia": "Datos del Gobierno de EE. UU., dominio público (sin verificar)",
     },
@@ -210,6 +215,7 @@ OBSERVACIONES = (
     },
 )
 NOTA_32012 = (
-    "La comparación de la v2 contra la boya 32012 pudo haber sido vista por el usuario antes del contrato (§0.1). "
-    "No cambia lo fijado: la regla, los efectos y la potencia ya estaban fijados, y la boya sola no retira escenarios."
+    "Una comparación anterior de un modelo con la boya 32012 pudo haber sido vista por el usuario antes del contrato "
+    "(§0.1; texto completo en el contrato §0.1 y §20.9). No cambia lo fijado: la regla, los efectos y la potencia ya "
+    "estaban fijados, y la boya sola no retira escenarios."
 )
