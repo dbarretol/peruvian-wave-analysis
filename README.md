@@ -15,6 +15,16 @@ Fase 3 (datos: ingesta, control de calidad e integridad) cerrada, en dos etapas:
 - `datos-candidatos`: ingesta contra el gate de la serie, particiones ausentes, centinelas y acumulaciones, período saturado, límites físicos, peralte, coherencia, calibración de k con series sintéticas, detector bilateral de picos, dipolo, los 20 mayores máximos independientes y una figura por máximo y por candidato.
 - `datos-serie`: aplica las resoluciones versionadas en `config/f03_resoluciones.yaml` y publica la serie del nodo con una columna por regla y `valido`, la cobertura, las marcas por año y por regla, Tp largo con la razón de asomeramiento y la lista de registros dudosos para la sensibilidad de los niveles de retorno.
 
+Fase 4 (homogeneidad de la fuente) cerrada, en dos etapas (`homogeneidad/`):
+- `homogeneidad-altimetros`: exposición del nodo a pasadas de altímetros por misión, pasadas y misiones con datos locales.
+- `homogeneidad`: cronología del producto, tramos, cuantiles por tramo, pruebas confirmatorias de cambio con su potencia escrita antes que cualquier estadístico observado, prueba de saltos frente a pasadas de altímetros y escenarios de Hs.
+
+Fase 5 (validación externa) cerrada, en cuatro órdenes (`validacion/` y `validacion_obs/`):
+- `validacion-descarga`: descarga, con hash, las boyas NDBC 32302 y 32012, WAVERYS en sus nodos y WAVERYS regional.
+- `validacion-modelo`: control de calidad regional del modelo y su coherencia con la serie del nodo.
+- `validacion-potencia`: colocaciones con la altimetría y las boyas, escalón del modelo en cada fuente y potencia de cada prueba, sin leer valores observados. Simulación con SIMEX, bootstrap por bloques mensuales y max-T; réplicas reanudables.
+- `validacion`: lee los valores observados solo después de comprobar el manifiesto y los hashes de la potencia. Mide el ruido de 1 Hz, el sesgo por cuantil y las pruebas de atribución y de sesgo, y publica los escenarios activos, las variantes de corrección, la serie corregida y la fila de incertidumbre de la fuente.
+
 Primera herramienta: **mapa de selección de sitio**, en dos pasos.
 
 1. **Mapa exploratorio** (`mapa-sitio`): dada una coordenada de referencia, descarga la batimetría (GMRT), la malla de nodos de WAVERYS y las zonas protegidas y de hidrocarburos, y dibuja las isóbatas elegidas (por defecto 200, 100 y 50 m), la malla con el recuadro de cada celda, las zonas de exclusión y de colisión de usos, y hasta 3 nodos candidatos.
@@ -108,6 +118,26 @@ uv run datos-serie        # segundos; exige una resolución por candidato manual
 
 `datos-candidatos` no exige resoluciones. Se detiene con «revisión requerida» si se supera un tope: 47 descartes automáticos, 5 en un año, 100 candidatos de revisión en la cola o 100 registros de una marca que exige resolución. `datos-serie` falla sin tocar la salida de la primera si falta una resolución, si una entrada no corresponde a un candidato ni a un máximo, si dos entradas se contradicen o si se descarta uno de los 20 máximos sin `confirmado_por_usuario`. Un descarte afecta a todas las variables del registro y a toda la excursión del candidato. La biblioteca carga la serie con `datos.carga.cargar_serie`, que aplica `valido`.
 
+### 8. Homogeneidad de la fuente
+
+```bash
+uv run homogeneidad-altimetros
+uv run homogeneidad --procesos 4   # por defecto, los núcleos físicos; con puntos de control
+```
+
+### 9. Validación externa
+
+```bash
+uv run validacion-descarga todo              # con red: ndbc, waverys-boyas o waverys-regional; solo escribe en raw/
+uv run validacion-modelo
+uv run validacion-potencia --previo          # geometría, nulidad y cronometraje, sin rejilla
+uv run validacion-potencia --procesos 8      # ≈ 7 h con 8 procesos (rejilla y validación); se reanuda si se corta
+uv run validacion --previo                   # valores sintéticos en interim/, para medir el costo
+uv run validacion --procesos 8               # ≈ 10 min; lee los valores observados
+```
+
+`validacion` falla sin leer ningún valor observado si la potencia no está publicada, si su hash no coincide con el manifiesto o si la huella del código de la potencia cambió. Los tiempos de cada paso se escriben en `interim/`, fuera de las salidas publicadas.
+
 ### Cuaderno
 
 `notebooks/01_mapa_seleccion_sitio.ipynb`: cambiar la celda de parámetros y ejecutar todo. Incluye el paso al mapa definitivo.
@@ -177,6 +207,12 @@ En `WAVE_DATA_DIR`:
 - `processed/F03-datos/candidatos/<nombre>/`: `serie_decodificada.parquet`, `hs_celdas.parquet`, `marcas.parquet`, `candidatos.csv` (con excursión, salto y vecinas usadas), `excursiones_k_rev.csv` (todas las excursiones del umbral de revisión, con sensibilidades de vecinas), `maximos.csv`, `figuras/` (máximos, candidatos e histogramas de acumulaciones), `resumen_candidatos.json` (escala, k, falsas alarmas sintéticas con IC, potencia, topes, particiones ausentes, períodos bajo resolución) y `MANIFEST.json`.
 - `processed/F03-datos/serie/<nombre>/`: `serie_nodo.parquet`, `vecinas_hs.parquet`, `cobertura.csv` (Hs y Tp, por año y mes), `cobertura_anual.csv`, `cobertura_mensual.csv`, `marcas_por_anio.csv`, `marcas_por_regla.csv`, `periodos_largos.json`, `resumen_f03.json` (con la lista de sensibilidad y sus dos variantes) y `MANIFEST.json`.
 
+- `processed/F04-homogeneidad/altimetros/<nombre>/`: `exposicion_altimetros.parquet`, `pasadas.csv`, `misiones_locales.csv`, `resumen_altimetros.json` y `MANIFEST.json`.
+- `processed/F04-homogeneidad/homogeneidad/<nombre>/`: `cronologia_f04.csv`, `tramos.csv`, `cuantiles_por_tramo.csv`, `indicadores_anuales.csv`, `potencia.csv`, `pruebas_cambio.json`, `prueba_altimetros.json`, `altimetros_por_mision_anio.csv`, `cobertura_altimetria.csv`, `figuras/`, `resumen_f04.json` (con los escenarios de Hs) y `MANIFEST.json`.
+- `processed/F05-validacion-externa/modelo/<nombre>/`: `modelo_region.parquet`, `marcas_region.parquet`, `celdas_region.csv`, `modelo_boyas.parquet`, `celdas_boyas.csv`, `resumen_modelo.json` y `MANIFEST.json`.
+- `processed/F05-validacion-externa/potencia/<nombre>/`: `colocaciones_geometria.parquet`, `qc_geometria.csv`, `escalon_modelo.csv`, `potencia.csv`, `potencia.json`, `efecto_minimo.csv`, `replicas_potencia.parquet` y `MANIFEST.json`.
+- `processed/F05-validacion-externa/validacion/<nombre>/`: `colocaciones.parquet`, `qc_observaciones.csv`, `observaciones.csv`, `sigma_1hz.csv`, `representatividad.json`, `sesgo_por_cuantil.csv`, `pruebas_validacion.json`, `correccion.json`, `serie_corregida.parquet`, `periodos.csv`, `saltos_validados.csv`, `figuras/`, `resumen_f05.json` (escenarios, variantes, fila de la fuente y entregas) y `MANIFEST.json`.
+
 Cada salida publicada lleva un `MANIFEST.json` sin marcas de tiempo: insumos con su ruta relativa a `WAVE_DATA_DIR` y su hash, salidas con su hash, huella del código, semilla y criterios del gate. Un gate fallido borra la salida anterior y deja solo `GATE_FAILED.json`.
 
 ### Columnas de `candidatos.csv`
@@ -215,5 +251,6 @@ Las pruebas usan datos sintéticos en directorios temporales y **no acceden a la
 - **Costa**: Natural Earth 1:10 m (`ne_10m_land`, `ne_10m_minor_islands`), versión 5.1.2.
 - **Altimetría**: Ribal y Young (2019), altimetría calibrada multimisión, IMOS/AODN (thredds.aodn.org.au). doi 10.1038/s41597-019-0083-9.
 - **Ciclones tropicales**: IBTrACS v04r01 (NOAA NCEI), cuenca del Pacífico Sur.
+- **Boyas**: NOAA NDBC, archivos históricos `stdmet` de las estaciones 32302 (1986–1995) y 32012 (2007–2018).
 
 Ver las condiciones de uso de cada servicio antes de redistribuir datos derivados. Este mapa es un filtro exploratorio para una tesis; no sustituye la consulta a las autoridades.

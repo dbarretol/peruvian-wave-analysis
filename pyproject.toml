@@ -40,6 +40,10 @@ datos-candidatos = "peruvian_wave_analysis.datos.run:main_candidatos"
 datos-serie = "peruvian_wave_analysis.datos.run:main_serie"
 homogeneidad-altimetros = "peruvian_wave_analysis.homogeneidad.run:main_altimetros"
 homogeneidad = "peruvian_wave_analysis.homogeneidad.run:main"
+validacion-descarga = "peruvian_wave_analysis.validacion.cli:main_descarga"
+validacion-modelo = "peruvian_wave_analysis.validacion.modelo:main"
+validacion-potencia = "peruvian_wave_analysis.validacion.etapa_potencia:main"
+validacion = "peruvian_wave_analysis.validacion_obs.etapa:main"
 
 [build-system]
 requires = ["hatchling"]
