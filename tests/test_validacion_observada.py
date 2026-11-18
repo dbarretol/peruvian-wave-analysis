@@ -557,3 +557,30 @@ def test_signo_opuesto_al_escalon_del_modelo_impide_retirar_e0():
     assert d["familias"]["V1"]["categoria"] == D.ESTABLECIDO
     assert D.M_SIGNO in d["familias"]["V1"]["marcas_fuente"]["a"]
     assert d["escenarios"]["E0"] == "activo"
+
+
+def test_g6_fallido_conserva_las_salidas_en_interim(tmp_path):
+    """§20.7, punto 19: con un estimado fuera de su IC, las salidas se copian a interim/ antes de que falle el gate."""
+    tabla = pd.DataFrame(
+        [
+            {
+                "lado": "A",
+                "estadistico": "P99",
+                "estimable": True,
+                "R_descontado": 1.10,
+                "R_ic95_lo": 0.9,
+                "R_ic95_hi": 1.05,
+            }
+        ]
+    )
+    fuera = EO.dentro_de_ic(tabla, {})
+    assert fuera == ["A P99"]
+    st = tmp_path / "staging"
+    (st / "figuras").mkdir(parents=True)
+    (st / "resumen_f05.json").write_text("{}", encoding="utf-8")
+    (st / "figuras" / "a.png").write_bytes(b"x")
+    destino = EO.conservar_gate_fallido(st, EO.ruta_gate_fallido(tmp_path), fuera, ["G6"])
+    assert (destino / "resumen_f05.json").is_file() and (destino / "figuras" / "a.png").is_file()
+    info = json.loads((destino / "G6_fuera_de_ic.json").read_text(encoding="utf-8"))
+    assert info["estimados_fuera_de_su_ic"] == ["A P99"]
+    assert "interim" in destino.parts and "processed" not in destino.parts

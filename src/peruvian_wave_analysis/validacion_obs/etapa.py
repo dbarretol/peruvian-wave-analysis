@@ -18,6 +18,7 @@ en ``interim/``, para cronometrar. Las réplicas se cronometran con una sola ré
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -70,6 +71,29 @@ def ruta_previo(raiz: Path, nombre: str = NOMBRE) -> Path:
 
 def ruta_avance(raiz: Path, nombre: str = NOMBRE) -> Path:
     return Path(raiz) / "interim" / "F05-validacion-externa" / "validacion-avance" / nombre
+
+
+def ruta_gate_fallido(raiz: Path, nombre: str = NOMBRE, previo: bool = False) -> Path:
+    carpeta = "validacion-previo-gate-fallido" if previo else "validacion-gate-fallido"
+    return Path(raiz) / "interim" / "F05-validacion-externa" / carpeta / nombre
+
+
+def conservar_gate_fallido(st: Path, destino: Path, fuera: list[str], motivos: list[str]) -> Path:
+    """§20.7, punto 19: antes de que el gate falle por G6, copia todas las salidas y la lista de los estimados fuera
+    de su IC a ``interim/``. Nada se publica en ``processed/`` y ninguna decisión se usa hasta el diagnóstico; un cambio
+    de método posterior se rotula como posterior a los datos y se publica junto a este resultado, sin reemplazarlo."""
+    if destino.exists():
+        shutil.rmtree(destino)
+    shutil.copytree(st, destino)
+    json_estricto.escribir(
+        destino / "G6_fuera_de_ic.json",
+        {
+            "estimados_fuera_de_su_ic": fuera,
+            "motivos_del_gate": motivos,
+            "regla": "§20.7, punto 19: resultado original sin publicar; ninguna decisión se usa hasta diagnosticarlo.",
+        },
+    )
+    return destino
 
 
 # --- G4 ----------------------------------------------------------------------------------------------------
@@ -687,6 +711,9 @@ def validacion_etapa(
         if fuera:
             motivos.append(f"G6: estimados fuera de su IC: {fuera[:5]}")
         criterios = {"g4": True, "geometria_igual": geometria_igual, "B": B, "previo": previo}
+        if fuera:
+            copia = conservar_gate_fallido(st, ruta_gate_fallido(raiz, nombre, previo), fuera, motivos)
+            print(f"G6 falló: salidas conservadas en {copia}; el avance de las réplicas se conserva.", flush=True)
         publicada = etapa.publicar(
             st,
             salida,
