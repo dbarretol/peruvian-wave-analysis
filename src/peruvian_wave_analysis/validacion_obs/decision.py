@@ -287,13 +287,22 @@ def rango_subida(potencia_json: dict) -> dict:
     return out
 
 
-def hallazgo_20_6(rango: dict) -> str:
+def hallazgo_20_6(rango: dict, configuracion: str | None = None) -> str:
     x2 = rango["con_maximos"]
-    return (
+    texto = (
         "La subida esperada de la regla de variantes supera el 2 % de la ADR-0006 dentro de la rejilla publicada: "
         f"de {100 * x2['rejilla_x2_min']:.2f} a {100 * x2['rejilla_x2_max']:.2f} % con calibración y ruido × 2 "
         "(con máximos). Declarado por la rejilla × 2, no por la regla nominal (§20.6, punto 1)."
     )
+    if configuracion is not None:  # §20.8: se añaden las cifras de la configuración elegida, sin quitar las anteriores
+        c = rango[configuracion]
+        nombre = {"con_maximos": "con máximos", "sin_maximos": "sin máximos"}[configuracion]
+        texto += (
+            f" Configuración elegida por la función de estructura: {nombre}; × 2 de {100 * c['rejilla_x2_min']:.2f} "
+            f"a {100 * c['rejilla_x2_max']:.2f} %; rango que recibe la F12, {100 * c['limite_inferior']:.2f}–"
+            f"{100 * c['limite_superior']:.2f} % (añadido posterior a los datos, §20.8)."
+        )
+    return texto
 
 
 def fila_fuente(v3: dict, gradiente: dict, rango_conf: dict, mde_v3a: float | None) -> dict:

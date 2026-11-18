@@ -36,7 +36,7 @@ from ..validacion import etapa_potencia as EP
 from ..validacion import geometria as G
 from ..validacion import potencia as P
 from ..validacion import reanudable
-from . import complementos, figuras, lectura, ruido
+from . import complementos, figuras, lectura, notas, ruido
 from . import config as C
 from . import decision as D
 from . import prueba as PR
@@ -653,7 +653,16 @@ def validacion_etapa(
         if corregida.shape[1] > 1:
             corregida.to_parquet(st / "serie_corregida.parquet")
         agranda = [f for f in prueba_serie if f["agranda"]]
-        hallazgos = list(pj["hallazgos"]) + [D.hallazgo_20_6(rango)]
+        hallazgos = list(pj["hallazgos"]) + [D.hallazgo_20_6(rango, conf)]
+        s_mod_p90 = {c: _s_mod(esc, c).get("P90") for c in pj["atribuye"]}
+        nota_v1 = notas.discrepancia_v1(comps, p_fin, s_mod_p90, dec["familias"]["V1"])
+        nota_serie = notas.hallazgo_serie_corregida(prueba_serie)
+        nota_448 = notas.lectura_linea_448(
+            dec["familias"]["V1"]["categoria"],
+            dec["escenarios"]["E0"],
+            any(f["alcance"].startswith("toda") for f in prueba_serie),
+        )
+        notas_posteriores = {"discrepancia_V1": nota_v1, "serie_corregida": nota_serie, "linea_448": nota_448}
         if agranda:
             hallazgos.append(f"La serie corregida agranda el escalón en {len(agranda)} estadísticos (§6.2).")
         resumen = {
@@ -682,6 +691,7 @@ def validacion_etapa(
             },
             "sesgo_estimador_sigma_medido": sesgo_medido,
             "hallazgos": hallazgos,
+            "notas_posteriores_a_los_datos": notas_posteriores,
             "alcance": {
                 "altimetria": "La cola del producto en la región (≤ 200 km, ≥ 50 km de la costa), no el nodo.",
                 "boyas": "El producto en la cuenca, a unos 1050–1100 km; su sesgo absoluto es descriptivo.",
@@ -694,8 +704,14 @@ def validacion_etapa(
             },
             "nota_32012": C.NOTA_32012,
             "entregas": {
-                "F8": "V1 y V2 con sus marcas; descriptivos de §19 (escalón de C2 en la cuenca y cola de C1 en 32302).",
-                "F9": "Sesgo de T0 como dato (P7); saltos_validados.csv; sensibilidad sin corregir.",
+                "F8": {
+                    "texto": "V1 y V2 con sus marcas; descriptivos de §19 (C2 en la cuenca; cola de C1 en 32302).",
+                    "discrepancia_V1": nota_v1,
+                },
+                "F9": {
+                    "texto": "Sesgo de T0 como dato (P7); saltos_validados.csv; sensibilidad sin corregir.",
+                    "marcas_serie_corregida": (nota_serie or {}).get("marcas_para_la_F9", []),
+                },
                 "F10": "periodos.csv; la serie corregida no cumple la coherencia ni el peralte de la F3 (§6.2).",
                 "F12": "Fila de la fuente (§6.3) y rango de la subida (§20.6), separada del sesgo de profundidad.",
             },

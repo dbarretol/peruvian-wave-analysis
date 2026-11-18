@@ -17,7 +17,7 @@ from peruvian_wave_analysis.validacion import config as CV
 from peruvian_wave_analysis.validacion import potencia as P
 from peruvian_wave_analysis.validacion import simulacion as S
 from peruvian_wave_analysis.validacion.etapa_potencia import _fila_replica
-from peruvian_wave_analysis.validacion_obs import complementos, lectura, ruido
+from peruvian_wave_analysis.validacion_obs import complementos, lectura, notas, ruido
 from peruvian_wave_analysis.validacion_obs import config as C
 from peruvian_wave_analysis.validacion_obs import decision as D
 from peruvian_wave_analysis.validacion_obs import etapa as EO
@@ -584,3 +584,51 @@ def test_g6_fallido_conserva_las_salidas_en_interim(tmp_path):
     info = json.loads((destino / "G6_fuera_de_ic.json").read_text(encoding="utf-8"))
     assert info["estimados_fuera_de_su_ic"] == ["A P99"]
     assert "interim" in destino.parts and "processed" not in destino.parts
+
+
+# --- Notas posteriores a los datos (§20.8) ------------------------------------------------------------------------
+
+
+def _comp(rech, p, p2, rech2, p90):
+    return {
+        "principal": {"rechaza": rech, "p": p, "estimado": {"P90": p90}},
+        "calibracion_x2": {"rechaza": rech2, "p": p2},
+    }
+
+
+def test_nota_discrepancia_v1_solo_si_una_fuente_rechaza():
+    comps = {"V1a": _comp(True, 0.003, 0.10, False, 0.092), "V1b": _comp(False, 0.12, 0.32, False, 0.006)}
+    pot = {"V1a": 0.091, "V1b_lado": 0.527}
+    s_mod = {"V1a": 0.041, "V1b": 0.089}
+    n = notas.discrepancia_v1(comps, pot, s_mod, {"fuentes_que_rechazan": ["a"]})
+    assert "discrepan" in n["texto"] and "2.2 veces" in n["texto"] and "no se sostiene" in n["texto"]
+    assert n["rotulo"].startswith("Posterior a los datos")
+    assert notas.discrepancia_v1(comps, pot, s_mod, {"fuentes_que_rechazan": ["a", "b"]}) is None
+
+
+def test_nota_serie_corregida_frente_al_dos_por_ciento():
+    filas = [
+        {"variante": "cuantiles", "alcance": "toda la serie (E0)", "cambio": "1993-02", "estadistico": "P90",
+         "S_sin_corregir": 0.0953, "S_corregida": 0.1133, "agranda": True},
+        {"variante": "cuantiles", "alcance": "toda la serie (E0)", "cambio": "1993-02", "estadistico": "max",
+         "S_sin_corregir": 0.0978, "S_corregida": 0.1108, "agranda": True},
+        {"variante": "cuantiles", "alcance": "tramo asimilado (E1, E2)", "cambio": "2016-03", "estadistico": "P50",
+         "S_sin_corregir": -0.0216, "S_corregida": -0.0233, "agranda": True},
+    ]  # fmt: skip
+    n = notas.hallazgo_serie_corregida(filas)
+    assert n["aumento_maximo"] == pytest.approx(0.018) and not n["llega_al_efecto_relevante"]
+    e0 = [m for m in n["marcas_para_la_F9"] if m["cambio"] == "1993-02"][0]
+    assert e0["marca"] == "agranda el escalón de 1993-02 en 0.018 en P90"
+    assert notas.hallazgo_serie_corregida([dict(filas[0], agranda=False)]) is None
+
+
+def test_nota_linea_448_y_hallazgo_20_6_con_la_configuracion_elegida():
+    assert notas.lectura_linea_448("establecido", "activo", True) is not None
+    assert notas.lectura_linea_448("establecido", "sensibilidad", True) is None
+    assert notas.lectura_linea_448("no concluyente", "activo", True) is None
+    r = {
+        c: {"rejilla_x2_min": a, "rejilla_x2_max": b, "limite_inferior": li, "limite_superior": b}
+        for c, a, b, li in (("con_maximos", 0.0225, 0.0314, 0.0101), ("sin_maximos", 0.0257, 0.0280, 0.0169))
+    }
+    t = D.hallazgo_20_6(r, "sin_maximos")
+    assert "2.25 a 3.14 %" in t and "sin máximos; × 2 de 2.57 a 2.80 %" in t and "1.69–2.80 %" in t
