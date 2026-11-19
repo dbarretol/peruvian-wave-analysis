@@ -18,6 +18,7 @@ from peruvian_wave_analysis.clima import etapa1 as E1
 from peruvian_wave_analysis.clima import figuras as F
 from peruvian_wave_analysis.clima import gev_ramas as GV
 from peruvian_wave_analysis.clima import run as R
+from peruvian_wave_analysis.clima import tablas as TB
 from peruvian_wave_analysis.comun import etapa, json_estricto, orquestador
 from peruvian_wave_analysis.comun.errores import GateFallido
 from peruvian_wave_analysis.extremos import dependencia as D
@@ -46,12 +47,18 @@ def _serie_mixta():
     return df
 
 
-def _sembrar(raiz, monkeypatch, unimodal: bool = True):
+def _sembrar(raiz, monkeypatch, unimodal: bool = True, huella_etapa0: bool = True):
     monkeypatch.setattr(T1, "_serie", _serie_unimodal if unimodal else _serie_mixta)
     T1._sembrar(raiz)
     codigo = raiz.parent / "codigo"
     r0 = {"factor_concordancia": 20.0, "regla_no_discrimina": True, "valores_del_sitio_leidos": False}
     T1._publicar(raiz, E0.ruta_salida(raiz), {"etapa0.json": lambda p: json_estricto.escribir(p, r0)}, codigo)
+    if huella_etapa0:  # la etapa 0 sintética se publicó con otro código: su huella es la del manifiesto
+        h0 = etapa.exigir_publicada(E0.ruta_salida(raiz))["huella_codigo"]
+        real = orquestador.huella_etapa
+        monkeypatch.setattr(
+            orquestador, "huella_etapa", lambda et, *a, **k: h0 if et is E0.ETAPA0 else real(et, *a, **k)
+        )
 
 
 @pytest.mark.lento
@@ -88,18 +95,31 @@ def test_g7_se_detiene_si_cambio_el_codigo_de_la_etapa1(tmp_path, chico, monkeyp
     _sembrar(raiz, monkeypatch)
     E1.etapa1(raiz, procesos_=0)
     real = orquestador.huella_etapa
-    monkeypatch.setattr(orquestador, "huella_etapa", lambda et, *a, **k: "otra" if et is E1.ETAPA1 else real(et))
+    monkeypatch.setattr(
+        orquestador, "huella_etapa", lambda et, *a, **k: "otra" if et is E1.ETAPA1 else real(et, *a, **k)
+    )
     leidos = []
     monkeypatch.setattr(R.I, "cargar", lambda *a, **k: leidos.append(1))
+    salida = R.ruta_salida(raiz, R.I.NOMBRE)
+    salida.mkdir(parents=True)
+    (salida / etapa.MANIFIESTO).write_text("{}", encoding="utf-8")  # una salida «anterior»
     with pytest.raises(GateFallido, match="G7"):
         R.clima(raiz, procesos_=0, b=B_PRUEBA)
     assert not leidos  # no se cargó la serie: ningún exceso leído
+    assert not (salida / etapa.MANIFIESTO).exists()  # §7: el gate fallido borra la salida anterior
 
 
 def test_g7_se_detiene_sin_etapa1(tmp_path, monkeypatch):
     raiz = tmp_path / "datos"
     _sembrar(raiz, monkeypatch)
     with pytest.raises(GateFallido, match="G7"):
+        R.clima(raiz, procesos_=0, b=B_PRUEBA)
+
+
+def test_etapa0_con_otro_codigo_detiene(tmp_path, monkeypatch):
+    raiz = tmp_path / "datos"
+    _sembrar(raiz, monkeypatch, huella_etapa0=False)
+    with pytest.raises(GateFallido, match="etapa 0 cambió"):
         R.clima(raiz, procesos_=0, b=B_PRUEBA)
 
 
@@ -122,7 +142,8 @@ def test_replicas_iguales_con_1_y_2_procesos(tmp_path):
     a = ES.replicas(bl, u, 1, tmp_path / "a", b=6)
     b = ES.replicas(bl, u, 2, tmp_path / "b", b=6)
     np.testing.assert_array_equal(a, b)
-    np.testing.assert_array_equal(ES.vector(bl, u), ES.vector(bl, u))
+    # §8: la función de réplica aplicada a los años en su orden da exactamente el punto
+    np.testing.assert_array_equal(np.asarray(ES.trabajo_replicas((bl, [list(range(len(bl)))], u))[0]), ES.vector(bl, u))
 
 
 # --- Piezas -------------------------------------------------------------------------------------------------
@@ -171,8 +192,21 @@ def test_concordancia():
     ic["escala_extremograma_h"] = {"punto": 48.0}
     c = ES.concordancia(ic, 3.0, False)
     assert c["razon_max_min"] == 2.0 and c["concuerdan"] and "sin corte natural de los huecos" in c["senales_para_f7"]
+    c = ES.concordancia(ic, 20.0, True)
+    assert c["concuerdan"] is None and c["estado"].startswith("no evaluable")  # §3.5: la regla no discrimina
     ic["escala_extremograma_h"] = {"punto": 240.0}
     assert "escalas de dependencia discordantes" in ES.concordancia(ic, 3.0, False)["senales_para_f7"]
+
+
+def test_notas_para_la_f7():
+    ic = {f"T_C_h_q{q:g}": {"punto": 15.0, "lo": 6.0, "hi": 30.0} for q in ES.CUANTILES_THETA}
+    ic["T_C_h_q0.99"] = {"punto": 54.0, "lo": 9.0, "hi": 117.0}
+    ic["corte_h"] = {"punto": 20.8}
+    notas = ES.notas_f7(ic, 48.0)
+    assert len(notas) == 2 and "menor que τ_e" in notas[0] and "T_(C) inestable" in notas[1]
+    ic["corte_h"] = {"punto": 60.0}
+    ic["T_C_h_q0.99"] = {"punto": 54.0, "lo": 40.0, "hi": 80.0}
+    assert ES.notas_f7(ic, 48.0) == []
 
 
 def test_gev_bloques_completos_y_mes_de_inicio():
@@ -198,3 +232,29 @@ def test_g3_detecta_eje_que_recorta_el_maximo():
     ax.set_xlim(0, 2)
     assert len(F.revisar(fig, "f")) == 1
     matplotlib.pyplot.close(fig)
+
+
+def test_pares_cercanos():
+    t = pd.to_datetime(["2000-01-01", "2000-01-10", "2000-01-14", "2000-02-01"])
+    pk = pd.DataFrame({"t_inicio": t - pd.Timedelta(hours=6), "t_fin": t + pd.Timedelta(hours=6)}, index=t)
+    rachas = pd.DataFrame({"inicio": [t[0] - pd.Timedelta(hours=6), t[0] + pd.Timedelta(hours=3)],
+                           "fin": [t[0] - pd.Timedelta(hours=3), t[0] + pd.Timedelta(hours=6)],
+                           "hueco_siguiente_h": [6.0, 50.0]})  # fmt: skip
+    d = TB.pares_cercanos(pk, rachas, 48.0, n=2)
+    fus = d[d["tipo"] == "casi fusionados"]
+    assert list(fus["hueco_h"]) == [84.0, 204.0]  # huecos > 48 h, del más cercano al más lejano
+    par = d[d["tipo"] == "casi partidos"]
+    assert len(par) == 1 and par["t_pico"].iloc[0] == t[0] and par["hueco_h"].iloc[0] == 6.0
+
+
+def test_poblacion_mixta_con_dos_separaciones():
+    def pk(dirs):
+        return pd.DataFrame({"Hs": np.arange(len(dirs), 0, -1.0), "VPED": dirs})
+
+    arco = (250.0, 330.0)
+    sin = pk([200.0] * 20)
+    con = pk([300.0] + [200.0] * 19)  # el mayor de todos es del grupo menor
+    m = ET.poblacion_mixta({"48 h": sin, "72 h": con}, arco)
+    assert m["senal"] and m["cambia_entre_separaciones"]
+    assert not ET.poblacion_mixta({"48 h": sin}, arco)["senal"]
+    assert ET.poblacion_mixta({"48 h": sin}, None)["veredicto"] == "población única"
