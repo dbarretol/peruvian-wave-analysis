@@ -27,6 +27,7 @@ import pandas as pd
 from scipy import stats
 
 from ..extremos.gpd import ajustar_gpd
+from ..extremos.perfil import perfil_rl, perfil_rl_multiestrato
 from . import estratificacion as E
 from . import picos as P
 
@@ -150,6 +151,10 @@ def modelos(picos: pd.DataFrame, columna: str, estratos: Sequence[str], u: float
     ok = a1.valido and a2.valido
     rl_s = E.rl_mezcla([(la, a1.xi, a1.sigma), (lb, a2.xi, a2.sigma)], u, T_RL) if ok else float("nan")
     lrt = float(max(2.0 * (a1.loglik + a2.loglik - co.loglik), 0.0)) if ok and co.valido else float("nan")
+    ic_u = _ic(lambda: perfil_rl(np.r_[a, b], a.size + b.size, anios, T_RL, u, au)) if au.valido else None
+    ic_s = (
+        _ic(lambda: perfil_rl_multiestrato([a, b], [a.size, b.size], [anios, anios], T_RL, u, [a1, a2])) if ok else None
+    )
 
     def gpd(x):
         return {"valido": x.valido, "xi": x.xi, "sigma": x.sigma, "n": x.n, "causa": x.causa}
@@ -159,14 +164,23 @@ def modelos(picos: pd.DataFrame, columna: str, estratos: Sequence[str], u: float
 
     return {
         "u": u, "anios": anios, "n": {estratos[0]: int(a.size), estratos[1]: int(b.size)},
-        "sin_estratos": gpd(au) | {"rl100": rl_u},
+        "sin_estratos": gpd(au) | {"rl100": rl_u, "ic_perfil_rl100": ic_u},
         "xi_comun": {"valido": co.valido, "xi": co.xi, "sigma": [co.sigma1, co.sigma2], "rl100": rl_c,
                      "delta_pct": pct(rl_c)},
         "xi_por_estrato": {"ajustes": [gpd(a1), gpd(a2)], "rl100": rl_s, "delta_pct": pct(rl_s),
-                           "no_calculable": not ok},
+                           "no_calculable": not ok, "ic_perfil_rl100": ic_s},
         "lrt": {"estadistico": lrt, "p_asintotico": float(stats.chi2.sf(lrt, 1)) if np.isfinite(lrt) else None,
                 "rotulo": "sin potencia y con tamaño inflado (§5)"},
     }  # fmt: skip
+
+
+def _ic(f) -> dict | None:
+    """IC 95 % de perfil del RL100 (límites abiertos como None, con su causa); None si el perfil falla."""
+    try:
+        r = f()
+    except (ValueError, FloatingPointError, RuntimeError) as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    return {"punto": r.punto, "lo": r.lo, "hi": r.hi, "causa_lo": r.causa_lo, "causa_hi": r.causa_hi}
 
 
 def alarma_adr0029(mod: Mapping, efecto_pct: float = E.EFECTO_PCT) -> list[str]:
@@ -175,7 +189,15 @@ def alarma_adr0029(mod: Mapping, efecto_pct: float = E.EFECTO_PCT) -> list[str]:
     for clave in ("xi_comun", "xi_por_estrato"):
         d = mod[clave].get("delta_pct", float("nan"))
         if np.isfinite(d) and d > efecto_pct:
-            out.append(f"{clave}: ΔRL100 = {d:+.1f} % (> {efecto_pct:g} %)")
+            texto = f"{clave}: ΔRL100 = {d:+.1f} % (> {efecto_pct:g} %)"
+            ic, ic_u = mod[clave].get("ic_perfil_rl100"), mod.get("sin_estratos", {}).get("ic_perfil_rl100")
+            if ic and "lo" in ic:
+                texto += f"; IC95 de perfil de este modelo [{ic['lo']:.2f}, {ic['hi']:.2f}] m"
+            elif clave == "xi_comun":
+                texto += "; sin IC de perfil para ξ común"
+            if ic_u and "lo" in ic_u:
+                texto += f"; sin estratos {ic_u['punto']:.2f} m [{ic_u['lo']:.2f}, {ic_u['hi']:.2f}]"
+            out.append(texto)
     return out
 
 

@@ -39,7 +39,7 @@ from . import picos as P
 from . import tablas as TB
 
 ETAPA = orquestador.Etapa("clima", Path(__file__).resolve(), Path("."))
-EXCLUIR_MENOS_DE_30 = True  # ADR-0029 (propuesta): lo que depende de un estrato con < 30 picos no entra
+EXCLUIR_MENOS_DE_30 = True  # ADR-0029 (aceptada el 2026-11-19): lo que depende de un estrato con < 30 picos no entra
 
 
 def ruta_salida(raiz: Path, nombre: str = I.NOMBRE) -> Path:
