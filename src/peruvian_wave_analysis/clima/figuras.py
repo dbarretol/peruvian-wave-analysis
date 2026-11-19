@@ -290,7 +290,10 @@ def evento(serie: pd.DataFrame, t_pico: pd.Timestamp, u: float, sep_h: float, ti
     axs[2].plot(d.index, d["VPED"], ".", ms=3, color="k")
     axs[2].set_ylabel("VPED (°)")
     axs[2].set_ylim(0, 360)
+    loc = mdates.AutoDateLocator(minticks=3, maxticks=7)
     for a in axs:
         a.set_xlabel("Fecha (-)")
+        a.xaxis.set_major_locator(loc)
+        a.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
     fig.suptitle(titulo)
     _guardar(fig, ruta)
