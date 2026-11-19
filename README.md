@@ -25,7 +25,7 @@ Fase 5 (validación externa) cerrada, en cuatro órdenes (`validacion/` y `valid
 - `validacion-potencia`: colocaciones con la altimetría y las boyas, escalón del modelo en cada fuente y potencia de cada prueba, sin leer valores observados. Simulación con SIMEX, bootstrap por bloques mensuales y max-T; réplicas reanudables.
 - `validacion`: lee los valores observados solo después de comprobar el manifiesto y los hashes de la potencia. Mide el ruido de 1 Hz, el sesgo por cuantil y las pruebas de atribución y de sesgo, y publica los escenarios activos, las variantes de corrección, la serie corregida y la fila de incertidumbre de la fuente.
 
-Fase 6 (clima de oleaje) en curso, en `clima/` y `extremos/` (rama `feature/f06-clima`; aún sin la etapa con datos):
+Fase 6 (clima de oleaje) en curso, en `clima/` y `extremos/` (rama `feature/f06-clima`):
 - `extremos/dependencia.py`: índice extremal de Ferro y Segers dentro del invierno, declustering automático, rachas y corte natural de los huecos, extremograma con referencia estacional y escalas de decorrelación.
 - `extremos/gev.py`: GEV de máximos anuales con validación de soporte, nivel de retorno de ADR-0022 y de Coles e IC de perfil.
 - `clima/clase_fisica.py`: clase física por particiones (swell, mixto, mar de viento).
@@ -33,6 +33,7 @@ Fase 6 (clima de oleaje) en curso, en `clima/` y `extremos/` (rama `feature/f06-
 - `clima-etapa0`: etapa 0 sintética, factor de la regla de concordancia (publicada).
 - `clima-simulacion-previa`: reproducción de la simulación previa del contrato (§5 y §5.4), sin datos del sitio (publicada).
 - `clima-etapa1`: estratificación sin leer excesos: τ_e y separación provisional, picos provisionales (fechas y direcciones), bimodalidad de `VPED`, conteos por estrato en las cuatro ramas, fronteras para la fracción real, potencia de Anderson–Darling, α de familia y G7b.
+- `clima` (`clima/run.py`, con `escalas.py`, `estratos_sitio.py`, `gev_ramas.py`, `tablas.py` y `figuras.py`): etapa principal. Antes de leer excesos verifica que la etapa 1 esté publicada, sin cambios y con la misma huella de código e insumos (G7). Después: prueba de Anderson–Darling con el α congelado y escenarios, dependencia con IC por bloques (B = 999), descriptivos, GEV por rama, figuras y gate. **No se puede cambiar ningún archivo que use la etapa 1** (su huella cubre `picos.py`, `insumos.py`, `descriptivos.py`, `estratificacion.py`, `extremos/dependencia.py`, `estilo.py`, `uv.lock` y otros) sin repetirla.
 
 Primera herramienta: **mapa de selección de sitio**, en dos pasos.
 
@@ -156,6 +157,8 @@ uv run clima-simulacion-previa --previo
 uv run clima-simulacion-previa --procesos 4  # unos 45 min; se reanuda si se corta y muestra el avance
 uv run clima-etapa1 --previo                 # lee la serie; cronometra, no publica
 uv run clima-etapa1 --procesos 6             # con datos del sitio, sin leer excesos
+uv run clima --previo                        # verifica la etapa 1 y cronometra; no lee excesos
+uv run clima --procesos 6                    # etapa principal; se reanuda si se corta y muestra el avance
 ```
 
 `clima-etapa0` y `clima-simulacion-previa` no leen datos del sitio. El avance va a `interim/F06-clima-de-oleaje/` y se borra al publicar.
@@ -236,6 +239,7 @@ En `WAVE_DATA_DIR`:
 - `processed/F05-validacion-externa/validacion/<nombre>/`: `colocaciones.parquet`, `qc_observaciones.csv`, `observaciones.csv`, `sigma_1hz.csv`, `representatividad.json`, `sesgo_por_cuantil.csv`, `pruebas_validacion.json`, `correccion.json`, `serie_corregida.parquet`, `periodos.csv`, `saltos_validados.csv`, `figuras/`, `resumen_f05.json` (escenarios, variantes, fila de la fuente y entregas) y `MANIFEST.json`.
 - `processed/F06-clima-de-oleaje/etapa0-sintetica/`: `etapa0.json` (factor de concordancia, resumen por proceso y señal de variación de θ(u)), `replicas_etapa0.csv` y `MANIFEST.json`.
 - `processed/F06-clima-de-oleaje/etapa1/<nombre>/`: `estratos_etapa1.json` (conteos por estrato y rama, bimodalidad, fronteras, potencia, α de familia, G7b; `excesos_leidos: false`) y `MANIFEST.json`.
+- `processed/F06-clima-de-oleaje/<nombre>/`: salidas de §2 del contrato (`resumen_f06.json`, `estratos.json`, `dependencia.json`, `clima_mensual.csv`, `clase_fisica.parquet`, `dominancia.csv`, `picos_provisionales.csv`, `origen_mayores.csv`, `rachas.csv`, `declustering_dudoso.csv`, `tp_condicional.csv`, `peralte.csv`, `gev_bloques.csv`, `figuras/`) y `MANIFEST.json`.
 - `processed/F06-clima-de-oleaje/simulacion-previa/`: `simulacion_previa.json` (fronteras con sus rejillas, potencia, sesgo y ancho de los modelos, barrido de umbral y mínimo del modelo con ξ común) y `MANIFEST.json`.
 
 Cada salida publicada lleva un `MANIFEST.json` sin marcas de tiempo: insumos con su ruta relativa a `WAVE_DATA_DIR` y su hash, salidas con su hash, huella del código, semilla y criterios del gate. Un gate fallido borra la salida anterior y deja solo `GATE_FAILED.json`.
