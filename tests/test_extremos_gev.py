@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pytest
 from scipy import stats
@@ -80,11 +82,12 @@ def test_perfil_contiene_el_punto_y_es_finito():
 
 @pytest.mark.lento
 @pytest.mark.parametrize("xi", [-0.2, 0.0, 0.2])
-def test_cobertura_del_perfil(xi):
+def test_cobertura_del_perfil(xi, capsys):
     """§8: cobertura del IC de perfil en 500 réplicas (n = 46) dentro de ±3 puntos del 95 %, para ξ y el RL100."""
     T = 100.0
     verdad_rl = float(G.cuantil(np.exp(-1 / T), 5.0, 0.6, xi))
     cub_xi, cub_rl, n = 0, 0, 0
+    t0 = time.time()
     for i in range(500):
         x = _muestra(xi, 46, semillas.generador("prueba", "gev-cobertura", str(xi), str(i)))
         aj = G.ajustar_gev(x)
@@ -94,5 +97,12 @@ def test_cobertura_del_perfil(xi):
         cub_xi += lo_x <= xi <= hi_x
         cub_rl += lo_r <= verdad_rl <= hi_r
         n += 1
+        if n % 50 == 0:
+            with capsys.disabled():  # avance en la consola aunque pytest capture la salida
+                print(
+                    f"  cobertura xi={xi:g}: {n}/500 replicas, xi {cub_xi / n:.3f}, RL100 {cub_rl / n:.3f}, "
+                    f"{time.time() - t0:.0f} s",
+                    flush=True,
+                )
     assert abs(cub_xi / n - 0.95) <= 0.03, cub_xi / n
     assert abs(cub_rl / n - 0.95) <= 0.03, cub_rl / n
