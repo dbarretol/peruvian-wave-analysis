@@ -45,6 +45,7 @@ validacion-modelo = "peruvian_wave_analysis.validacion.modelo:main"
 validacion-potencia = "peruvian_wave_analysis.validacion.etapa_potencia:main"
 validacion = "peruvian_wave_analysis.validacion_obs.etapa:main"
 clima-etapa0 = "peruvian_wave_analysis.clima.etapa0:main"
+clima-simulacion-previa = "peruvian_wave_analysis.clima.simulacion_previa:main"
 
 [build-system]
 requires = ["hatchling"]
