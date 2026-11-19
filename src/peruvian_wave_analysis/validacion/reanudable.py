@@ -16,6 +16,7 @@ import json
 import os
 import pickle
 import shutil
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,8 @@ def ejecutar(
     """Resultados de ``funcion(args)`` para cada ``(nombre, args)``, en orden, reanudando lo ya guardado.
 
     ``procesos_ = 0`` ejecuta en este mismo proceso (pruebas); si no, en procesos hijos (``procesos.mapear``).
-    ``funcion`` debe poder importarse desde su módulo.
+    ``funcion`` debe poder importarse desde su módulo. Con ``avisar``, informa el avance unas 20 veces (tareas
+    hechas, minutos transcurridos y una estimación de lo que falta).
     """
     directorio = Path(directorio)
     directorio.mkdir(parents=True, exist_ok=True)
@@ -71,11 +73,23 @@ def ejecutar(
     if avisar:
         avisar(f"{len(tareas) - len(pendientes)} de {len(tareas)} tareas ya guardadas; faltan {len(pendientes)}")
     if pendientes:
+        t0 = time.time()
+        total = len(pendientes)
+        paso = max(1, total // 20)  # unas 20 líneas de avance, y siempre la última
+
+        def informar(hechas: int) -> None:
+            if avisar and (hechas % paso == 0 or hechas == total):
+                seg = time.time() - t0
+                resto = seg / hechas * (total - hechas)
+                avisar(f"{hechas}/{total} tareas, {seg / 60:.1f} min; faltan unos {resto / 60:.1f} min")
+
         if procesos_ == 0:
-            for p in pendientes:
+            for k, p in enumerate(pendientes, 1):
                 _tarea(p)
+                informar(k)
         else:
-            procesos.mapear(_tarea, pendientes, procesos=procesos_)
+            for k, _ in enumerate(procesos.mapear_a_medida(_tarea, pendientes, procesos_), 1):
+                informar(k)
     return [_cargar(r) for r in rutas]
 
 

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import multiprocessing
 import os
-from collections.abc import Callable, Iterable
-from concurrent.futures import ProcessPoolExecutor
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any
 
 VARIABLES_HILOS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS")
@@ -29,6 +29,28 @@ def mapear(funcion: Callable[..., Any], *iterables: Iterable, procesos: int, chu
     try:
         with ProcessPoolExecutor(max_workers=procesos, mp_context=multiprocessing.get_context("spawn")) as ex:
             return list(ex.map(funcion, *iterables, chunksize=max(1, chunksize)))
+    finally:
+        for v, valor in antes.items():
+            if valor is None:
+                os.environ.pop(v, None)
+            else:
+                os.environ[v] = valor
+
+
+def mapear_a_medida(funcion: Callable[[Any], Any], argumentos: Iterable, procesos: int) -> Iterator[tuple[int, Any]]:
+    """Como ``mapear`` con un argumento, pero entrega ``(índice, resultado)`` a medida que cada tarea termina.
+
+    Sirve para informar el avance de corridas largas; el orden de llegada no es el de las tareas.
+    """
+    if procesos < 1:
+        raise ValueError(f"procesos debe ser ≥ 1: {procesos}")
+    antes = {v: os.environ.get(v) for v in VARIABLES_HILOS}
+    os.environ.update({v: "1" for v in VARIABLES_HILOS})
+    try:
+        with ProcessPoolExecutor(max_workers=procesos, mp_context=multiprocessing.get_context("spawn")) as ex:
+            futuros = {ex.submit(funcion, a): i for i, a in enumerate(argumentos)}
+            for fu in as_completed(futuros):
+                yield futuros[fu], fu.result()
     finally:
         for v, valor in antes.items():
             if valor is None:
