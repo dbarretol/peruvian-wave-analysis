@@ -31,7 +31,8 @@ Fase 6 (clima de oleaje) en curso, en `clima/` y `extremos/` (rama `feature/f06-
 - `clima/clase_fisica.py`: clase física por particiones (swell, mixto, mar de viento).
 - `clima/estratificacion.py`: mezclas de dos estratos GPD, frontera del efecto de 2 % en el RL100, Anderson–Darling, razón de verosimilitudes y elección del α de familia.
 - `clima-etapa0`: etapa 0 sintética, factor de la regla de concordancia (publicada).
-- `clima-simulacion-previa`: reproducción de la simulación previa del contrato (§5 y §5.4), sin datos del sitio.
+- `clima-simulacion-previa`: reproducción de la simulación previa del contrato (§5 y §5.4), sin datos del sitio (publicada).
+- `clima-etapa1`: estratificación sin leer excesos: τ_e y separación provisional, picos provisionales (fechas y direcciones), bimodalidad de `VPED`, conteos por estrato en las cuatro ramas, fronteras para la fracción real, potencia de Anderson–Darling, α de familia y G7b.
 
 Primera herramienta: **mapa de selección de sitio**, en dos pasos.
 
@@ -153,9 +154,11 @@ uv run clima-etapa0 --previo                 # cronometra, no publica
 uv run clima-etapa0 --procesos 6             # unos 2 min; factor de concordancia
 uv run clima-simulacion-previa --previo
 uv run clima-simulacion-previa --procesos 4  # unos 45 min; se reanuda si se corta y muestra el avance
+uv run clima-etapa1 --previo                 # lee la serie; cronometra, no publica
+uv run clima-etapa1 --procesos 6             # con datos del sitio, sin leer excesos
 ```
 
-Ninguno de los dos lee datos del sitio. El avance va a `interim/F06-clima-de-oleaje/` y se borra al publicar.
+`clima-etapa0` y `clima-simulacion-previa` no leen datos del sitio. El avance va a `interim/F06-clima-de-oleaje/` y se borra al publicar.
 
 ### Cuaderno
 
@@ -232,6 +235,7 @@ En `WAVE_DATA_DIR`:
 - `processed/F05-validacion-externa/potencia/<nombre>/`: `colocaciones_geometria.parquet`, `qc_geometria.csv`, `escalon_modelo.csv`, `potencia.csv`, `potencia.json`, `efecto_minimo.csv`, `replicas_potencia.parquet` y `MANIFEST.json`.
 - `processed/F05-validacion-externa/validacion/<nombre>/`: `colocaciones.parquet`, `qc_observaciones.csv`, `observaciones.csv`, `sigma_1hz.csv`, `representatividad.json`, `sesgo_por_cuantil.csv`, `pruebas_validacion.json`, `correccion.json`, `serie_corregida.parquet`, `periodos.csv`, `saltos_validados.csv`, `figuras/`, `resumen_f05.json` (escenarios, variantes, fila de la fuente y entregas) y `MANIFEST.json`.
 - `processed/F06-clima-de-oleaje/etapa0-sintetica/`: `etapa0.json` (factor de concordancia, resumen por proceso y señal de variación de θ(u)), `replicas_etapa0.csv` y `MANIFEST.json`.
+- `processed/F06-clima-de-oleaje/etapa1/<nombre>/`: `estratos_etapa1.json` (conteos por estrato y rama, bimodalidad, fronteras, potencia, α de familia, G7b; `excesos_leidos: false`) y `MANIFEST.json`.
 - `processed/F06-clima-de-oleaje/simulacion-previa/`: `simulacion_previa.json` (fronteras con sus rejillas, potencia, sesgo y ancho de los modelos, barrido de umbral y mínimo del modelo con ξ común) y `MANIFEST.json`.
 
 Cada salida publicada lleva un `MANIFEST.json` sin marcas de tiempo: insumos con su ruta relativa a `WAVE_DATA_DIR` y su hash, salidas con su hash, huella del código, semilla y criterios del gate. Un gate fallido borra la salida anterior y deja solo `GATE_FAILED.json`.
