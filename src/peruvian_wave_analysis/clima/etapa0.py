@@ -12,6 +12,11 @@ excedencia es una tormenta), el corte natural de los huecos (si existe) y la esc
 La razón se calcula con las escalas disponibles (al menos dos). Si el factor supera 3, la regla no discrimina y se
 dice así (no es un fallo del gate).
 
+**Agregado posterior a la aceptación** (`revision.md` §10, fijado antes de correr, sin datos del sitio): la señal
+«θ(u) varía más de 0.2 entre P95 y P99.5» se mide como descriptivo. Variación = máximo − mínimo de θ̂ dentro del
+invierno en P95, P96, P97, P98, P99 y P99.5. Se publica por proceso el porcentaje de réplicas con variación > 0.2; el
+0.2 no se recalibra, y si la tasa en algún AR(1) supera el 5 % la alarma se declara débil.
+
 Reanudable: cada trozo de réplicas se guarda al terminar. ``--previo`` cronometra unas réplicas sin publicar.
 Salida en ``processed/F06-clima-de-oleaje/etapa0-sintetica/``.
 """
@@ -42,6 +47,9 @@ FACTOR_EXTREMOGRAMA = 1.5
 SENSIBILIDADES_FACTOR = (1.25, 2.0)
 UMBRAL_NO_DISCRIMINA = 3.0
 CUANTIL_FACTOR = 0.95
+CUANTILES_THETA = (0.95, 0.96, 0.97, 0.98, 0.99, 0.995)
+UMBRAL_VARIACION_THETA = 0.2
+TASA_ALARMA_DEBIL = 0.05
 
 
 def ruta_salida(raiz: Path) -> Path:
@@ -72,6 +80,8 @@ def escalas_cola(serie: pd.Series, meses=S.INVIERNO, q: float = S.Q_UMBRAL) -> d
     sens = {f: D.escala_extremograma(ex.rho, ex.ref, f)[0] for f in SENSIBILIDADES_FACTOR}
     razon = razon_escalas(dc.T_C_horas, corte.corte_h, ex.escala_h)
     n_exc = sum(int(D.excedencias(b, u).sum()) for b in bl)
+    x = serie.to_numpy()
+    th_q = {qq: D.declustering_bloques(bl, float(np.nanquantile(x, qq)), meses).theta for qq in CUANTILES_THETA}
     return {
         "u": u,
         "theta": dc.theta,
@@ -88,6 +98,9 @@ def escalas_cola(serie: pd.Series, meses=S.INVIERNO, q: float = S.Q_UMBRAL) -> d
         "rho_3h": float(ex.rho[1]),
         "ref_3h": float(ex.ref[1]),
         "razon": razon,
+        **{f"theta_q{qq:g}": v for qq, v in th_q.items()},
+        "variacion_theta": float(max(th_q.values()) - min(th_q.values())),
+        "dif_theta_p995_p95": float(th_q[CUANTILES_THETA[-1]] - th_q[CUANTILES_THETA[0]]),
     }
 
 
@@ -127,7 +140,7 @@ def resumen_por_config(df: pd.DataFrame) -> list[dict]:
     out = []
     for cfg, g in df.groupby("config", sort=False):
         fila = {"config": cfg, "replicas": int(len(g)), "razon_no_calculable": int((~np.isfinite(g["razon"])).sum())}
-        for c in ("theta", "frac_invierno", "T_C_h", "corte_h", "escala_extremograma_h", "razon"):
+        for c in ("theta", "frac_invierno", "T_C_h", "corte_h", "escala_extremograma_h", "razon", "variacion_theta"):
             v = g[c].to_numpy(dtype=float)
             v = v[np.isfinite(v)]
             fila[c] = {"n": int(v.size)}
@@ -136,6 +149,7 @@ def resumen_por_config(df: pd.DataFrame) -> list[dict]:
                 fila[c]["p95"] = float(np.quantile(v, 0.95))
         fila["sin_corte"] = int((~np.isfinite(g["corte_h"])).sum())
         fila["p95_razon"] = factor_concordancia(g["razon"])
+        fila["tasa_variacion_theta_sobre_umbral"] = float(np.mean(g["variacion_theta"] > UMBRAL_VARIACION_THETA))
         out.append(fila)
     return out
 
@@ -164,6 +178,19 @@ def etapa0(raiz_datos=None, procesos_: int = 4, replicas: int = REPLICAS, previo
         df.to_csv(st / "replicas_etapa0.csv", index=False, float_format="%.6g", lineterminator="\n")
         factor = factor_concordancia(df["razon"])
         no_discrimina = bool(factor > UMBRAL_NO_DISCRIMINA)
+        por_config = resumen_por_config(df)
+        tasas_ar1 = {
+            c["config"]: c["tasa_variacion_theta_sobre_umbral"] for c in por_config if c["config"].startswith("ar1")
+        }
+        senal_theta = {
+            "criterio": (
+                f"Agregado posterior a la aceptación (revisión §10), fijado antes de correr: variación = máx − mín de "
+                f"θ̂ de invierno en {list(CUANTILES_THETA)}; alarma si > {UMBRAL_VARIACION_THETA:g}. Descriptivo; el "
+                f"umbral no se recalibra; débil si la tasa supera {TASA_ALARMA_DEBIL:.0%} en algún AR(1)."
+            ),
+            "tasas_ar1": tasas_ar1,
+            "alarma_debil": bool(max(tasas_ar1.values(), default=0.0) > TASA_ALARMA_DEBIL),
+        }
         resumen = {
             "valores_del_sitio_leidos": False,
             "factor_concordancia": factor,
@@ -190,10 +217,17 @@ def etapa0(raiz_datos=None, procesos_: int = 4, replicas: int = REPLICAS, previo
                 "extremograma; una réplica con menos de dos escalas no entra en el P95 y se cuenta aparte.",
             ],
             "replicas_sin_razon": int((~np.isfinite(df["razon"])).sum()),
-            "por_config": resumen_por_config(df),
+            "por_config": por_config,
+            "senal_variacion_theta": senal_theta,
             "segundos": round(time.time() - t0),
         }
         json_estricto.escribir(st / "etapa0.json", resumen)
+        print(
+            f"Variación de θ(u) > {UMBRAL_VARIACION_THETA:g} en AR(1): "
+            + ", ".join(f"{k} {v:.0%}" for k, v in tasas_ar1.items())
+            + (" (alarma DÉBIL)" if senal_theta["alarma_debil"] else ""),
+            flush=True,
+        )
         print(f"Factor de concordancia: {factor:.3f}{' (la regla NO discrimina)' if no_discrimina else ''}", flush=True)
         motivos = [] if np.isfinite(factor) else ["El factor de concordancia no es finito"]
         criterios = {"replicas": replicas, "configuraciones": len(PROCESOS) * len(CICLOS), "factor": factor}

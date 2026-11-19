@@ -285,6 +285,9 @@ def test_replica_etapa0_determinista():
     b = E0.replica("fs", 0.5, True, 3)
     assert a == b or all((a[k] == b[k]) or (np.isnan(a[k]) and np.isnan(b[k])) for k in a)
     assert a["ref_3h"] > 0.015  # la referencia estacional supera 0.01 con ciclo
+    th = [a[f"theta_q{q:g}"] for q in E0.CUANTILES_THETA]
+    assert a["variacion_theta"] == pytest.approx(max(th) - min(th))
+    assert a["dif_theta_p995_p95"] == pytest.approx(th[-1] - th[0])
 
 
 @pytest.mark.lento
