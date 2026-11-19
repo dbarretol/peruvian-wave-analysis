@@ -47,11 +47,13 @@ def loglik(x, mu: float, sigma: float, xi: float) -> float:
     n = x.size
     if abs(xi) < XI_CERO:
         return float(-n * np.log(sigma) - s.sum() - np.exp(-s).sum())
-    z = 1.0 + xi * s
-    if np.any(z <= 0):
+    xs = xi * s
+    if np.any(xs <= -1.0):
         return -np.inf
-    lz = np.log(z)
-    return float(-n * np.log(sigma) - (1.0 / xi + 1.0) * lz.sum() - np.exp(-lz / xi).sum())
+    lz = np.log1p(xs)  # precisión cerca de ξ = 0
+    with np.errstate(over="ignore"):  # exp → ∞ solo lejos del soporte efectivo: verosimilitud −∞, correcta
+        ll = float(-n * np.log(sigma) - (1.0 / xi + 1.0) * lz.sum() - np.exp(-lz / xi).sum())
+    return ll if np.isfinite(ll) else -np.inf
 
 
 def cuantil(p, mu: float, sigma: float, xi: float) -> np.ndarray:
