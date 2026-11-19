@@ -39,6 +39,7 @@ from . import picos as P
 from . import tablas as TB
 
 ETAPA = orquestador.Etapa("clima", Path(__file__).resolve(), Path("."))
+ANIO_COMPLETO_FINAL = 2025
 EXCLUIR_MENOS_DE_30 = True  # ADR-0029 (aceptada el 2026-11-19): lo que depende de un estrato con < 30 picos no entra
 
 
@@ -89,6 +90,12 @@ def verificar_etapa0(raiz: Path) -> dict:
     man = etapa.exigir_publicada(d)
     if not man["gate"]["aprobado"]:
         raise GateFallido("La etapa 0 sintética tiene el gate fallido.")
+    actual = orquestador.huella_etapa(E0.ETAPA0)
+    if man["huella_codigo"] != actual:
+        raise GateFallido(
+            "El código de la etapa 0 cambió después de publicarla "
+            f"(huella publicada {man['huella_codigo'][:12]}, actual {actual[:12]}); hay que repetirla."
+        )
     r = json_estricto.leer(d / "etapa0.json")
     if r.get("valores_del_sitio_leidos") is not False:
         raise GateFallido("etapa0.json no declara valores_del_sitio_leidos = False.")
@@ -110,6 +117,10 @@ def comprobar_conteos(pks: dict, r1: dict) -> list[str]:
         cb = P.conteos(pk["estrato_B"], (P.B_INVIERNO, P.B_VERANO))
         if len(pk) != c["n_picos"] or cb != c["B"] or not np.isclose(u, c["u_tent"]):
             out.append(f"{rama}: {len(pk)} picos y B = {cb}; la etapa 1 publicó {c['n_picos']} y {c['B']}")
+        if "C" in c:
+            cc = P.conteos(pk["estrato_C"], (P.C_MAYOR, P.C_MENOR)) if "estrato_C" in pk else None
+            if cc != c["C"]:
+                out.append(f"{rama}: C = {cc}; la etapa 1 publicó {c['C']}")
     return out
 
 
@@ -193,16 +204,17 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
     def aviso(t: str) -> None:
         print(f"[{(time.time() - t0) / 60:5.1f} min] {t}", flush=True)
 
-    rutas_ins = I.rutas_insumos(raiz, nombre)  # G1
-    r0 = verificar_etapa0(raiz)
-    r1, g7 = verificar_etapa1(raiz, rutas_ins, nombre)
-    aviso("G7: etapa 1 publicada, sin cambios, con la misma huella de código y los mismos insumos")
-    datos = I.cargar(raiz, rutas_ins, nombre)
-    sep = float(r1["tau"]["separacion_provisional_h"])
-    bl = D.bloques_anuales(datos.ramas[I.RAMA_DECISION])
-    u = ES.umbrales(datos.ramas[I.RAMA_DECISION])
+    def preparar():
+        rutas_ins = I.rutas_insumos(raiz, nombre)  # G1
+        r0 = verificar_etapa0(raiz)
+        r1, g7 = verificar_etapa1(raiz, rutas_ins, nombre)
+        aviso("G7: etapas 0 y 1 publicadas, sin cambios, con la misma huella de código y los mismos insumos")
+        datos = I.cargar(raiz, rutas_ins, nombre)
+        bl = D.bloques_anuales(datos.ramas[I.RAMA_DECISION])
+        return rutas_ins, r0, r1, g7, datos, bl, ES.umbrales(datos.ramas[I.RAMA_DECISION])
 
     if previo:
+        _, _, _, _, _, bl, u = preparar()
         t1 = time.time()
         ES.vector(bl, u)
         t_rep = time.time() - t1
@@ -216,6 +228,9 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
     avance = ruta_avance(raiz, nombre) / reanudable.clave(orquestador.huella_etapa(ETAPA), b)
     F.PROBLEMAS.clear()
     with etapa.staging_protegido(salida, raices) as st:
+        # un fallo de G1 o G7 aquí dentro borra la salida publicada anterior (§7)
+        rutas_ins, r0, r1, g7, datos, bl, u = preparar()
+        sep = float(r1["tau"]["separacion_provisional_h"])
         figs = st / "figuras"
         figs.mkdir()
         # --- picos y conteos -----------------------------------------------------------------------------
@@ -243,9 +258,14 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
         ic = ES.intervalos(punto, reps)
         sin_ic, fuera_ic = ES.g6(ic)
         tau = D.tau_bloques(bl, kmax=ES.KMAX_TAU)
-        conc = ES.concordancia(ic, float(r0["factor_concordancia"]), bool(r0["regla_no_discrimina"]))
+        conc = ES.concordancia(ic, float(r0["factor_concordancia"]), bool(r0["regla_no_discrimina"]), tau.tau_e_h)
         anual = ES.por_anio(bl, u[ES.Q_PRINCIPAL])
+        anual = anual[anual["anio"] <= ANIO_COMPLETO_FINAL]  # 2026 tiene 8 meses: no entra en la autocorrelación
+        anual_e1 = anual[anual["anio"] >= ES.INICIO_ASIMILACION.year + 1]
         rachas = ES.rachas_tabla(datos.ramas[I.RAMA_DECISION], u[ES.Q_PRINCIPAL])
+        punto_corte = D.corte_natural(D.huecos_bloques(bl, u[ES.Q_PRINCIPAL], ES.INVIERNO) * D.PASO_H)
+        if punto_corte.mas_de_dos_modas:
+            aviso(f"AVISO §3.5: la densidad de los huecos tiene {punto_corte.n_modas} modas (más de dos)")
         dep = {
             "umbrales_m": {f"{q:g}": v for q, v in u.items()},
             "tau": {"tau_e_h": tau.tau_e_h, "tau_int_h": tau.tau_int_h, "kmax_h": ES.KMAX_TAU * D.PASO_H,
@@ -255,7 +275,13 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
             "sensibilidades": ES.sensibilidades(bl, datos.ramas[I.RAMA_DECISION], u),
             "por_tramo": ES.por_tramo(datos.ramas[I.RAMA_DECISION], u),
             "autocorrelacion_entre_anios": ES.autocorrelacion_entre_anios(anual),
+            "autocorrelacion_entre_anios_desde_1994": ES.autocorrelacion_entre_anios(anual_e1),
+            "nota_autocorrelacion": "Con toda la serie mezcla el escalón de 1993 (F4); dentro de E1 mide la "
+            "dependencia entre años del régimen actual. 2026 (8 meses) no entra.",
             "concordancia": conc,
+            "corte_natural": {"corte_h": punto_corte.corte_h, "n_modas": punto_corte.n_modas,
+                              "frac_segunda": punto_corte.frac_segunda,
+                              "mas_de_dos_modas": punto_corte.mas_de_dos_modas, "n_huecos": punto_corte.n_huecos},
             "nota_umbral": "Umbrales fijos en las réplicas (IC condicional al umbral).",
         }  # fmt: skip
         json_estricto.escribir(st / "dependencia.json", dep)
@@ -331,6 +357,29 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
 
         # --- resumen y gate --------------------------------------------------------------------------------
         top_viento = om[om["clase"].isin(["mar de viento", "mixto"])]
+        anio_pico = pk0.index.year
+        a0, a1 = int(datos.ramas[I.RAMA_DECISION].index[0].year), ES.INICIO_ASIMILACION.year
+        n_antes, n_desp = int((anio_pico < a1).sum()), int(((anio_pico >= a1) & (anio_pico <= 2025)).sum())
+        picos_por_tramo = {
+            "antes_de_1993": {"picos": n_antes, "anios": a1 - a0, "por_anio": n_antes / (a1 - a0)},
+            "1993_2025": {"picos": n_desp, "anios": 2026 - a1, "por_anio": n_desp / (2026 - a1)},
+        }
+        cascada = []
+        for nom, c in est["candidatas"].items():
+            fuera = [e for e in c["escenarios"][1:] if not e["envolvente"]]
+            if c["desenlace"] == ET.ESTABLECIDO and fuera:
+                m = c["modelos_por_rama"][I.RAMA_DECISION]
+                sig = m["xi_comun"]["sigma"]
+                cascada.append(
+                    f"{nom}: heterogeneidad de escala establecida (σ del estrato chico / σ del grande = "
+                    f"{sig[1] / sig[0]:.2f}) y no aplicada: estrato con menos de 30 picos (ADR-0029, punto 5). "
+                    f"ΔRL100 con ξ común en E0: {m['xi_comun']['delta_pct']:+.1f} %."
+                )
+                if sig[1] < sig[0]:
+                    cascada.append(
+                        f"{nom}: el estrato chico es más liviano (razón de σ < 1); la frontera y la potencia de la "
+                        "etapa 1 solo simularon un estrato chico más pesado (r de 1.1 a 4)."
+                    )
         swell_sur = bool((om["fenomeno"].str.startswith("swell del sur")).mean() > 0.5)
         estratos_json = {
             "conteos": r1["conteos"], "etapa1": g7, "estratificacion": est, "poblacion_mixta": mixta,
@@ -352,6 +401,15 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
             "escalas_cola": conc, "u_tent_m": {rama: u_ for rama, (u_, _) in pks.items()},
             "picos": {rama: int(len(pk)) for rama, (_, pk) in pks.items()},
             "mayores_mar_de_viento_o_mixto": int(len(top_viento)),
+            "senal_f10": (
+                "La cola mezcla Tp de swell y de mar de viento: entre los 20 mayores, "
+                + "; ".join(f"{r.t_pico} ({r.clase}, Tp {r.VTPK:.1f} s)" for r in top_viento.itertuples())
+                + ". Para el modelo de Tp dado Hs de la F10."
+            )
+            if len(top_viento)
+            else None,
+            "cascada_f12": cascada,
+            "picos_por_tramo": picos_por_tramo,
             "aviso_alcance": bool(len(top_viento)),
             "limitacion_viento": "«Poco mar de viento en los extremos» es un resultado del modelo forzado por "
             "ERA5, no del sitio (§3.8).",
@@ -373,13 +431,15 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
             motivos.append(f"G2: {g2}")
         motivos += [f"G3: {p}" for p in g3]
         motivos += [f"G5: {p}" for p in g5]
-        for m in sin_ic:
-            aviso(f"MARCA G6: {m} sin valor o sin IC finito")
+        exentos = [m for m in sin_ic if m == "tau_int_h" or (m == "corte_h" and punto_corte.corte_h is None)]
+        motivos += [f"G6: {m} sin valor o sin IC finito" for m in sin_ic if m not in exentos]
+        for m in exentos:
+            aviso(f"MARCA G6: {m} sin valor o sin IC finito (exento)")
         for m in fuera_ic:
             aviso(f"MARCA G6: el IC de {m} no contiene su punto")
         if len(top_viento):
             aviso(f"AVISO §3.8: {len(top_viento)} de los 20 mayores son mar de viento o mixto")
-        criterios = {"G2": g2["cumple"], "G3": len(g3), "G5": g5, "G6_marcas": sin_ic + fuera_ic,
+        criterios = {"G2": g2["cumple"], "G3": len(g3), "G5": g5, "G6_marcas": exentos + fuera_ic,
                      "G7": g7["comprobado_antes_de_leer_excesos"]}  # fmt: skip
         ins_hash = rutas_ins | {"estratos_etapa1": E1.ruta_salida(raiz, nombre) / "estratos_etapa1.json",
                                 "etapa0": E0.ruta_salida(raiz) / "etapa0.json"}  # fmt: skip

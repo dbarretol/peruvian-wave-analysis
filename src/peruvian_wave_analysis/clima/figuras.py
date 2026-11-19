@@ -228,7 +228,7 @@ def gev(tabla: pd.DataFrame, mxs: dict, ruta: Path) -> None:
         f = tabla[tabla["rama"] == rama].iloc[0]
         x = np.sort(mx["hs_max"].to_numpy(float))
         pp = estilo.posiciones_trazado(x.size)
-        T_emp = 1.0 / (1.0 - pp)
+        T_emp = -1.0 / np.log(pp)  # ADR-0022: p = exp(−1/T), igual que la curva
         ax = axs[0, j]
         ax.plot(T_emp, x, "o", ms=3, color="k", label="máximos")
         if f["valido"]:

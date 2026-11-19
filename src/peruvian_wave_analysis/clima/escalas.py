@@ -99,8 +99,10 @@ def intervalos(punto: np.ndarray, reps: np.ndarray) -> dict[str, dict]:
     out = {}
     for j, n in enumerate(NOMBRES):
         ic = BS.ic_percentil(reps[:, j], float(punto[j]), no_regular=False)
+        definido = bool(np.isfinite(ic.punto))  # sin punto, no se publica un IC de un valor que no existe
         out[n] = {
-            "punto": ic.punto, "lo": ic.lo, "hi": ic.hi, "n_validas": ic.n_validas, "n_no_finitas": ic.n_no_finitas,
+            "punto": ic.punto, "lo": ic.lo if definido else float("nan"), "hi": ic.hi if definido else float("nan"),
+            "n_validas": ic.n_validas, "n_no_finitas": ic.n_no_finitas,
             "contiene_punto": bool(np.isfinite(ic.punto) and ic.contiene_punto),
         }  # fmt: skip
     return out
@@ -205,8 +207,12 @@ def rachas_tabla(serie: pd.Series, u99: float) -> pd.DataFrame:
     })  # fmt: skip
 
 
-def concordancia(ic: dict[str, dict], factor: float, regla_no_discrimina: bool) -> dict:
-    """Regla de §3.5 con las tres escalas de la cola a P99 (invierno); τ_e no entra."""
+def concordancia(ic: dict[str, dict], factor: float, regla_no_discrimina: bool, tau_e_h: float = float("nan")) -> dict:
+    """Regla de §3.5 con las tres escalas de la cola a P99 (invierno); τ_e no entra.
+
+    Si la regla no discrimina (factor calibrado > 3), ``concuerdan`` es None («no evaluable»): §3.5 pide decirlo así.
+    ``notas_descriptivas_para_f7`` no son señales de la regla (se agregaron después de ver los datos, rotuladas).
+    """
     tc = ic[f"T_C_h_q{Q_PRINCIPAL:g}"]["punto"]
     corte = ic["corte_h"]["punto"]
     esc = ic["escala_extremograma_h"]["punto"]
@@ -222,10 +228,36 @@ def concordancia(ic: dict[str, dict], factor: float, regla_no_discrimina: bool) 
         senales.append(f"θ(u) varía {variacion:.2f} entre P95 y P99.5 (> {VARIACION_THETA})")
     if not np.isfinite(corte):
         senales.append("sin corte natural de los huecos")
+    if regla_no_discrimina:
+        concuerdan, estado = None, f"no evaluable: la regla no discrimina (factor calibrado {factor:g} > 3, etapa 0)"
+    else:
+        concuerdan = bool(np.isfinite(razon) and razon <= factor)
+        estado = "concuerdan" if concuerdan else "discordantes"
     return {
         "escalas_h": disp, "razon_max_min": razon, "factor": factor, "regla_no_discrimina": regla_no_discrimina,
-        "concuerdan": bool(np.isfinite(razon) and razon <= factor),
+        "concuerdan": concuerdan, "estado": estado,
         "rango_h": [min(disp.values()), max(disp.values())] if disp else None,
         "variacion_theta": variacion, "senales_para_f7": senales,
-        "nota": "Con factor > 3 la regla no discrimina (etapa 0): «concuerdan» no es evidencia de concordancia.",
+        "notas_descriptivas_para_f7": notas_f7(ic, tau_e_h),
     }  # fmt: skip
+
+
+def notas_f7(ic: dict[str, dict], tau_e_h: float) -> list[str]:
+    """Contradicciones que la F7 tiene que ver; descriptivas, no señales de la regla (posteriores a ver los datos)."""
+    notas = []
+    corte = ic["corte_h"]["punto"]
+    if np.isfinite(corte) and np.isfinite(tau_e_h) and corte < tau_e_h:
+        notas.append(
+            f"El corte natural de los huecos ({corte:.1f} h) es menor que τ_e ({tau_e_h:g} h), el piso del IET de la "
+            "hoja de ruta («IET ≥ τ_e»): con ese piso se fusionan eventos que el corte separaría. Decide la F7."
+        )
+    tcs = [ic[f"T_C_h_q{q:g}"]["punto"] for q in CUANTILES_THETA]
+    t99 = ic[f"T_C_h_q{Q_PRINCIPAL:g}"]
+    lo, hi = t99.get("lo", np.nan), t99.get("hi", np.nan)
+    if np.isfinite(lo) and np.isfinite(hi) and hi > 3 * max(lo, D.PASO_H):
+        notas.append(
+            f"T_(C) inestable: de {min(tcs):g} a {max(tcs):g} h entre P95 y P99.5, y a P99 {t99['punto']:g} h con IC "
+            f"[{t99['lo']:g}, {t99['hi']:g}] h. Con θ pequeño, T_(C) cae donde hay pocos huecos y un cambio mínimo "
+            "de θ̂ lo mueve mucho: no sirve como IET por sí solo."
+        )
+    return notas
