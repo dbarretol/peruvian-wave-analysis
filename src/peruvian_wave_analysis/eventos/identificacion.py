@@ -10,9 +10,18 @@
    - las crestas (el máximo de Hs de cada parte, primera aparición) están separadas por ≥ IET horas;
    - Hs(m) es el mínimo de Hs entre las dos crestas y **cada** cresta lo supera en ≥ 0.5 m.
 
-   Entre los cortes posibles se toma la bajada más profunda, min(cresta izquierda, cresta derecha) − Hs(m); con
-   empate, el primero. Se repite en cada parte hasta que no quede ningún corte. Un registro NaN no puede ser el
-   mínimo de un corte. La racha original se conserva en ``id_racha`` (la prueba de Poisson corre sobre ella).
+   **Comprobación frente a las vecinas** (precisión anterior a los datos, confirmada por el usuario el 2026-11-20):
+   la subparte que queda junto a una parte vecina ya cortada debe cumplir también las dos condiciones frente a ella
+   (su cresta a ≥ IET de la cresta vecina y ≥ 0.5 m sobre el corte compartido). Sin esto, la recursión podía dejar
+   como eventos distintos dos crestas a menos de IET.
+
+   **Orden de los cortes** (fijado antes del conteo): en cada paso se aplica, entre todas las partes de la racha, el
+   corte válido de bajada más honda, min(cresta izquierda, cresta derecha) − Hs(m); con empate, el de más a la
+   izquierda. Se repite hasta que ningún corte cumpla. Es el sentido jerárquico de la regla y no depende del sentido
+   del tiempo. (``orden="izquierda"`` existe solo para la prueba que muestra que el orden importa.)
+
+   Un registro NaN no puede ser el mínimo de un corte. La racha original se conserva en ``id_racha`` (la prueba de
+   Poisson corre sobre ella).
 3. **Evento:** cada parte. Su pico en E0 sin corregir es el máximo de Hs en [t_inicio, t_fin] (primera aparición);
    ese instante asigna el evento a las ramas y al período.
 
@@ -111,19 +120,18 @@ def _cumple(separacion_pasos: float, bajada_m: float, sep_pasos: float, bajada: 
     return separacion_pasos >= sep_pasos - TOL and bajada_m >= bajada - TOL
 
 
-def mejor_corte(
+def corte(
     x: np.ndarray,
     sep_pasos: float,
     bajada: float = BAJADA_M,
     izquierda: Vecina | None = None,
     derecha: Vecina | None = None,
-) -> int | None:
-    """Posición del corte de la bajada más profunda que cumple las condiciones, o None.
+) -> tuple[int, float] | None:
+    """(posición, profundidad) del corte válido de bajada más honda de una parte, o None. Empate: el primero.
 
     ``x`` es Hs de una parte; ``sep_pasos`` = IET / paso. El corte deja [0, m] y [m + 1, fin]. Con una vecina ya
-    cortada, la subparte que queda junto a ella también debe cumplir las dos condiciones frente a ella: su cresta a
-    ≥ IET de la cresta vecina y ≥ 0.5 m sobre el corte compartido. Sin esto, la recursión podría dejar como eventos
-    distintos dos crestas a menos de IET (la primera división las mide contra otra cresta más lejana).
+    cortada, la subparte que queda junto a ella también debe cumplir las dos condiciones frente a ella. Un corte que
+    falla frente a una vecina no detiene la búsqueda: se sigue con los demás.
     """
     x = np.asarray(x, dtype=float)
     if x.size < 3:
@@ -148,31 +156,59 @@ def mejor_corte(
             continue
         if prof > prof_mejor + TOL:
             mejor, prof_mejor = m, prof
-    return mejor
+    return None if mejor is None else (mejor, float(prof_mejor))
+
+
+def mejor_corte(x, sep_pasos: float, bajada: float = BAJADA_M, izquierda=None, derecha=None) -> int | None:
+    """Posición del corte de ``corte``, o None."""
+    c = corte(x, sep_pasos, bajada, izquierda, derecha)
+    return None if c is None else c[0]
 
 
 def _pico(v: np.ndarray, s: int, e: int) -> int:
     return s + int(np.argmax(np.where(np.isnan(v[s : e + 1]), -np.inf, v[s : e + 1])))
 
 
-def dividir(v: np.ndarray, a: int, b: int, sep_pasos: float, bajada: float = BAJADA_M) -> list[tuple[int, int]]:
-    """Partes [a_i, b_i] de la racha [a, b] tras aplicar la bajada intermedia de forma recursiva, en orden.
+def corte_de_parte(
+    v: np.ndarray, partes: list[tuple[int, int]], i: int, sep_pasos: float, bajada: float = BAJADA_M
+) -> tuple[int, float] | None:
+    """Corte válido de la parte ``i`` frente a sus vecinas tal como están (posición relativa al inicio de la parte)."""
+    s, e = partes[i]
+    izq = Vecina(_pico(v, *partes[i - 1]) - s, float(v[s - 1])) if i > 0 else None
+    der = Vecina(_pico(v, *partes[i + 1]) - s, float(v[e])) if i + 1 < len(partes) else None
+    return corte(v[s : e + 1], sep_pasos, bajada, izq, der)
 
-    Se corta una parte a la vez (la de más a la izquierda que admita un corte, y en ella la bajada más profunda), y
-    cada corte se comprueba también frente a las partes vecinas tal como están en ese momento.
+
+ORDENES = ("mas_honda", "izquierda")
+
+
+def dividir(
+    v: np.ndarray, a: int, b: int, sep_pasos: float, bajada: float = BAJADA_M, orden: str = "mas_honda"
+) -> list[tuple[int, int]]:
+    """Partes [a_i, b_i] de la racha [a, b] tras aplicar la bajada intermedia, en orden.
+
+    ``orden="mas_honda"`` (la regla): en cada paso, el corte válido más hondo entre todas las partes (empate: el de
+    más a la izquierda). ``orden="izquierda"``: la parte de más a la izquierda que admita un corte; solo para pruebas.
     """
+    if orden not in ORDENES:
+        raise ValueError(f"orden debe ser uno de {ORDENES}: {orden}")
     partes = [(a, b)]
-    i = 0
-    while i < len(partes):
+    while True:
+        elegido = None
+        for i in range(len(partes)):
+            c = corte_de_parte(v, partes, i, sep_pasos, bajada)
+            if c is None:
+                continue
+            if orden == "izquierda":
+                elegido = (i, c[0])
+                break
+            if elegido is None or c[1] > elegido[2] + TOL:
+                elegido = (i, c[0], c[1])
+        if elegido is None:
+            return partes
+        i, m = elegido[0], elegido[1]
         s, e = partes[i]
-        izq = Vecina(_pico(v, *partes[i - 1]) - s, float(v[s - 1])) if i > 0 else None
-        der = Vecina(_pico(v, *partes[i + 1]) - s, float(v[e])) if i + 1 < len(partes) else None
-        m = mejor_corte(v[s : e + 1], sep_pasos, bajada, izq, der)
-        if m is None:
-            i += 1
-        else:
-            partes[i : i + 1] = [(s, s + m), (s + m + 1, e)]  # se vuelve a mirar la izquierda primero
-    return partes
+        partes[i : i + 1] = [(s, s + m), (s + m + 1, e)]
 
 
 def identificar(
@@ -181,6 +217,7 @@ def identificar(
     iet_horas: float,
     bajada: float | None = BAJADA_M,
     paso_horas: float = PASO_H,
+    orden: str = "mas_honda",
 ) -> pd.DataFrame:
     """Eventos de §3.2 sobre la serie ``hs`` (E0 sin corregir, rejilla completa). ``bajada=None``: sin división."""
     comprobar_rejilla(hs.index, paso_horas)
@@ -189,7 +226,7 @@ def identificar(
     sep = iet_horas / paso_horas
     filas = []
     for j, (a, b, toca) in enumerate(zip(r.ini, r.fin, r.toca_hueco, strict=True)):
-        partes = [(int(a), int(b))] if bajada is None else dividir(v, int(a), int(b), sep, bajada)
+        partes = [(int(a), int(b))] if bajada is None else dividir(v, int(a), int(b), sep, bajada, orden)
         for s, e in partes:
             seg = np.where(np.isnan(v[s : e + 1]), -np.inf, v[s : e + 1])
             filas.append(

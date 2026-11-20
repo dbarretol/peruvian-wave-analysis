@@ -17,8 +17,8 @@ ninguno cumple, el gate falla y decide el usuario.
 {0.8·N_mín, 1.2·N_máx} (redondeados). Los años simulados son los de la exposición de la rama de cada extremo,
 redondeados (46 en E0; 33 en E1).
 
-Salida en ``processed/F07-eventos/simulacion-previa/conteo-previo/``: la simulación publica su propia salida al lado,
-en ``simulacion-previa/``, sin reemplazar esta.
+Salida en ``processed/F07-eventos/simulacion-previa/conteo-previo/``. La simulación publica en la carpeta hermana
+``simulacion-previa/simulacion/`` (``salidas.py``), así que no borra esta.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from ..extremos import tasa
 from ..extremos.estratos import Estratificacion
 from ..homogeneidad.cuantiles import cuantiles_mensuales
 from . import identificacion as ID
+from . import salidas as SA
 
 ETAPA = orquestador.Etapa("eventos-conteo-previo", Path(__file__).resolve(), Path("."))
 NOMBRE = CI.NOMBRE
@@ -52,7 +53,7 @@ FACTORES_N0 = (0.8, 1.2)
 
 
 def ruta_salida(raiz: Path) -> Path:
-    return Path(raiz) / "processed" / "F07-eventos" / "simulacion-previa" / "conteo-previo"
+    return SA.ruta_conteo_previo(raiz)
 
 
 def rutas_insumos(raiz: Path, nombre: str = NOMBRE) -> dict[str, Path]:
