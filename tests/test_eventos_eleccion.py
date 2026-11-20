@@ -1,4 +1,4 @@
-"""F7: oráculo, métrica y elección de la regla de umbral (contrato §5.4 y §8, «Oráculo y control», «Simulación previa»)."""
+"""F7: oráculo, métrica y elección de la regla de umbral (§5.4; §8: «Oráculo y control», «Simulación previa»)."""
 
 from __future__ import annotations
 
@@ -210,18 +210,25 @@ def test_replica_misma_semilla_mismas_reglas_y_sustituto_k10():
     assert a.loc[a["regla"] == "oraculo", "u_usado"].item() > a["u0"].iloc[0]
     for _, f in a.iterrows():
         if f["estado"] == U.SIN_RESULTADO:  # entra con k = 10
-            assert f["sustituto"].startswith("k") and f["indice_usado"] == a.loc[a.regla == "k10", "indice_usado"].item()
+            assert f["sustituto"].startswith("k")
+            assert f["indice_usado"] == a.loc[a.regla == "k10", "indice_usado"].item()
 
 
-def test_regla_que_elige_el_oraculo_difiere_cero_con_gpd_exacta_sobre_u0():
-    """Si una regla elige el u_k del oráculo, su error es el del oráculo: la diferencia regla − oráculo es 0."""
+def test_regla_que_elige_el_oraculo_difiere_cero_con_gpd_exacta_sobre_u0(monkeypatch):
+    """Una regla que elige el u_k del oráculo tiene su mismo error: la diferencia regla − oráculo es exactamente 0."""
     c = next(x for x in _celdas() if x.caso == "B-" and x.N0 == 685)
-    for i in range(6):
-        a = pd.DataFrame(SP.evaluar_replica(c, i, ("R1b", "R3")))
-        o = a[a["regla"] == "oraculo"].iloc[0]
-        for _, f in a[a["regla"].isin(["R1b", "R3"])].iterrows():
-            if f["indice_usado"] == o["indice_usado"]:
-                assert f["error_log"] - o["error_log"] == 0.0
+
+    def oraculo_como_regla(picos, rej, aj, reglas, semilla_r3):
+        r = SP.CS.replica(c, SP.semillas.generador("f07", "simulacion-previa", SP.nombre_celda(c), str(i)))
+        j = SP.indice_oraculo(rej, r.u0)
+        return {"R3": U.ResultadoRegla(U.CON_RESULTADO, j, (j, rej.u.size - 1), {})}
+
+    monkeypatch.setattr(SP, "aplicar_reglas", oraculo_como_regla)
+    for i in range(4):
+        a = pd.DataFrame(SP.evaluar_replica(c, i, ("R3",))).set_index("regla")
+        assert a.loc["R3", "indice_usado"] == a.loc["oraculo", "indice_usado"]
+        assert a.loc["R3", "error_log"] - a.loc["oraculo", "error_log"] == 0.0
+        assert np.isfinite(a.loc["oraculo", "error_log"])
 
 
 def test_pendiente_xi():
