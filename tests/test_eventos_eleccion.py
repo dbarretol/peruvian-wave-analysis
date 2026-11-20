@@ -107,7 +107,7 @@ def test_filtro_del_control_y_eleccion_por_metrica():
         "R3": lambda c, r: 0.8 * r + _o(c),
     }
     el = EL.elegir(_tabla(e))
-    assert el["variante_r1"] == "R1b"
+    assert el["variante_r1"] == "R1b" and el["n_variantes_r1_elegibles"] == 2
     assert el["mejor_solo_con_restricciones"] == "R2" and el["filtro_cambio_la_eleccion"]
     assert not el["por_regla"]["R2"]["cumple_control"]
     assert el["elegida"] == "R3" and el["empatadas"] == ["R3"]
@@ -267,3 +267,18 @@ def test_simulacion_previa_de_extremo_a_extremo(tmp_path, monkeypatch):
     salida2 = SP.ejecutar(raiz, procesos_=0, replicas=4)
     pd.testing.assert_frame_equal(df, pd.read_csv(salida2 / "replicas.csv"))
     assert CS.SIGMA == 0.35
+
+
+def test_nulo_de_la_pendiente_por_celda_y_vacias():
+    e = _base() | {"R3": lambda c, r: r}
+    df = _tabla(e)
+    a = (df["caso"] == "A") & (df["regla"] == "R3")
+    celda = "A_0_N334"
+    vac = a & (df["celda"] == celda) & (df["replica"] < 60)  # 30 % vacías en una celda
+    df.loc[vac, "pendiente_xi"] = np.nan
+    n = EL.nulo_pendiente(df, "R3")
+    assert len(n["por_celda"]) == 6 and n["sin_pendiente"] == 60
+    assert n["por_celda"][celda]["porcentaje_vacias"] == pytest.approx(30.0)
+    assert n["celdas_poco_informativas"] == [celda]
+    lo, hi = n["intervalo"]
+    assert lo < 0 < hi  # el ruido común es simétrico

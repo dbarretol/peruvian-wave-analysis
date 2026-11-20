@@ -37,6 +37,7 @@ B_BOOT = 2000
 Z_EMPATE = 2.0
 TERCIOS_K0 = (4.0, 4.0 + 10.0 / 3.0, 4.0 + 20.0 / 3.0, 14.0)
 CASOS_METRICA = ("A", "B+", "B-", "C")
+MAX_PENDIENTES_VACIAS = 0.20
 
 
 def _recm(x) -> float:
@@ -193,6 +194,9 @@ def elegir(df: pd.DataFrame, res: pd.DataFrame | None = None, B: int = B_BOOT) -
         "sigma": float(sigmas[0]),
         "por_regla": por_regla,
         "variante_r1": variante_r1,
+        # R1 compite con la mejor de sus variantes: ventaja por selección, declarada (§5.4, punto 4)
+        "variantes_r1_elegibles": r1_elegibles,
+        "n_variantes_r1_elegibles": len(r1_elegibles),
         "mejor_solo_con_restricciones": mejor_sin_filtro,
         "marcas": marcas_potencia(res),
         "elegida": None,
@@ -224,21 +228,34 @@ def elegir(df: pd.DataFrame, res: pd.DataFrame | None = None, B: int = B_BOOT) -
 
 
 def nulo_pendiente(df: pd.DataFrame, regla: str, nivel: float = 0.90) -> dict:
-    """§5.2: intervalo central de la pendiente de ξ̂ frente a log n_k sobre u*, en el caso A con la regla elegida."""
+    """§5.2: intervalo central de la pendiente de ξ̂ frente a log n_k sobre u*, en el caso A con la regla elegida.
+
+    El intervalo junta las 6 celdas de A (contrato); además se publica el de cada celda y su porcentaje de pendientes
+    vacías (menos de 3 umbrales con ξ̂ sobre u*). Una celda con más del 20 % vacías tiene un nulo poco informativo y
+    se marca. La misma regla de los 3 umbrales vale en la etapa con datos, sin otra salida.
+    """
     a = df[(df["caso"] == "A") & (df["regla"] == regla)]
     x = a["pendiente_xi"].to_numpy(float)
     ok = np.isfinite(x)
     q = (1 - nivel) / 2
-    por = {
-        str(c): [float(v) for v in np.nanquantile(g["pendiente_xi"].to_numpy(float), [q, 1 - q])]
-        for c, g in a.groupby("celda", sort=False)
-    }
+    por = {}
+    for c, g in a.groupby("celda", sort=False):
+        y = g["pendiente_xi"].to_numpy(float)
+        f = np.isfinite(y)
+        vacias = float(np.mean(~f))
+        por[str(c)] = {
+            "intervalo": [float(v) for v in np.quantile(y[f], [q, 1 - q])] if f.any() else None,
+            "porcentaje_vacias": 100.0 * vacias,
+            "poco_informativo": vacias > MAX_PENDIENTES_VACIAS,
+        }
     return {
         "regla": regla,
         "nivel": nivel,
         "intervalo": [float(v) for v in np.quantile(x[ok], [q, 1 - q])] if ok.any() else None,
         "replicas": int(x.size),
         "sin_pendiente": int((~ok).sum()),
+        "porcentaje_vacias": 100.0 * float(np.mean(~ok)) if x.size else None,
+        "celdas_poco_informativas": [c for c, v in por.items() if v["poco_informativo"]],
         "por_celda": por,
     }
 
