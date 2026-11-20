@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from peruvian_wave_analysis.comun import semillas
@@ -265,3 +268,97 @@ def test_tamano_de_r2_y_r3_con_gpd_exacta(capsys):
         print(f"  tamaño R2 = {rech2 / R:.3f}, R3 = {rech3 / R:.3f}", flush=True)
     assert abs(rech2 / R - 0.05) <= 0.03
     assert abs(rech3 / R - 0.10) <= 0.03
+
+
+# --- R2 frente al apéndice de Northrop y Coleman (score en forma cerrada, p. 13 del manuscrito) --------------------
+
+
+def _score_apendice(y, v, sigma1, phi):
+    """Score de una observación en θ = (σ₁, φ₁, …, φ_m), φ_j = ξ_j/σ_j, transcrito del apéndice (p. 13).
+
+    S_j = Y − v_j, T_j = 1 + φ_j S_j, γ_j = 1 + φ_j w_j, h_j = φ_j Π_{i<j} γ_i, R_j = log T_j / (σ₁ h_j);
+    ∂ log σ_j/∂φ_k = w_k/γ_k·I(k ≤ j−1); ∂ log T_j/∂φ_k = S_j/T_j·I(k = j);
+    ∂R_j/∂φ_k = σ₁⁻¹{h_j⁻¹[S_j/T_j − log T_j/φ_j]·I(k = j) − w_k/γ_k·I(k ≤ j−1)·log T_j/h_j};
+    ∂ log p_j/∂φ_k = −σ₁⁻¹{h_k⁻¹[w_k/γ_k − log γ_k/φ_k]·I(k ≤ j−1) − w_k/γ_k·Σ_{i<j} I(k ≤ i−1)·log γ_i/h_i}.
+    """
+    m = v.size
+    w = np.diff(v)
+    gam = 1 + phi[:-1] * w
+    h = np.array([phi[j] * np.prod(gam[:j]) for j in range(m)])
+    logp = np.array([-sum(np.log(gam[i]) / (sigma1 * h[i]) for i in range(j)) for j in range(m)])
+    out = np.zeros((y.size, m + 1))
+    for n_, yy in enumerate(y):
+        j = int(np.clip(np.searchsorted(v, yy, side="right") - 1, 0, m - 1))
+        S = yy - v[j]
+        T = 1 + phi[j] * S
+        R = np.log(T) / (sigma1 * h[j])
+        out[n_, 0] = -(logp[j] + 1 - R) / sigma1
+        for k in range(m):
+            d_logsig = w[k] / gam[k] if k <= j - 1 else 0.0
+            d_logT = S / T if k == j else 0.0
+            dR = ((S / T - np.log(T) / phi[j]) / h[j] if k == j else 0.0) - (
+                w[k] / gam[k] * np.log(T) / h[j] if k <= j - 1 else 0.0
+            )
+            dR /= sigma1
+            suma = sum(np.log(gam[i]) / h[i] for i in range(j) if k <= i - 1)
+            dlogp = -((w[k] / gam[k] - np.log(gam[k]) / phi[k]) / h[k] if k <= j - 1 else 0.0)
+            if k < m - 1:  # w_k y γ_k solo existen para k ≤ m − 2 (aparecen con k ≤ j − 1)
+                dlogp += (w[k] / gam[k]) * suma
+            dlogp /= sigma1
+            out[n_, k + 1] = dlogp - d_logsig - d_logT - dR
+    return out  # fmt: skip
+
+
+@pytest.mark.parametrize("xi", [-0.2, 0.15])
+def test_r2_igual_al_score_del_apendice(xi):
+    """El score del apéndice (θ) y el de r2 (ψ = (σ₁, ξ₁…ξ_m)) dan el mismo S: la prueba es la de Northrop y
+    Coleman, no solo un cálculo correcto. Se comprueba también la regla de la cadena entre los dos scores."""
+    rng = np.random.default_rng(11)
+    y = gpd.cuantil_supervivencia(rng.random(250), xi, 0.4) * (1 + 0.2 * (rng.random(250) > 0.5))  # H0 algo falsa
+    v = np.array([0.0, 0.15, 0.35, 0.6])
+    a = gpd.ajustar_gpd(y)
+    m = v.size
+    sig = a.sigma + a.xi * v  # σ_j bajo H0
+    phi = a.xi / sig
+    # score total del apéndice frente al de r2, transformado con el jacobiano ∂ψ/∂θ (numérico)
+    U_theta = _score_apendice(y, v, a.sigma, phi).sum(axis=0)
+    psi = np.r_[a.sigma, np.full(m, a.xi)]
+    U_psi = r2.score_por_observacion(y, v, psi).sum(axis=0)
+
+    def psi_de_theta(th):
+        s1, ph = th[0], th[1:]
+        s = [s1]
+        for j in range(m - 1):
+            s.append(s[-1] * (1 + ph[j] * (v[j + 1] - v[j])))  # σ_{j+1} = σ_j + ξ_j w_j = σ_j(1 + φ_j w_j)
+        return np.r_[s1, ph * np.array(s)]
+
+    th0 = np.r_[a.sigma, phi]
+    J = np.empty((m + 1, m + 1))
+    for k in range(m + 1):
+        e = np.zeros(m + 1)
+        e[k] = 1e-7
+        J[:, k] = (psi_de_theta(th0 + e) - psi_de_theta(th0 - e)) / 2e-7
+    np.testing.assert_allclose(U_theta, J.T @ U_psi, rtol=1e-5, atol=1e-6)
+    # S con el score del apéndice y su información esperada (misma cuadratura) frente a r2.prueba_score
+    yq, wq = r2.nodos_bajo_h0(v, a.xi, a.sigma)
+    uq = _score_apendice(yq, v, a.sigma, phi)
+    info_theta = y.size * (uq * wq[:, None]).T @ uq
+    S_ap = float(U_theta @ np.linalg.solve(info_theta, U_theta))
+    t = r2.prueba_score(y, v, a)
+    assert t.S == pytest.approx(S_ap, rel=1e-6) and t.gl == m - 1
+
+
+_DIR_MEV = Path(__file__).parent / "datos" / "r2_mev"
+
+
+@pytest.mark.skipif(not (_DIR_MEV / "referencia_mev.csv").is_file(), reason="falta referencia_mev.csv (correr el .R)")
+def test_r2_frente_a_mev_nc_diag():
+    """p de la prueba de score frente a mev::NC.diag (Northrop y Coleman), con los números guardados (ADR-0019)."""
+    ref = pd.read_csv(_DIR_MEV / "referencia_mev.csv")
+    for i in (1, 2):
+        x = pd.read_csv(_DIR_MEV / f"conjunto_{i}.csv")["x"].to_numpy()
+        u = pd.read_csv(_DIR_MEV / f"conjunto_{i}_umbrales.csv")["u"].to_numpy()
+        p = np.array([t.p for t in r2.pruebas_r2(x, u)])
+        p_ref = ref.loc[ref["conjunto"] == i, "p_score"].to_numpy()
+        assert p_ref.size == p.size
+        np.testing.assert_allclose(p, p_ref, rtol=1e-3, atol=1e-4)
