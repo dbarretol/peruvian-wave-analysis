@@ -258,3 +258,31 @@ def test_poblacion_mixta_con_dos_separaciones():
     assert m["senal"] and m["cambia_entre_separaciones"]
     assert not ET.poblacion_mixta({"48 h": sin}, arco)["senal"]
     assert ET.poblacion_mixta({"48 h": sin}, None)["veredicto"] == "población única"
+
+
+def test_revision_visual_en_declustering_dudoso(tmp_path):
+    t = pd.to_datetime(["2000-01-01 03:00", "2001-02-03 00:00"])
+    pares = pd.DataFrame({"tipo": ["casi fusionados", "casi partidos"], "t_pico": t, "hueco_h": [50.0, 30.0]})
+    ruta = tmp_path / "rv.csv"
+    sin = R.con_revision_visual(pares, ruta)
+    assert list(sin["clasificacion_visual"]) == ["pendiente", "pendiente"]
+    rv = pd.DataFrame({
+        "figura": ["a.png", "b.png", "m.png"], "tipo": ["casi fusionados", "casi partidos", "mayor"],
+        "t_pico": ["2000-01-01 03:00:00", "2001-02-03 00:00:00", "2002-01-01"],
+        "clasificacion": ["bien", "fusionado", "bien"], "razon": ["r1", "r2", "r3"],
+        "clasificado_por": "x", "criterio": "c",
+    })  # fmt: skip
+    rv.to_csv(ruta, index=False)
+    con = R.con_revision_visual(pares, ruta)
+    assert (
+        list(con["clasificacion_visual"]) == ["bien", "fusionado", "bien"] and con["rotulo"].iloc[0] == R.ROTULO_VISUAL
+    )
+    rv.assign(clasificacion=["bien", "raro", "bien"]).to_csv(ruta, index=False)
+    with pytest.raises(GateFallido, match="clases desconocidas"):
+        R.con_revision_visual(pares, ruta)
+    rv.iloc[[0, 2]].to_csv(ruta, index=False)
+    with pytest.raises(GateFallido, match="sin clasificar"):
+        R.con_revision_visual(pares, ruta)
+    rv.drop(columns="criterio").to_csv(ruta, index=False)
+    with pytest.raises(GateFallido, match="criterio"):
+        R.con_revision_visual(pares, ruta)

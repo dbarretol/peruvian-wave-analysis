@@ -51,6 +51,48 @@ def ruta_avance(raiz: Path, nombre: str = I.NOMBRE) -> Path:
     return Path(raiz) / "interim" / "F06-clima-de-oleaje" / "clima-avance" / nombre
 
 
+def ruta_revision_visual(raiz: Path, nombre: str = I.NOMBRE) -> Path:
+    """Registro de la revisión visual de las figuras de eventos (§3.3): juicio visual, insumo con hash."""
+    return (
+        Path(raiz) / "interim" / "F06-clima-de-oleaje" / "revision-visual" / nombre / "revision_visual_declustering.csv"
+    )
+
+
+CLASES_VISUALES = ("bien", "fusionado", "partido", "dudoso")
+ROTULO_VISUAL = "posterior a ver las figuras (juicio visual, no regla; nada se corrige a mano)"
+
+
+def con_revision_visual(pares: pd.DataFrame, ruta: Path) -> pd.DataFrame:
+    """``declustering_dudoso.csv``: los candidatos con su clasificación visual, si el registro existe, y las filas de
+    los 20 mayores. Sin registro, los candidatos salen con «revisión visual pendiente»."""
+    if not ruta.is_file():
+        return pares.assign(clasificacion_visual="pendiente", motivo="candidato por cercanía al límite de separación; "
+                            "revisión visual pendiente")  # fmt: skip
+    rv = pd.read_csv(ruta)
+    malas = set(rv["clasificacion"]) - set(CLASES_VISUALES)
+    if malas:
+        raise GateFallido(f"Revisión visual: clases desconocidas {sorted(malas)}")
+    for c in ("clasificado_por", "criterio", "razon"):
+        if c not in rv or rv[c].isna().any():
+            raise GateFallido(f"Revisión visual: falta «{c}» (quién clasificó, con qué criterio y por qué)")
+    p = pares.copy()
+    p["clave"] = p["tipo"] + "|" + pd.to_datetime(p["t_pico"], format="mixed").astype(str)
+    rv["clave"] = rv["tipo"] + "|" + pd.to_datetime(rv["t_pico"], format="mixed").astype(str)
+    faltan = sorted(set(p["clave"]) - set(rv["clave"]))
+    if faltan:
+        raise GateFallido(
+            f"Revisión visual: {len(faltan)} candidatos sin clasificar (los candidatos cambiaron): {faltan[:3]}"
+        )
+    cols = ["clave", "figura", "clasificacion", "razon", "clasificado_por", "criterio"]
+    out = p.merge(rv[cols], on="clave", how="left")
+    mayores = rv[rv["tipo"] == "mayor"].drop(columns="clave")
+    out = pd.concat([out.drop(columns="clave"), mayores], ignore_index=True)
+    out = out.rename(columns={"clasificacion": "clasificacion_visual"})
+    out["motivo"] = out["razon"]
+    out["rotulo"] = ROTULO_VISUAL
+    return out.drop(columns="razon")
+
+
 # --- G7: la etapa 1 congelada ------------------------------------------------------------------------------
 
 
@@ -186,6 +228,30 @@ def estratificacion(pks: dict, r1: dict, anios_por_rama: dict) -> dict:
     return out
 
 
+def nota_f9(gev: pd.DataFrame, est: dict, picos_por_tramo: dict) -> str | None:
+    """GEV frente a GPD sin estratos en E0 y E1. Hipótesis rotulada, no conclusión (tercera revisión externa)."""
+    if "B" not in est["candidatas"]:
+        return None
+    mod = est["candidatas"]["B"]["modelos_por_rama"]
+    g = gev.set_index("rama")
+    partes = []
+    for rama in ("E0_sin_corregir", "E1_sin_corregir"):
+        if rama in g.index and rama in mod and bool(g.at[rama, "valido"]):
+            rg, rp = float(g.at[rama, "rl100"]), float(mod[rama]["sin_estratos"]["rl100"])
+            xg, xp = float(g.at[rama, "xi"]), mod[rama]["sin_estratos"]["xi"]
+            partes.append(
+                f"{rama}: GEV {rg:.2f} m (ξ = {xg:+.3f}) frente a GPD sin estratos {rp:.2f} m (ξ = {xp:+.3f}), "
+                f"{100 * (rg / rp - 1):+.1f} %"
+            )
+    a, d = picos_por_tramo["antes_de_1993"], picos_por_tramo["1993_2025"]
+    return (
+        "Hipótesis, no conclusión: " + "; ".join(partes) + ". La diferencia en E0 probablemente viene del escalón de "
+        f"1993: E0 suma {a['anios']} máximos anuales de un régimen con menos picos ({a['por_anio']:.2f} por año frente "
+        f"a {d['por_anio']:.2f}), lo que ensancha la distribución de los máximos y sube el ξ de la GEV. En E1, sin ese "
+        "tramo, GEV y GPD casi coinciden. Para la F9."
+    )
+
+
 def separacion_cola(ic: dict) -> float:
     """La mayor de las escalas de la cola (T_(C) a P99 de invierno o el corte), al paso de 3 h hacia arriba."""
     v = [ic[f"T_C_h_q{ES.Q_PRINCIPAL:g}"]["punto"], ic["corte_h"]["punto"]]
@@ -319,7 +385,8 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
         per, per_res = TB.peralte(serie, u0)
         per.to_csv(st / "peralte.csv", index=False)
         pares = TB.pares_cercanos(pk0, rachas, sep)
-        dudoso = pares.assign(motivo="candidato por cercanía al límite de separación; revisión visual pendiente")
+        ruta_rv = ruta_revision_visual(raiz, nombre)
+        dudoso = con_revision_visual(pares, ruta_rv)
         dudoso.to_csv(st / "declustering_dudoso.csv", index=False)
         sens_u = {f"{q:g}": {rama: int(len(P.picos(hs, serie, P.u_tentativo(hs, q), sep))) for rama, hs in
                              datos.ramas.items()} for q in P.Q_SENSIBILIDAD}  # fmt: skip
@@ -417,8 +484,12 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
             | {"g2": g2, "swell_secundario": TB.swell_secundario(serie)},
             "peralte": per_res, "tp_discretos_hs_alto": TB.tp_discretos(serie, u0),
             "gev": {"mes_inicio_bloque": m0, "meses_de_maximos_e0": meses_max},
-            "declustering_dudoso": "candidatos automáticos; la revisión visual de las figuras de eventos es "
-            "posterior y se anota en la bóveda",
+            "declustering_dudoso": {
+                "revision_visual": ruta_rv.is_file(),
+                "conteo": {k: int(v) for k, v in dudoso["clasificacion_visual"].value_counts().items()},
+                "rotulo": ROTULO_VISUAL if ruta_rv.is_file() else "revisión visual pendiente",
+            },
+            "nota_f9": nota_f9(gev, est, picos_por_tramo),
             "gate": {"G1": True, "G2": g2["cumple"], "G3": g3, "G4_marca": r1["g4_estratos_con_menos_de_30"],
                      "G5": g5, "G6_sin_ic_finito": sin_ic, "G6_ic_sin_punto": fuera_ic, "G7": g7,
                      "G7_marca": r1["alfa_fam"]["g7_marca"], "G7b": "no detiene (etapa 1)",
@@ -443,6 +514,8 @@ def clima(raiz_datos=None, procesos_: int = 4, previo: bool = False, nombre: str
                      "G7": g7["comprobado_antes_de_leer_excesos"]}  # fmt: skip
         ins_hash = rutas_ins | {"estratos_etapa1": E1.ruta_salida(raiz, nombre) / "estratos_etapa1.json",
                                 "etapa0": E0.ruta_salida(raiz) / "etapa0.json"}  # fmt: skip
+        if ruta_rv.is_file():
+            ins_hash["revision_visual"] = ruta_rv
         publicada = etapa.publicar(st, salida, etapa.Gate(not motivos, criterios, motivos), raices, ins_hash, raiz,
                                    semillas.semilla("f06", "clima", "dependencia"))  # fmt: skip
         reanudable.limpiar(avance)
