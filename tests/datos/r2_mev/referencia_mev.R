@@ -17,3 +17,6 @@ for (i in 1:2) {
 write.csv(do.call(rbind, filas), "referencia_mev.csv", row.names = FALSE)
 # 17 cifras para que la comparación no dependa del redondeo de write.csv
 cat("Escrito referencia_mev.csv\n")
+# Constancia del oráculo (ADR-0035): versión de R y de mev con que se generó referencia_mev.csv
+writeLines(capture.output(sessionInfo()), "sessioninfo_mev.txt")
+cat("Escrito sessioninfo_mev.txt\n")
