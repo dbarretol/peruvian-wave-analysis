@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 from scipy import stats
 
+from peruvian_wave_analysis.comun import etapa, json_estricto
 from peruvian_wave_analysis.eventos import casos as CS
+from peruvian_wave_analysis.eventos import piloto_r3 as PR
+from peruvian_wave_analysis.eventos import salidas as SA
+
+from . import test_clima_etapa1 as T1
 
 U_ID = 2.70
 
@@ -70,3 +75,22 @@ def test_picos_redondeados_y_rl_verdadero():
     # GPD exacta: RL = u + σ·log(λT) con ξ = 0
     assert r.rl100_verdadero == pytest.approx(U_ID + 0.35 * np.log(685 / 46 * 100), rel=1e-9)
     assert abs(r.picos.size - 685) < 5 * np.sqrt(685)
+
+
+def test_piloto_r3_de_extremo_a_extremo(tmp_path, monkeypatch):
+    raiz = tmp_path / "WAVE-DATA"
+    raiz.mkdir()
+    codigo = tmp_path / "codigo"
+    codigo.mkdir()
+    (codigo / "m.py").write_text("X = 1\n", encoding="utf-8")
+    conteo = {"u_id_m": U_ID, "n0_simulacion": {"n0": [60, 80], "anios_simulados": [33, 46]}}
+    T1._publicar(raiz, SA.ruta_conteo_previo(raiz),
+                 {"conteo_previo.json": lambda p: json_estricto.escribir(p, conteo)}, codigo)  # fmt: skip
+    monkeypatch.setattr(PR, "CELDAS", (("A", 0.0, 0),))
+    monkeypatch.setattr(PR, "TROZO", 1)
+    salida = PR.ejecutar(raiz, procesos_=0, replicas=2)
+    man = etapa.exigir_publicada(salida)
+    assert set(man["insumos"]) == {"conteo_previo"}
+    r = json_estricto.leer(salida / "piloto_r3.json")
+    assert r["replicas"] == 2 and "atajo_aceptado" in r and r["celdas"] == ["A_0_N60"]
+    etapa.exigir_publicada(SA.ruta_conteo_previo(raiz))  # el piloto no borra el conteo
