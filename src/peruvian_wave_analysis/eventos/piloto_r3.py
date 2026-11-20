@@ -6,7 +6,10 @@ reajustes. Se publica, por celda y en total: réplicas con el mismo u*, mayor |�
 número de u_k con p distinto y el estado de la regla en cada versión.
 
 Celdas (N0 y años del conteo previo, §5.0): A con ξ = −0.1 (N_mín) y +0.1 (N_máx); B+ con ξ0 = −0.1 (N_mín); B− con
-ξ0 = 0 (N_máx); C con k = 1.5 (N_máx) y k = 2 (N_mín). Sin datos del sitio más allá del conteo y de u_id.
+ξ0 = −0.1 (N_mín; ξ = −0.25 bajo u0); C con k = 1.5 (N_máx) y k = 2 (N_mín). Incluyen las más difíciles para el ajuste
+rápido: el N0 menor, cuyo umbral más alto deja ≈ 30 picos, con la forma más negativa de A, de B− y de C (donde más
+delega y donde una diferencia mínima en p podría resolver distinto el empate de R3). Sin datos del sitio más allá del
+conteo y de u_id.
 
 Reanudable (trozos de 10 réplicas). ``--previo`` cronometra una réplica por celda sin publicar. Salida en
 ``processed/F07-eventos/simulacion-previa/piloto-r3/``, hermana del conteo y de la simulación.
@@ -34,7 +37,7 @@ from . import umbral as U
 ETAPA = orquestador.Etapa("eventos-piloto-r3", Path(__file__).resolve(), Path("."))
 REPLICAS = 100
 TROZO = 10
-CELDAS = (("A", -0.1, 0), ("A", 0.1, 1), ("B+", -0.1, 0), ("B-", 0.0, 1), ("C", 1.5, 1), ("C", 2.0, 0))
+CELDAS = (("A", -0.1, 0), ("A", 0.1, 1), ("B+", -0.1, 0), ("B-", -0.1, 0), ("C", 1.5, 1), ("C", 2.0, 0))
 
 
 def ruta_salida(raiz: Path) -> Path:
