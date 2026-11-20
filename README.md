@@ -25,7 +25,7 @@ Fase 5 (validación externa) cerrada, en cuatro órdenes (`validacion/` y `valid
 - `validacion-potencia`: colocaciones con la altimetría y las boyas, escalón del modelo en cada fuente y potencia de cada prueba, sin leer valores observados. Simulación con SIMEX, bootstrap por bloques mensuales y max-T; réplicas reanudables.
 - `validacion`: lee los valores observados solo después de comprobar el manifiesto y los hashes de la potencia. Mide el ruido de 1 Hz, el sesgo por cuantil y las pruebas de atribución y de sesgo, y publica los escenarios activos, las variantes de corrección, la serie corregida y la fila de incertidumbre de la fuente.
 
-Fase 6 (clima de oleaje) en curso, en `clima/` y `extremos/` (rama `feature/f06-clima`):
+Fase 6 (clima de oleaje) cerrada, en `clima/` y `extremos/`:
 - `extremos/dependencia.py`: índice extremal de Ferro y Segers dentro del invierno, declustering automático, rachas y corte natural de los huecos, extremograma con referencia estacional y escalas de decorrelación.
 - `extremos/gev.py`: GEV de máximos anuales con validación de soporte, nivel de retorno de ADR-0022 y de Coles e IC de perfil.
 - `clima/clase_fisica.py`: clase física por particiones (swell, mixto, mar de viento).
@@ -148,7 +148,7 @@ uv run validacion --procesos 8               # ≈ 10 min; lee los valores obser
 
 `validacion` falla sin leer ningún valor observado si la potencia no está publicada, si su hash no coincide con el manifiesto o si la huella del código de la potencia cambió. Los tiempos de cada paso se escriben en `interim/`, fuera de las salidas publicadas.
 
-### 10. Clima de oleaje (en curso)
+### 10. Clima de oleaje
 
 ```bash
 uv run clima-etapa0 --previo                 # cronometra, no publica
@@ -160,6 +160,8 @@ uv run clima-etapa1 --procesos 6             # con datos del sitio, sin leer exc
 uv run clima --previo                        # verifica la etapa 1 y cronometra; no lee excesos
 uv run clima --procesos 6                    # etapa principal; se reanuda si se corta y muestra el avance
 ```
+
+`clima` lee, si existe, el registro de la revisión visual de las figuras de eventos (`interim/F06-clima-de-oleaje/revision-visual/<nombre>/revision_visual_declustering.csv`, con quién clasificó, el criterio y la razón de cada figura) y lo vuelca en `declustering_dudoso.csv`, rotulado «posterior a ver las figuras». Sin el registro, los candidatos salen con «revisión visual pendiente».
 
 `clima-etapa0` y `clima-simulacion-previa` no leen datos del sitio. El avance va a `interim/F06-clima-de-oleaje/` y se borra al publicar.
 
