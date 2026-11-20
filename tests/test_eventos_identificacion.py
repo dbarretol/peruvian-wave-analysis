@@ -9,6 +9,7 @@ import pytest
 from peruvian_wave_analysis.comun import etapa, json_estricto
 from peruvian_wave_analysis.eventos import conteo_previo as CP
 from peruvian_wave_analysis.eventos import identificacion as ID
+from peruvian_wave_analysis.eventos import salidas as SA
 from peruvian_wave_analysis.extremos import decluster
 
 from . import test_clima_etapa1 as T1
@@ -143,6 +144,56 @@ def test_eventos_de_una_racha_siempre_a_iet_o_mas():
             assert v[p[k]] - corte >= 0.5 - 1e-9 and v[p[k + 1]] - corte >= 0.5 - 1e-9
 
 
+def _cuatro_crestas():
+    """Racha con crestas en 20 (3.6 m), 40 (3.3 m), 50 (3.3 m) y 70 (3.7 m) pasos.
+
+    El primer corte (el más hondo, 2.0 m en 45) separa {20, 40} de {50, 70}. Quedan dos cortes válidos que se
+    excluyen: entre 20 y 40 (bajada 0.8 m) y entre 50 y 70 (bajada 1.0 m); hecho uno, el otro dejaría las crestas de
+    40 y 50, a 30 h, como eventos vecinos. Con tres crestas no puede pasar: tras el primer corte solo queda una
+    parte con dos crestas, así que el orden no cambia nada.
+    """
+    v = _con_crestas(2.5, 100, {20: 3.6, 40: 3.3, 50: 3.3, 70: 3.7})
+    v[45] = 2.0
+    v[55:66] = np.minimum(v[55:66], 2.3)
+    return v
+
+
+def test_el_orden_de_los_cortes_importa_y_rige_el_mas_hondo():
+    v = _cuatro_crestas()
+    honda = ID.identificar(_serie(v), 2.0, 48.0)
+    izquierda = ID.identificar(_serie(v), 2.0, 48.0, orden="izquierda")
+    assert list(honda["i_pico"]) == [20, 50, 70]  # primero la bajada de 1.0 m entre 50 y 70
+    assert list(izquierda["i_pico"]) == [20, 40, 70]  # primero la parte de la izquierda
+    assert list(ID.identificar(_serie(v), 2.0, 48.0)["i_pico"]) == list(honda["i_pico"])  # la regla por omisión
+    # invertir el tiempo con el orden por la bajada más honda da los mismos eventos, reflejados
+    rev = ID.identificar(_serie(v[::-1].copy()), 2.0, 48.0)
+    assert sorted(len(v) - 1 - rev["i_pico"].to_numpy()) == [20, 50, 70]
+    with pytest.raises(ValueError, match="orden"):
+        ID.identificar(_serie(v), 2.0, 48.0, orden="otro")
+
+
+def _sin_cortes_pendientes(v, ev, sep_pasos):
+    for _, g in ev.groupby("id_racha"):
+        partes = list(zip(g["i_inicio"].astype(int), g["i_fin"].astype(int), strict=True))
+        for i in range(len(partes)):
+            assert ID.corte_de_parte(v, partes, i, sep_pasos) is None, (partes, i)
+
+
+@pytest.mark.parametrize("orden", ID.ORDENES)
+def test_al_final_no_queda_ningun_corte_valido(orden):
+    v = _cuatro_crestas()
+    _sin_cortes_pendientes(v, ID.identificar(_serie(v), 2.0, 48.0, orden=orden), 16)
+    rng = np.random.default_rng(8)
+    z = np.zeros(6000)
+    e = rng.normal(0, 1, z.size)
+    for i in range(1, z.size):
+        z[i] = 0.95 * z[i - 1] + 0.31 * e[i]
+    w = np.round(2.0 * np.exp(0.3 * z), 2)
+    ev = ID.identificar(_serie(w), float(np.quantile(w, 0.9)), 48.0, orden=orden)
+    assert ev["dividido_por_bajada"].any()
+    _sin_cortes_pendientes(w, ev, 16)
+
+
 def test_nan_no_es_el_minimo_de_un_corte():
     v = _con_crestas(3.1, 80, {20: 3.5, 40: 3.5})  # bajada de 0.4 m en el fondo
     v[30] = np.nan  # el único punto bajo sería el hueco
@@ -241,3 +292,21 @@ def test_etapa_publica_conteo(tmp_path):
     r = json_estricto.leer(salida / "conteo_previo.json")
     assert r["valores_de_picos_leidos"] is False and len(r["conteos"]) == 4
     assert r["n0_simulacion"]["n0"][0] <= r["n0_simulacion"]["n0"][1]
+
+
+def test_la_simulacion_no_borra_el_conteo(tmp_path):
+    raiz = tmp_path / "WAVE-DATA"
+    raiz.mkdir()
+    codigo = tmp_path / "codigo"
+    codigo.mkdir()
+    (codigo / "m.py").write_text("X = 1\n", encoding="utf-8")
+    conteo, sim = SA.ruta_conteo_previo(raiz), SA.ruta_simulacion(raiz)
+    assert conteo.parent == sim.parent and conteo != sim
+    assert not sim.is_relative_to(conteo) and not conteo.is_relative_to(sim)
+    assert CP.ruta_salida(raiz) == conteo
+    T1._publicar(raiz, conteo, {"conteo_previo.json": lambda p: json_estricto.escribir(p, {"n": 1})}, codigo)
+    for _ in range(2):  # publicar la simulación, también dos veces, deja el conteo intacto
+        T1._publicar(raiz, sim, {"simulacion.json": lambda p: json_estricto.escribir(p, {"m": 2})}, codigo)
+    etapa.exigir_publicada(conteo)
+    etapa.exigir_publicada(sim)
+    assert json_estricto.leer(conteo / "conteo_previo.json") == {"n": 1}
