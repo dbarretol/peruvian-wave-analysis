@@ -224,9 +224,7 @@ def _previo(cs: list[CS.Celda], replicas: int, procesos: int) -> None:
     p = max(procesos, 1)
     f1 = seg * replicas * len(cs) / p / 3600
     f2 = seg * replicas * len(cs) * len(SIGMAS_SENSIBILIDAD) / p / 3600  # cota: si gana R3, la regla cara
-    print(
-        f"previo: {seg:.1f} s por réplica; fase 1 ≈ {f1:.1f} h y fase 2 ≤ {f2:.1f} h con {p} procesos", flush=True
-    )
+    print(f"previo: {seg:.1f} s por réplica; fase 1 ≈ {f1:.1f} h y fase 2 ≤ {f2:.1f} h con {p} procesos", flush=True)
 
 
 def ejecutar(raiz_datos=None, procesos_: int = 4, replicas: int = REPLICAS, previo: bool = False) -> Path | None:
@@ -285,7 +283,7 @@ def ejecutar(raiz_datos=None, procesos_: int = 4, replicas: int = REPLICAS, prev
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="eventos-simulacion-previa", description="Simulación previa de la regla de umbral")
+    ap = argparse.ArgumentParser(prog="eventos-simulacion-previa", description="Simulación previa de la F7")
     ap.add_argument("--datos")
     ap.add_argument("--procesos", type=int, default=4)
     ap.add_argument("--replicas", type=int, default=REPLICAS)

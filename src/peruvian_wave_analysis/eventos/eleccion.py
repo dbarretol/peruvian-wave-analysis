@@ -156,9 +156,8 @@ def metricas_bootstrap(df: pd.DataFrame, reglas: Sequence[str], B: int = B_BOOT,
         n = len(e)
         idx = semillas.generador("f07", "eleccion", "bootstrap", f"{s:g}", celda).integers(0, n, size=(B, n))
 
-        def recm_boot(x):
-            y = x[idx] ** 2
-            return np.sqrt(np.nanmean(y, axis=1))
+        def recm_boot(x, idx=idx):
+            return np.sqrt(np.nanmean(x[idx] ** 2, axis=1))
 
         base = recm_boot(e["k10"].to_numpy(float))
         for r in reglas:
