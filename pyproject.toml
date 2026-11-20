@@ -50,6 +50,7 @@ clima-etapa1 = "peruvian_wave_analysis.clima.etapa1:main"
 clima = "peruvian_wave_analysis.clima.run:main"
 eventos-conteo-previo = "peruvian_wave_analysis.eventos.conteo_previo:main"
 eventos-piloto-r3 = "peruvian_wave_analysis.eventos.piloto_r3:main"
+eventos-simulacion-previa = "peruvian_wave_analysis.eventos.simulacion_previa:main"
 
 [build-system]
 requires = ["hatchling"]
