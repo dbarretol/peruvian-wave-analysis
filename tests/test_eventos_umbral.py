@@ -358,7 +358,10 @@ def test_r2_frente_a_mev_nc_diag():
     for i in (1, 2):
         x = pd.read_csv(_DIR_MEV / f"conjunto_{i}.csv")["x"].to_numpy()
         u = pd.read_csv(_DIR_MEV / f"conjunto_{i}_umbrales.csv")["u"].to_numpy()
-        p = np.array([t.p for t in r2.pruebas_r2(x, u)])
-        p_ref = ref.loc[ref["conjunto"] == i, "p_score"].to_numpy()
-        assert p_ref.size == p.size
-        np.testing.assert_allclose(p, p_ref, rtol=1e-3, atol=1e-4)
+        pr = r2.pruebas_r2(x, u)
+        r = ref.loc[ref["conjunto"] == i]
+        assert len(r) == len(pr) == u.size - 1
+        assert [t.gl for t in pr] == r["gl"].tolist()
+        # mev 2.2 (R 4.6.2) da lo mismo hasta 1e-5; la tolerancia deja margen solo para ξ̂ ≈ 0 (xi.tol de mev)
+        np.testing.assert_allclose([t.S for t in pr], r["s_score"], rtol=1e-4)
+        np.testing.assert_allclose([t.p for t in pr], r["p_score"], rtol=1e-3, atol=1e-4)
