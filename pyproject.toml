@@ -53,6 +53,7 @@ eventos-piloto-r3 = "peruvian_wave_analysis.eventos.piloto_r3:main"
 eventos-simulacion-previa = "peruvian_wave_analysis.eventos.simulacion_previa:main"
 eventos-ruido-iet = "peruvian_wave_analysis.eventos.ruido_iet:main"
 eventos-sesgo-regla = "peruvian_wave_analysis.eventos.sesgo_regla:main"
+eventos-ramas-picos = "peruvian_wave_analysis.eventos.ramas_picos:main"
 
 [build-system]
 requires = ["hatchling"]
