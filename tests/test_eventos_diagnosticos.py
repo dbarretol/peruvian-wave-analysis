@@ -184,6 +184,17 @@ def _max_ar(n, phi, rng):
     return x
 
 
+def test_kgaps_p_chi2_y_p_calibrado():
+    rng = np.random.default_rng(6)
+    x = _max_ar(20000, 0.5, rng)
+    j = np.flatnonzero(x > np.quantile(x, 0.99))
+    r = D.kgaps(j, 1, 0.01, rng=np.random.default_rng(1), B=99)
+    assert r["p_chi2"] == pytest.approx(stats.chi2.sf(r["T"], 1))
+    assert r["p"] in {(1 + k) / 100 for k in range(100)} and r["B"] == 99
+    assert D.kgaps(j, 1, 0.01)["p"] is None
+    assert r == D.kgaps(j, 1, 0.01, rng=np.random.default_rng(1), B=99)
+
+
 def test_kgaps_recupera_theta_en_un_max_ar():
     rng = np.random.default_rng(3)
     x = _max_ar(60000, 0.5, rng)
@@ -199,8 +210,8 @@ def test_tamano_de_la_matriz_de_informacion():
     for _ in range(500):
         x = _max_ar(20000, 0.5, rng)
         u = np.quantile(x, 0.99)
-        rech += D.kgaps(np.flatnonzero(x > u), 1, 0.01)["p"] <= 0.05
-    assert abs(rech / 500 - 0.05) <= 0.03, rech / 500
+        rech += D.kgaps(np.flatnonzero(x > u), 1, 0.01, rng=rng)["p"] <= 0.05
+    assert abs(rech / 500 - 0.05) <= 0.03, rech / 500  # §8 con el p calibrado (precisión n.º 27)
 
 
 def test_picos_de_verano():

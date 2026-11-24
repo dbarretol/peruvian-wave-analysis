@@ -24,7 +24,8 @@ está en ``diagnosticos_datos.py``. **Ningún diagnóstico elige nada:** no muev
 5. **A² de Anderson–Darling en u\\*** contra la GPD ajustada, con bootstrap paramétrico (B = 999), réplicas
    redondeadas a 0.01 m como en R3 (C2-05) y reajuste con ``gpd_perfil.ajustar_rapido`` (ADR-0034).
 6. **Süveges y Davison (2010):** θ por K-gaps (ec. 3) y prueba de la matriz de información (ec. 4 y apéndice),
-   T ~ χ²₁, solo en las celdas con K·F̄(u) ≤ 0.2 y F̄(u) = 1 − q nominal (C-10, C2-08).
+   solo en las celdas con K·F̄(u) ≤ 0.2 y F̄(u) = 1 − q nominal (C-10, C2-08). El p se calibra con un bootstrap
+   paramétrico del modelo límite ajustado (B = 499; precisión n.º 27) y se publica también el de χ²₁.
 7. **Picos de verano** (noviembre a abril) sobre u\\*.
 """
 
@@ -57,6 +58,7 @@ ESTACIONES_2 = {"may-oct": (5, 6, 7, 8, 9, 10), "nov-abr": (11, 12, 1, 2, 3, 4)}
 ESTACIONES_4 = {"DEF": (12, 1, 2), "MAM": (3, 4, 5), "JJA": (6, 7, 8), "SON": (9, 10, 11)}
 MESES_MAYO_OCTUBRE = ESTACIONES_2["may-oct"]
 Q_SD = (0.99, 0.995)
+B_SD = 499  # precisión n.º 27
 KF_MAX = 0.2
 ITER_MAX_GLM = 100
 
@@ -428,39 +430,63 @@ def celdas_sd(
     return out
 
 
-def kgaps(posiciones, K: int, F_barra: float, bloques=None) -> dict:
+def _estadistico_im(c: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(θ̂, T) por fila de ``c`` (huecos normalizados F̄(u)·S, forma (R, n)): θ̂ de la ec. 3 en forma cerrada y T de la
+    prueba de la matriz de información (ec. 4 y apéndice). La varianza usa d + D′·I⁻¹·ℓ′ (§2.3 del artículo; es el
+    desarrollo de D_n(θ̂) alrededor de θ). Filas sin huecos no nulos: θ̂ y T = NaN."""
+    c = np.atleast_2d(np.asarray(c, float))
+    n = c.shape[1]
+    i1 = c > 0
+    i0 = ~i1
+    nc, sc = i1.sum(1).astype(float), c.sum(1)
+    bb = sc + n + nc
+    with np.errstate(divide="ignore", invalid="ignore"):
+        th = np.minimum(1.0, (bb - np.sqrt(np.maximum(bb * bb - 8.0 * nc * sc, 0.0))) / (2.0 * sc))
+        th = np.where(nc > 0, th, np.nan)[:, None]
+        uno = 1.0 - th
+        inv1 = np.where(uno > 0, 1.0 / uno, 0.0)
+        score = np.where(i0, -inv1, 0.0) + np.where(i1, 2.0 / th, 0.0) - c
+        info = np.mean(np.where(i0, inv1**2, 0.0) + np.where(i1, 2.0 / th**2, 0.0), axis=1)[:, None]
+        d = np.where(i1, 2.0 / th**2, 0.0) + c**2 - 4.0 * c / th
+        Dn = d.mean(1)
+        Dp = np.mean(np.where(i1, -4.0 / th**3, 0.0) + 4.0 * c / th**2, axis=1)[:, None]
+        Vn = np.mean((d + Dp / info * score) ** 2, axis=1)
+        T = np.where(Vn > 0, n * Dn**2 / Vn, np.nan)
+    return th[:, 0], T
+
+
+def kgaps(
+    posiciones, K: int, F_barra: float, bloques=None, rng: np.random.Generator | None = None, B: int = B_SD
+) -> dict:
     """θ por K-gaps (ec. 3) y la prueba de la matriz de información (ec. 4; apéndice). ``posiciones``: índices de
-    las excedencias, crecientes; ``bloques``: si se da, solo cuentan los huecos dentro de un mismo bloque."""
+    las excedencias, crecientes; ``bloques``: si se da, solo cuentan los huecos dentro de un mismo bloque.
+
+    ``p_chi2`` usa T ~ χ²₁. **Precisión n.º 27** (posterior a los datos, motivada por la prueba de tamaño de §8, no
+    por los resultados del sitio): ``p`` se calibra con un bootstrap paramétrico del modelo límite ajustado: B
+    muestras de n huecos, nulos con probabilidad 1 − θ̂ y Exp(θ̂) si no; p = (1 + #{T* ≥ T}) / (B + 1). Sin ``rng``,
+    ``p`` es None."""
     j = np.asarray(posiciones, dtype=np.int64)
-    T = np.diff(j)
+    S = np.diff(j)
     if bloques is not None:
         b = np.asarray(bloques)
-        T = T[b[1:] == b[:-1]]
-    c = F_barra * np.maximum(T - K, 0).astype(float)
+        S = S[b[1:] == b[:-1]]
+    c = F_barra * np.maximum(S - K, 0).astype(float)
     n = c.size
-    i1 = c > 0
-    nc, sc = int(i1.sum()), float(c.sum())
+    nc = int((c > 0).sum())
+    vacio = {"N_huecos": n, "N_C": nc, "theta": None, "T": None, "p_chi2": None, "p": None, "B": B}
     if n < 2 or nc == 0:
-        return {"N_huecos": n, "N_C": nc, "theta": None, "T": None, "p": None}
-    bb = sc + n + nc
-    theta = min(1.0, (bb - np.sqrt(max(bb * bb - 8.0 * nc * sc, 0.0))) / (2.0 * sc))
-    i0 = ~i1
-    uno = 1.0 - theta
-    inv0 = np.where(i0, 1.0 / max(uno, 1e-300) ** 2, 0.0) if uno > 0 else np.zeros(n)
-    score = np.where(i0, -1.0 / uno if uno > 0 else 0.0, 0.0) + np.where(i1, 2.0 / theta, 0.0) - c
-    info = float(np.mean(inv0 + np.where(i1, 2.0 / theta**2, 0.0)))
-    d = np.where(i1, 2.0 / theta**2, 0.0) + c**2 - 4.0 * c / theta
-    Dn = float(d.mean())
-    Dp = float(np.mean(np.where(i1, -4.0 / theta**3, 0.0) + 4.0 * c / theta**2))
-    Vn = float(np.mean((d - Dp / info * score) ** 2))
-    Tst = n * Dn**2 / Vn if Vn > 0 else np.nan
-    return {
-        "N_huecos": n,
-        "N_C": nc,
-        "theta": float(theta),
-        "T": float(Tst),
-        "p": float(stats.chi2.sf(Tst, 1)) if np.isfinite(Tst) else None,
-    }
+        return vacio
+    th, T = _estadistico_im(c[None, :])
+    theta, Tst = float(th[0]), float(T[0])
+    if not np.isfinite(Tst):
+        return vacio | {"theta": theta}
+    p = None
+    if rng is not None:
+        nz = rng.random((B, n)) < theta
+        cb = np.where(nz, rng.exponential(1.0 / theta, (B, n)), 0.0)
+        _, Tb = _estadistico_im(cb)
+        p = (1 + int(np.sum(np.nan_to_num(Tb, nan=-np.inf) >= Tst))) / (B + 1)
+    return {"N_huecos": n, "N_C": nc, "theta": theta, "T": Tst, "p_chi2": float(stats.chi2.sf(Tst, 1)), "p": p, "B": B}
 
 
 # --- 7. Picos de verano ------------------------------------------------------------------------------------------

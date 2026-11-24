@@ -89,7 +89,9 @@ NOTA_TAU = (
     "picos casi coinciden; un p bajo en algunos IET no es un rechazo."
 )
 NOTA_SD = (
-    "Süveges y Davison (2010), descriptivo (P8). F̄(u) = 1 − q nominal y u = cuantil q con peso mensual de los "
+    "Süveges y Davison (2010), descriptivo (P8). p calibrado con el bootstrap paramétrico del modelo límite ajustado "
+    "(B = 499, θ = θ̂; precisión n.º 27, posterior a los datos, motivada por la prueba de tamaño de §8: con χ²₁ el "
+    "tamaño fue del 8.4 %); se publica también p_chi2. F̄(u) = 1 − q nominal y u = cuantil q con peso mensual de los "
     "estados de 3 h del período (en mayo–octubre, de los estados de esos meses; los huecos entre dos excedencias "
     "solo cuentan dentro de un mismo mayo–octubre). Un NaN cuenta como estado sin excedencia. El 0.2 de K·F̄(u) es un "
     "criterio del revisor, no del artículo."
@@ -244,7 +246,7 @@ def suveges_davison(hs0: pd.Series, iets) -> pd.DataFrame:
             u = float(cuantiles_mensuales(s[en], [c["q"]])[0])
             pos = np.flatnonzero(en & (np.nan_to_num(v, nan=-np.inf) > u))
             bloques = None if periodo == "todo_el_anio" else s.index.year.to_numpy()[pos]
-            r = D.kgaps(pos, c["K"], 1.0 - c["q"], bloques)
+            r = D.kgaps(pos, c["K"], 1.0 - c["q"], bloques, rng=_rng("sd", periodo, c["q"], c["iet_h"]))
             filas.append(
                 {
                     "periodo": periodo,
@@ -275,6 +277,8 @@ def tabla_sd(sd: pd.DataFrame) -> list[dict]:
                 "theta_min": float(g["theta"].min()),
                 "theta_max": float(g["theta"].max()),
                 "p_min": float(g["p"].min()),
+                "p_chi2_min": float(g["p_chi2"].min()),
+                "p_chi2_max": float(g["p_chi2"].max()),
                 "p_max": float(g["p"].max()),
                 "rechazos": int((g["p"] <= 0.05).sum()),
             }
