@@ -70,6 +70,24 @@ NOTA_UMBRAL_POR_IET = (
     "Precisión n.º 25 (propuesta, pendiente de aceptación): en cada IET de la rejilla, los diagnósticos usan el u* de "
     "la rama, elegido con IET* (§3.4). El contrato no fija el umbral de los diagnósticos por IET."
 )
+NOTA_P_POISSON = (
+    "El p de la prueba de Poisson se reporta como «≤ 1/(B + 1)» cuando ninguna réplica alcanza el A² observado: es el "
+    "piso del Monte Carlo (con B = 199, ≤ 1/200), no un valor estimado."
+)
+NOTA_GARWOOD = (
+    "El IC de Garwood de λ supone llegadas de Poisson. La prueba de §3.5 rechaza en E0 y también en E1 (en los 8 IET, "
+    "por variabilidad entre años), así que en las dos eras ese intervalo es demasiado estrecho. Pasa a la F9: el "
+    "período de retorno depende de λ (rotulado: nota escrita después de ver los diagnósticos)."
+)
+NOTA_TAMANO = (
+    "Observación rotulada, escrita después de ver los diagnósticos: con 2 estaciones fijas el tamaño es del 22.6 %, y "
+    "esa sensibilidad queda «frágil». No cambia la regla de la marca (precisión n.º 26): la prueba armónica, con "
+    "tamaño correcto (5.0 %), rechaza igual."
+)
+NOTA_TAU = (
+    "τ de picos consecutivos: descriptivo. Los p de los 8 IET no son pruebas independientes, porque los conjuntos de "
+    "picos casi coinciden; un p bajo en algunos IET no es un rechazo."
+)
 NOTA_SD = (
     "Süveges y Davison (2010), descriptivo (P8). F̄(u) = 1 − q nominal y u = cuantil q con peso mensual de los "
     "estados de 3 h del período (en mayo–octubre, de los estados de esos meses; los huecos entre dos excedencias "
@@ -242,6 +260,28 @@ def suveges_davison(hs0: pd.Series, iets) -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
+def tabla_sd(sd: pd.DataFrame) -> list[dict]:
+    """Resumen completo de Süveges y Davison: cada período (todo el año, mayo–octubre) con cada cuantil (P99, P99.5),
+    para no comparar cuantiles y temporadas mezclados."""
+    out = []
+    for (periodo, q), g in sd.groupby(["periodo", "q"], sort=True):
+        out.append(
+            {
+                "periodo": periodo,
+                "q": float(q),
+                "u_m": float(g["u_m"].iloc[0]),
+                "celdas": int(len(g)),
+                "excedencias": int(g["excedencias"].iloc[0]),
+                "theta_min": float(g["theta"].min()),
+                "theta_max": float(g["theta"].max()),
+                "p_min": float(g["p"].min()),
+                "p_max": float(g["p"].max()),
+                "rechazos": int((g["p"] <= 0.05).sum()),
+            }
+        )
+    return out
+
+
 # --- Armado ---------------------------------------------------------------------------------------------------
 
 
@@ -262,7 +302,18 @@ def armar(tareas, resultados, ctx, iet_estrella, u_estrella):
         }
         for m in MODELOS if iet == iet_estrella else ("armonico",):
             pp = res[f"poisson__{clave}__{m}"]
-            for k in ("ad", "p_ad", "rechaza", "ks", "p_ks", "n_rachas", "n_llegadas", "n_intervalos"):
+            for k in (
+                "ad",
+                "p_ad",
+                "p_ad_en_el_piso",
+                "p_ad_texto",
+                "rechaza",
+                "ks",
+                "p_ks",
+                "n_rachas",
+                "n_llegadas",
+                "n_intervalos",
+            ):
                 fila[f"poisson_{m}_{k}"] = pp[k]
         d = pk["dispersion"]
         fila |= {"dispersion_indice": d["indice"], "dispersion_p": d["p"], "anios": d["anios"]}
@@ -486,12 +537,14 @@ def ejecutar(raiz_datos=None, procesos_: int = 4, previo: bool = False) -> Path 
             "marcas": mk,
             "picos_de_verano": ver,
             "tamano_poisson": tam.to_dict(orient="records"),
+            "notas": {"p_poisson": NOTA_P_POISSON, "garwood": NOTA_GARWOOD, "tamano": NOTA_TAMANO, "tau": NOTA_TAU},
             "suveges_davison": {
                 "celdas": int(len(sd) // 2),
                 "nota": NOTA_SD,
                 "retirado": sd_vacia,
                 "rechazos_todo_el_anio": int((sd.query("periodo == 'todo_el_anio'")["p"] <= 0.05).sum()),
                 "rechazos_mayo_octubre": int((sd.query("periodo == 'mayo_octubre'")["p"] <= 0.05).sum()),
+                "por_periodo_y_cuantil": tabla_sd(sd),
             },
             "figuras": figs,
         }

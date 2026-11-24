@@ -88,3 +88,14 @@ def test_figuras(tmp_path, corrida):
     tabla, seps, _, sd, _, _ = corrida
     hechas = DD.figuras(tabla, seps, sd, 48.0, tmp_path)
     assert hechas and all((tmp_path / h).stat().st_size > 0 for h in hechas)
+
+
+def test_p_en_el_piso_y_tabla_sd(corrida):
+    tabla, _, _, sd, _, _ = corrida
+    piso = tabla["poisson_armonico_p_ad_en_el_piso"].astype(bool)
+    assert (tabla.loc[piso, "poisson_armonico_p_ad"] == 1 / (B["poisson"] + 1)).all()
+    assert (tabla.loc[piso, "poisson_armonico_p_ad_texto"] == f"≤ 1/{B['poisson'] + 1}").all()
+    filas = DD.tabla_sd(sd)
+    assert {(f["periodo"], f["q"]) for f in filas} == {
+        (p, q) for p in ("todo_el_anio", "mayo_octubre") for q in (0.99, 0.995)
+    }

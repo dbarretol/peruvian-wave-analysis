@@ -224,6 +224,8 @@ def prueba_poisson_rachas(
         "modelo": modelo.tipo if modelo.X is not None else f"{modelo.n_grupos}_estaciones",
         "ad": ad0,
         "p_ad": p_ad,
+        "p_ad_en_el_piso": bool(k_ad == 0),
+        "p_ad_texto": f"≤ 1/{B + 1}" if k_ad == 0 else f"{p_ad:.3f}",
         "rechaza": bool(p_ad <= ALFA + 1e-12),
         "ks": ks0,
         "p_ks": (1 + k_ks) / (B + 1),
