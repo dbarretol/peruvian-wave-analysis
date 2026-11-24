@@ -126,3 +126,24 @@ def test_banderas_dudoso_y_revision_visual():
     rev = pd.DataFrame({"tipo": ["casi fusionados"], "t_pico": ["2000-03-01 12:00"],
                         "t_pico_siguiente": ["2000-03-04 00:00"], "clasificacion_visual": ["bien"]})  # fmt: skip
     assert R.marcar_revision_f6(p, rev).tolist() == ["", "casi fusionados: bien"]
+
+
+def test_empate_numerico_devuelve_el_pico_al_instante_de_e0():
+    """Precisión n.º 24 (propuesta): un desempate de la variante menor que 10⁻⁴ relativo no mueve el pico."""
+    df = _tormenta(_serie(), "1993-02-10 12:00", 3.5)
+    i = df.index.get_loc(pd.Timestamp("1993-02-10 12:00"))
+    df.iloc[i + 2, 0] = 3.5  # empate en E0: misma Hs 6 h después; E0 toma la primera aparición
+    df.iloc[i + 2, 1] = 99.0  # Tp distinto en el instante del empate
+    ev = ID.identificar(df["VHM0"], 2.7, 48.0)
+    var = df["VHM0"].copy()
+    var.iloc[i + 2] = 3.5 * (1 + 2e-5)  # la corrección por rango desempata hacia el instante posterior
+    sin = R.picos_de_rama(ev, var, df)
+    assert sin.loc[0, "pico_movido"] and sin.loc[0, "tp"] == 99.0 and not sin.loc[0, "empate_resuelto"]
+    con = R.picos_de_rama(ev, var, df, tol_empate=R.TOL_EMPATE)
+    assert not con.loc[0, "pico_movido"] and con.loc[0, "empate_resuelto"]
+    assert con.loc[0, "t_pico"] == pd.Timestamp("1993-02-10 12:00") and con.loc[0, "tp"] != 99.0
+    assert con.loc[0, "hs"] == pytest.approx(sin.loc[0, "hs"], rel=1e-4)
+    # una diferencia real (mayor que la tolerancia) sí mueve el pico
+    var.iloc[i + 2] = 3.5 * (1 + 1e-3)
+    real = R.picos_de_rama(ev, var, df, tol_empate=R.TOL_EMPATE)
+    assert real.loc[0, "pico_movido"] and not real.loc[0, "empate_resuelto"]
