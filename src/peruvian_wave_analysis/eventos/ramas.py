@@ -44,7 +44,7 @@ SIN_CORREGIR = {"E0_sin_corregir": "E0_sin_corregir", "E0_cuantiles": "E0_sin_co
 FIN_MODELO = CP.FIN_MODELO
 ETIQUETAS = {"tp": "VTPK", "vmdr": "VMDR", "vped": "VPED"}
 REVISION_REQUERIDA = "revisión requerida"
-TOL_EMPATE = 1e-4  # precisión n.º 24 del contrato (propuesta; posterior a los datos, por artefacto)
+TOL_EMPATE = 1e-4  # precisión n.º 24 del contrato (aceptada el 2026-11-23; posterior a los datos, por artefacto)
 NOTA_GARWOOD_E0 = (
     "Supone conteos de Poisson. En E0 ese supuesto no vale: la tasa sobre u_id salta en 1993 (6.9 frente a 14.6 "
     "eventos por año, conteo de §5.0) y la prueba de Poisson de §3.5 (punto 1) lo rechaza o se espera que lo rechace. "
@@ -86,16 +86,17 @@ def particion_dominante(fila_serie: pd.DataFrame) -> np.ndarray:
 
 
 def picos_de_rama(
-    eventos_rama: pd.DataFrame, hs_rama: pd.Series, serie_e0: pd.DataFrame, tol_empate: float | None = None
+    eventos_rama: pd.DataFrame, hs_rama: pd.Series, serie_e0: pd.DataFrame, tol_empate: float | None = TOL_EMPATE
 ) -> pd.DataFrame:
     """Pico de la rama en la ventana de cada evento, con etiquetas de E0 en su instante y ``pico_movido``.
 
     ``serie_e0``: la serie del nodo en la rejilla completa (índice de tiempo), con ``VHM0`` y las etiquetas.
 
-    ``tol_empate`` (precisión n.º 24, propuesta): si la Hs de la rama en el instante del pico de E0 queda a menos de
-    ``tol_empate`` relativo del máximo de la ventana, el pico se toma en el instante del pico de E0
-    (``empate_resuelto``). Corrige el desempate artificial de la corrección por cuantiles de la F5 entre estados con
-    la misma Hs en E0. ``None``: sin la regla (lo publicado el 2026-11-23).
+    ``tol_empate`` (precisión n.º 24, aceptada por el usuario el 2026-11-23; activa por defecto): si la Hs de la
+    rama en el instante del pico de E0 queda a menos de ``tol_empate`` relativo del máximo de la ventana, el pico se
+    toma en el instante del pico de E0 (``empate_resuelto``). Corrige el desempate artificial de la corrección por
+    cuantiles de la F5 entre estados con la misma Hs en E0. ``None``: sin la regla (como la primera publicación de
+    ramas y picos).
     """
     idx = pd.DatetimeIndex(serie_e0.index)
     v = _alinear(hs_rama, idx)

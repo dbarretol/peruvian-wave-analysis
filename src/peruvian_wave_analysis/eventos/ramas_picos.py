@@ -95,7 +95,8 @@ def ramas_picos(datos: CI.Datos, u_id: float, p95_f3: float, candidatos: pd.Data
             expo = R.exposicion(datos.ramas[rama], ini, n_picos=int(len(p)), rama=rama)
             conteos.append({
                 "iet_h": iet, "rama": rama, "eventos": int(len(ev_r)), "picos": int(len(p)),
-                "pico_movido": int(p["pico_movido"].sum()), "recortados": int(p["recortado"].sum()),
+                "pico_movido": int(p["pico_movido"].sum()), "empates_resueltos": int(p["empate_resuelto"].sum()),
+                "recortados": int(p["recortado"].sum()),
                 "e29_activo": bool(borde["activo"]), "picos_antes_de_e29": int(borde["picos_antes"]),
                 "picos_bajo_p95_f3": int(g8["picos_bajo_p95"]), "dudoso_f3": int(p["dudoso_f3"].sum()),
                 "revision_visual_f6": int((p["revision_visual_f6"] != "").sum()),
