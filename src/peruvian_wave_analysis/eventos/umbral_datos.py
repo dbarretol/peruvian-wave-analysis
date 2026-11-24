@@ -57,6 +57,14 @@ REGLA = "R1b"
 SENSIBILIDAD = ("R2", "R3")
 SEMILLAS_R3_DESCRIPTIVAS = 5
 TOL_RELEVANCIA = 0.02  # ADR-0030, punto 4
+EXCEDENCIAS_A = (73, 176)  # excedencias medias de R1b en las celdas A de la simulación (ADR-0037, punto 3)
+NOTA_DERIVA = (
+    "Aviso de deriva de ξ (§3.4): no cambia u* (pedido del usuario, 2026-11-23). Lectura: la pendiente sale de los "
+    "umbrales ≥ u*; con {n} picos en u* el ajuste queda por debajo del régimen de la simulación (R1b usó de {a} a {b} "
+    "excedencias en las celdas A), así que el nulo de la pendiente ([{lo:.3f}, {hi:.3f}]), calibrado con más datos, "
+    "probablemente sea estrecho para este caso. No se recalibra. ξ es incierto con tan pocos picos: pesa más en los "
+    "periodos de retorno largos y en el contorno que en el RL100. Pasa a la F9."
+)
 PERIODOS = U.PERIODOS
 NIVEL = 0.95
 
@@ -103,6 +111,14 @@ def _ic(picos: np.ndarray, a: U.AjusteUmbral, anios: float) -> dict:
         causas.append(f"rl100:{e}")
     out["causa_ic"] = ";".join(causas)
     return out
+
+
+IC_COLUMNAS = ("rl100", "rl100_lo", "rl100_hi", "xi", "xi_lo", "xi_hi")
+
+
+def _num(x) -> float | None:
+    x = float(x)
+    return x if np.isfinite(x) else None
 
 
 def relevancia(rl100: np.ndarray, i: int) -> dict:
@@ -154,8 +170,18 @@ def analizar_rama(
     i = int(r1b.indice)
     out["relevancia"] = relevancia(rl, i)
     pend = SP.pendiente_xi(xi, rej.n_real, i)
-    out["deriva_xi"] = {"pendiente": pend, "intervalo_nulo_90": list(nulo),
-                        "marca": bool(np.isfinite(pend) and not (nulo[0] <= pend <= nulo[1]))}  # fmt: skip
+    marca = bool(np.isfinite(pend) and not (nulo[0] <= pend <= nulo[1]))
+    out["deriva_xi"] = {"pendiente": pend, "intervalo_nulo_90": list(nulo), "marca": marca,
+                        "puntos": int(np.sum(np.isfinite(xi[i:]))), "n_en_u": int(rej.n_real[i]),
+                        "nota": NOTA_DERIVA.format(n=int(rej.n_real[i]), a=EXCEDENCIAS_A[0], b=EXCEDENCIAS_A[1],
+                                                   lo=nulo[0], hi=nulo[1]) if marca else None}  # fmt: skip
+    out[REGLA] |= {c: _num(tabla.loc[i, c]) for c in IC_COLUMNAS if c in tabla}
+    out["tramos_estables"] = [
+        {"posiciones": [int(a), int(b)], "u_inferior_m": float(rej.u[a]), "n": int(rej.n_real[a]),
+         "rl100_min": float(np.nanmin(rl[a : b + 1])), "rl100_max": float(np.nanmax(rl[a : b + 1])),
+         "es_el_de_r1b": bool(a == i)} | {c: _num(tabla.loc[a, c]) for c in IC_COLUMNAS if c in tabla}
+        for a, b in (r1b.detalle.get("tramos") or [])
+    ]  # fmt: skip
     sens = {}
     for nombre in SENSIBILIDAD:
         r, ref = res[nombre], referencia["comparadas"][nombre]

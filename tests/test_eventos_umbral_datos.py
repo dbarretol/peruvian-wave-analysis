@@ -49,7 +49,16 @@ def test_marcas_y_sensibilidad_en_una_gpd():
         else:
             assert s["lectura"] == SR.NO_COMPARABLE
     assert len(res["r3_semillas_descriptivas"]) == UD.SEMILLAS_R3_DESCRIPTIVAS
-    assert set(res["deriva_xi"]) == {"pendiente", "intervalo_nulo_90", "marca"}
+    assert {"pendiente", "intervalo_nulo_90", "marca", "nota", "n_en_u"} <= set(res["deriva_xi"])
+    assert (res["deriva_xi"]["nota"] is None) == (not res["deriva_xi"]["marca"])
+    tramos = res["tramos_estables"]
+    assert sum(t["es_el_de_r1b"] for t in tramos) == 1
+    assert all(t["rl100_min"] <= t["rl100_max"] for t in tramos)
+
+
+def test_nota_de_deriva_con_los_numeros():
+    t = UD.NOTA_DERIVA.format(n=41, a=73, b=176, lo=-0.274, hi=0.463)
+    assert "41 picos" in t and "de 73 a 176" in t and "[-0.274, 0.463]" in t and "no cambia u*" in t
 
 
 def test_relevancia_a_mano():
@@ -70,7 +79,10 @@ def test_tabla_de_picos_solo_sobre_u_y_con_exceso():
 
 def test_ic_de_perfil_en_el_barrido():
     picos = _picos(n=300, seed=3)
-    tabla, _ = UD.analizar_rama("E0_cuantiles", picos, 46.0, REF, NULO, con_ic=True)
+    tabla, res = UD.analizar_rama("E0_cuantiles", picos, 46.0, REF, NULO, con_ic=True)
+    i = res["R1b"]["posicion"]
+    assert res["R1b"]["rl100_lo"] == pytest.approx(tabla.loc[i, "rl100_lo"])  # IC del RL100 en u* publicado
+    assert res["R1b"]["rl100_lo"] < res["R1b"]["rl100"] < res["R1b"]["rl100_hi"]
     ok = tabla["valido"] & tabla["xi_lo"].notna() & tabla["rl100_lo"].notna()
     assert ok.sum() >= 15
     assert (tabla.loc[ok, "xi_lo"] < tabla.loc[ok, "xi"]).all()
