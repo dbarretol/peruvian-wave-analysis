@@ -112,6 +112,8 @@ def test_exposicion_hasta_2025_y_e1_desde_febrero():
     assert e1["anios"] == pytest.approx(33 - 31 / 365, abs=0.01)  # sin enero de 1993
     lo, hi = e0["ic_garwood_95"]
     assert lo < e0["lambda_por_anio"] < hi
+    assert R.exposicion(hs, idx[0], n_picos=100, rama="E0_cuantiles")["nota_ic"] == R.NOTA_GARWOOD_E0
+    assert R.exposicion(hs[hs.index >= INI_E1], INI_E1, n_picos=80, rama="E1_sin_corregir")["nota_ic"] is None
 
 
 def test_banderas_dudoso_y_revision_visual():
