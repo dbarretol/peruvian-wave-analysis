@@ -44,6 +44,7 @@ SIN_CORREGIR = {"E0_sin_corregir": "E0_sin_corregir", "E0_cuantiles": "E0_sin_co
 FIN_MODELO = CP.FIN_MODELO
 ETIQUETAS = {"tp": "VTPK", "vmdr": "VMDR", "vped": "VPED"}
 REVISION_REQUERIDA = "revisión requerida"
+TOL_EMPATE = 1e-4  # precisión n.º 24 del contrato (propuesta; posterior a los datos, por artefacto)
 NOTA_GARWOOD_E0 = (
     "Supone conteos de Poisson. En E0 ese supuesto no vale: la tasa sobre u_id salta en 1993 (6.9 frente a 14.6 "
     "eventos por año, conteo de §5.0) y la prueba de Poisson de §3.5 (punto 1) lo rechaza o se espera que lo rechace. "
@@ -84,10 +85,17 @@ def particion_dominante(fila_serie: pd.DataFrame) -> np.ndarray:
     return out
 
 
-def picos_de_rama(eventos_rama: pd.DataFrame, hs_rama: pd.Series, serie_e0: pd.DataFrame) -> pd.DataFrame:
+def picos_de_rama(
+    eventos_rama: pd.DataFrame, hs_rama: pd.Series, serie_e0: pd.DataFrame, tol_empate: float | None = None
+) -> pd.DataFrame:
     """Pico de la rama en la ventana de cada evento, con etiquetas de E0 en su instante y ``pico_movido``.
 
     ``serie_e0``: la serie del nodo en la rejilla completa (índice de tiempo), con ``VHM0`` y las etiquetas.
+
+    ``tol_empate`` (precisión n.º 24, propuesta): si la Hs de la rama en el instante del pico de E0 queda a menos de
+    ``tol_empate`` relativo del máximo de la ventana, el pico se toma en el instante del pico de E0
+    (``empate_resuelto``). Corrige el desempate artificial de la corrección por cuantiles de la F5 entre estados con
+    la misma Hs en E0. ``None``: sin la regla (lo publicado el 2026-11-23).
     """
     idx = pd.DatetimeIndex(serie_e0.index)
     v = _alinear(hs_rama, idx)
@@ -100,12 +108,16 @@ def picos_de_rama(eventos_rama: pd.DataFrame, hs_rama: pd.Series, serie_e0: pd.D
         if not np.isfinite(seg).any():
             raise ValueError(f"El evento {ev.id_evento} no tiene ningún dato de la rama en su ventana")
         j = s + int(np.argmax(np.where(np.isfinite(seg), seg, -np.inf)))
+        i0 = int(ev.i_pico)
+        empate = tol_empate is not None and j != i0 and bool(np.isfinite(v[i0])) and v[i0] >= v[j] * (1 - tol_empate)
+        if empate:
+            j = i0
         filas.append({
             "id_evento": int(ev.id_evento), "id_racha": int(ev.id_racha),
             "t_inicio": ev.t_inicio, "t_fin": ev.t_fin, "t_pico": idx[j], "t_pico_e0": ev.t_pico,
             "i_pico": j, "n_excedencias": int(ev.n_excedencias), "hs": float(v[j]), "hs_e0_en_pico": float(hs_e0[j]),
             "toca_hueco": bool(ev.toca_hueco), "dividido_por_bajada": bool(ev.dividido_por_bajada),
-            "pico_movido": bool(j != int(ev.i_pico)), "recortado": bool(idx[s] < inicio),
+            "pico_movido": bool(j != i0), "empate_resuelto": bool(empate), "recortado": bool(idx[s] < inicio),
         })  # fmt: skip
     df = pd.DataFrame(filas)
     if df.empty:
