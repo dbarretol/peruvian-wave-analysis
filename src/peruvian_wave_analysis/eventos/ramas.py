@@ -44,6 +44,11 @@ SIN_CORREGIR = {"E0_sin_corregir": "E0_sin_corregir", "E0_cuantiles": "E0_sin_co
 FIN_MODELO = CP.FIN_MODELO
 ETIQUETAS = {"tp": "VTPK", "vmdr": "VMDR", "vped": "VPED"}
 REVISION_REQUERIDA = "revisión requerida"
+NOTA_GARWOOD_E0 = (
+    "Supone conteos de Poisson. En E0 ese supuesto no vale: la tasa sobre u_id salta en 1993 (6.9 frente a 14.6 "
+    "eventos por año, conteo de §5.0) y la prueba de Poisson de §3.5 (punto 1) lo rechaza o se espera que lo rechace. "
+    "El intervalo es optimista: más estrecho de lo que debería."
+)
 
 
 def es_variante(rama: str) -> bool:
@@ -166,13 +171,17 @@ def proteccion_cola(picos: pd.DataFrame, p95_f3: float) -> dict:
     }
 
 
-def exposicion(hs_rama: pd.Series, inicio, fin=FIN_MODELO, n_picos: int | None = None) -> dict:
-    """Años con dato del período (un estrato) y, si se da ``n_picos``, λ con su IC de Garwood del 95 %."""
+def exposicion(hs_rama: pd.Series, inicio, fin=FIN_MODELO, n_picos: int | None = None, rama: str = "") -> dict:
+    """Años con dato del período (un estrato) y, si se da ``n_picos``, λ con su IC de Garwood del 95 %.
+
+    En las ramas de E0 el intervalo lleva ``NOTA_GARWOOD_E0`` (pedido del usuario, 2026-11-23); en E1 va sin nota.
+    """
     anios = CP.anios_exposicion(hs_rama, inicio, fin)
     out = {"inicio": str(pd.Timestamp(inicio)), "fin": str(pd.Timestamp(fin)), "anios": anios}
     if n_picos is not None:
         lo, hi = tasa.ic_garwood(int(n_picos), anios)
-        out |= {"picos": int(n_picos), "lambda_por_anio": n_picos / anios, "ic_garwood_95": [lo, hi]}
+        out |= {"picos": int(n_picos), "lambda_por_anio": n_picos / anios, "ic_garwood_95": [lo, hi],
+                "nota_ic": NOTA_GARWOOD_E0 if rama.startswith("E0") else None}  # fmt: skip
     return out
 
 
