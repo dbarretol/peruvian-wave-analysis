@@ -87,6 +87,12 @@ NOTA_REGRESION = (
 )
 
 
+NOTA_FIGURA = (
+    "Descriptiva (metodologia.md §3.7): el RL100 central casi no cambia con u; al subir u quedan menos picos y se "
+    "abre el límite superior del IC. No sirve para elegir u*: la regla se eligió por simulación (ADR-0037)."
+)
+
+
 def _o_none(x):
     return None if x is None else float(x)
 
@@ -279,6 +285,53 @@ def evaluar_gates(g1: dict, g2: dict, g3: dict, largas: dict, umb: dict, n_picos
     return gates, motivos
 
 
+FIGURA_RL100_PICOS = "rl100_y_picos_frente_a_u.png"
+REGLAS_FIGURA = (("R1b", "-", "u* (R1b)"), ("R2", ":", "R2"), ("R3", "-.", "R3"))
+
+
+def figura_rl100_y_picos(barrido: pd.DataFrame, umb: dict, ruta: Path) -> dict:
+    """RL100 con su IC de perfil y número de picos sobre u, frente a u, en las ramas que pasan a la F8 (descriptiva;
+    pedida por el usuario el 2026-11-25). Devuelve, por rama, si los ejes cubren todos los datos dibujados."""
+    import matplotlib  # noqa: PLC0415
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt  # noqa: PLC0415
+
+    fig, axs = plt.subplots(1, len(RAMAS_F8), figsize=(13, 4.6), sharey=True)
+    cubre = {}
+    for ax, rama in zip(np.atleast_1d(axs), RAMAS_F8, strict=True):
+        g = barrido[barrido["rama"] == rama].sort_values("u_m")
+        ax.fill_between(g["u_m"], g["rl100_lo"], g["rl100_hi"], alpha=0.18, color="C0", label="IC de perfil del 95 %")
+        ax.plot(g["u_m"], g["rl100"], marker="o", ms=3, color="C0", label="RL100")
+        ax.set_xlabel("Umbral u (m)")
+        ax.set_title(f"{rama} ({PAPEL[rama]})")
+        a2 = ax.twinx()
+        a2.step(g["u_m"], g["n"], where="mid", color="C1", lw=1.4, label="picos sobre u")
+        a2.set_ylim(0, 1.05 * float(g["n"].max()))
+        a2.set_ylabel("Picos sobre u", color="C1")
+        for regla, estilo, et in REGLAS_FIGURA:
+            u = umb["ramas"][rama].get(regla, {}).get("u_m")
+            if u is not None:
+                ax.axvline(float(u), color="k", ls=estilo, lw=0.9, label=et)
+        y0, y1 = ax.get_ylim()
+        x0, x1 = ax.get_xlim()
+        cubre[rama] = bool(
+            y0 <= float(g["rl100_lo"].min()) and float(g["rl100_hi"].max()) <= y1
+            and x0 <= float(g["u_m"].min()) and float(g["u_m"].max()) <= x1
+            and float(g["n"].max()) <= a2.get_ylim()[1]
+        )  # fmt: skip
+    axs[0].set_ylabel("RL100 (m)")
+    h1, l1 = axs[0].get_legend_handles_labels()
+    h2, l2 = axs[0].figure.axes[-1].get_legend_handles_labels()
+    fig.legend(h1 + h2, l1 + l2, loc="lower center", ncol=6, frameon=False)
+    fig.suptitle("RL100 y picos sobre u frente al umbral (IET* = 48 h)")
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(ruta, dpi=130)
+    plt.close(fig)
+    return cubre
+
+
 def resumen_rama(rama: str, umb: dict, conteo: pd.Series, diag: pd.Series, sens: pd.DataFrame, n_dud: int,
                  verano: int, nota_garwood: str) -> dict:  # fmt: skip
     u = umb["ramas"][rama]
@@ -392,6 +445,9 @@ def ejecutar(raiz_datos=None) -> Path:
             c["inicio"] = R.inicio_rama(r, inicio_serie, datos.inicio_e1)
             ramas[r] = resumen_rama(r, umb, c, diag.loc[r], sens, int(sj["dudosos_f3"][r]),
                                     int(dj["picos_de_verano"]["picos_nov_abr_sobre_u"][r]), nota_g)  # fmt: skip
+        ejes = figura_rl100_y_picos(barrido, umb, st / "figuras" / FIGURA_RL100_PICOS)
+        if not all(ejes.values()):
+            motivos.append(f"La figura {FIGURA_RL100_PICOS} recorta datos: {ejes}")
         g2 = comprobar_eventos(ev, datos.serie["VHM0"].astype(float), p95, iet)
         n_picos = {r: int((picos[picos["rama"] == r]["hs"] > u_estrella[r]).sum()) for r in R.RAMAS}
         gates, m = evaluar_gates(g1, g2, anidados(barrido), largas, umb, n_picos, j_iet, bajo, cola)
@@ -479,6 +535,7 @@ def ejecutar(raiz_datos=None) -> Path:
                     ]
                 },
             },  # fmt: skip
+            "figuras": {FIGURA_RL100_PICOS: {"ejes_cubren_los_datos": ejes, "lectura": NOTA_FIGURA}},
             "rotulos": ROTULOS,
         }
         json_estricto.escribir(st / "resumen_f07.json", resumen)

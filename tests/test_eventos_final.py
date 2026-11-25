@@ -201,3 +201,15 @@ def test_verificar_insumos_contra_el_manifiesto(tmp_path):
 def test_iet_siguiente_none_si_no_hay_vecino():
     """F07-R-04: con IET* = 120 h, iet.json deja el siguiente en None."""
     assert F._o_none(None) is None and F._o_none(54) == 54.0
+
+
+def test_figura_rl100_y_picos(tmp_path):
+    u = np.linspace(2.75, 3.65, 6)
+    b = pd.concat([pd.DataFrame({"rama": r, "u_m": u, "n": [400, 300, 150, 70, 40, 30], "rl100": 4.8,
+                                 "rl100_lo": 4.45, "rl100_hi": [5.0, 5.3, 5.6, 6.1, 7.6, 8.6]})
+                   for r in F.RAMAS_F8])  # fmt: skip
+    umb = {"ramas": {r: {"R1b": {"u_m": 3.395}, "R2": {"u_m": 2.755}, "R3": {"u_m": 2.885}} for r in F.RAMAS_F8}}
+    ruta = tmp_path / "figuras" / F.FIGURA_RL100_PICOS
+    cubre = F.figura_rl100_y_picos(b, umb, ruta)
+    assert ruta.is_file() and ruta.stat().st_size > 0
+    assert cubre == dict.fromkeys(F.RAMAS_F8, True)
