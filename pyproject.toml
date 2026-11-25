@@ -58,6 +58,7 @@ eventos-iet = "peruvian_wave_analysis.eventos.iet:main"
 eventos-umbral = "peruvian_wave_analysis.eventos.umbral_datos:main"
 eventos-diagnosticos = "peruvian_wave_analysis.eventos.diagnosticos_datos:main"
 eventos-sensibilidades = "peruvian_wave_analysis.eventos.sensibilidades:main"
+eventos-final = "peruvian_wave_analysis.eventos.final:main"
 
 [build-system]
 requires = ["hatchling"]
