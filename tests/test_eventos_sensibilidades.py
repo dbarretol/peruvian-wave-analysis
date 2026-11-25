@@ -20,7 +20,7 @@ DOM = np.array(["SW1"] * HS.size, dtype=object)
 
 
 def _corte(hs=HS, tp=TP, sw1=TM_SW1, dom=DOM):
-    return S.corte_tp(hs, tp, {"SW1": sw1, "SW2": TM_SW2}, dom)
+    return S.corte_tp(hs, tp, {"SW1": sw1, "SW2": np.full(len(hs), 8.0)}, dom, 0, len(hs) - 1)
 
 
 def test_corte_tp_cumple_las_cuatro_condiciones():
@@ -57,6 +57,22 @@ def test_corte_tp_falla_si_falta_una_condicion(cambio):
     elif cambio == "tp_nan":
         tp[11] = np.nan
     assert _corte(hs, tp, sw1, dom) is None
+
+
+def test_comprobacion_frente_a_la_vecina():
+    """Mismo procedimiento que la bajada: la subparte junto a una vecina ya cortada cumple las condiciones frente a
+    ella. Con la cresta vecina a 4 pasos (12 h) de la cresta izquierda, el corte no vale; a 10 pasos, sí."""
+    pre = 12
+    hs = np.concatenate([np.full(pre, 2.0), HS])
+    tp, sw1 = np.concatenate([np.full(pre, 8.0), TP]), np.concatenate([np.full(pre, 8.0), TM_SW1])
+    dom = np.array(["SW1"] * hs.size, dtype=object)
+    tm = {"SW1": sw1, "SW2": np.full(hs.size, 8.0)}
+    hs[pre - 1] = 2.5  # corte compartido con la vecina
+    for vecina, vale in ((pre + 2 - 4, False), (pre + 2 - 10, True)):
+        hs[vecina] = 3.9
+        c = S.corte_tp(hs, tp, tm, dom, pre, hs.size - 1, izquierda=vecina)
+        assert (c is not None) is vale
+        hs[vecina] = 2.0
 
 
 def test_un_salto_de_tp_por_cambio_de_particion_no_parte():

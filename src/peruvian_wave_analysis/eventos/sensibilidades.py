@@ -1,7 +1,7 @@
 """Sensibilidades de §3.7, ``eventos-sensibilidades`` (contrato de la F7, §3.7; ADR-0026 §5). **Descriptivas: no
 mueven u\\* ni el IET\\*.** Solo las seis que fija el contrato; lo raro que salga va como nota.
 
-**Lectura común (precisión n.º 28, propuesta):** en cada sensibilidad, u\\* e IET\\* de cada rama quedan fijos (los
+**Lectura común (precisión n.º 28, aceptada por el usuario el 2026-11-24):** en cada sensibilidad, u\\* e IET\\* de cada rama quedan fijos (los
 publicados por ``eventos-umbral`` y ``eventos-iet``). Se rehacen los eventos, los picos de cada rama y el ajuste de la
 GPD en u\\* (``iet.ajuste_descriptivo``: ξ̂ y RL100 con su IC de perfil). No se vuelve a correr R1b. En las ramas por
 cuantiles, u_id llevado y el borde de E-29 son los del período principal.
@@ -11,14 +11,15 @@ cuantiles, u_id llevado y el borde de E-29 son los del período principal.
 3. **Con enero a agosto de 2026:** los mismos eventos, asignados hasta el último estado de la serie; exposición en años
    decimales con la misma fórmula (P1).
 4. **Regla de Tp (E-06, E-28), rotulada posterior a ver las figuras de la F6.** Sobre cada evento de §3.2 (después de la
-   bajada), un corte en m con crestas tl (máximo de Hs a la izquierda, primera aparición) y tr (a la derecha):
-   - tr − tl ≥ 24 h; Hs(m) es el mínimo entre las crestas; min(Hs(tl), Hs(tr)) − Hs(m) ≥ 0.3 m;
+   bajada), **el mismo procedimiento que la bajada** (``identificacion.dividir(orden="mas_honda")``, con la
+   comprobación frente a las vecinas); solo cambia la condición de validez del corte. Un corte en m con crestas tl
+   (máximo de Hs a la izquierda, primera aparición) y tr (a la derecha) vale si (umbrales del contrato, §3.7 punto 4):
+   - tr − tl ≥ 24 h; Hs(m) es el mínimo entre las crestas; **cada** cresta supera Hs(m) en ≥ 0.3 m (la prominencia,
+     30 veces la discretización de 0.01 m: una oscilación de Hs no parte);
    - VTPK(tr) − VTPK(m) ≥ 3 s;
    - en tr domina una partición de swell (SW1 o SW2, ``ramas.particion_dominante``), y su VTM01 sube ≥ 2 s de m a tr.
 
-   Un NaN en cualquiera de esas variables hace fallar el corte. Orden: el corte válido más hondo de todo el evento, y
-   se repite (como la bajada), **sin** la comprobación frente a las vecinas. Se publican los eventos partidos y el
-   RL100 en u\\*.
+   Un NaN en cualquiera de esas variables hace fallar el corte. Se publican los eventos partidos y el RL100 en u\\*.
 5. **Picos con ``dudoso_f3``** sobre u\\* de cada rama y su rango en la cola (1 = el mayor).
 6. **Intensidad de la prueba de Poisson con 2 y 4 estaciones:** ya calculada en ``eventos-diagnosticos``; aquí se
    copia en (u\\*, IET\\*) de cada rama, con su tamaño.
@@ -71,13 +72,28 @@ def ruta_salida(raiz: Path) -> Path:
 # --- Regla de Tp -----------------------------------------------------------------------------------
 
 
-def corte_tp(hs, tp, tm01, dominante, sep_pasos: float = SEP_TP_H / PASO_H) -> tuple[int, float] | None:
-    """(posición, profundidad) del corte válido más hondo de la regla de Tp en una parte, o None.
+def cumple_tp(hs, tp, tm01, dominante, cresta1: int, m: int, cresta2: int, bajada: float) -> bool:
+    """Las condiciones de §3.7, punto 4, en posiciones absolutas: crestas a ≥ 24 h; ``bajada`` ≥ 0.3 m sobre Hs(m);
+    VTPK sube ≥ 3 s de m a la segunda cresta; en ella domina un swell cuyo VTM01 sube ≥ 2 s. Un NaN no cumple."""
+    if cresta2 - cresta1 < SEP_TP_H / PASO_H - ID.TOL or not bajada >= BAJADA_TP_M - ID.TOL:
+        return False
+    if not tp[cresta2] - tp[m] >= SUBIDA_TP_S - ID.TOL:
+        return False
+    p = dominante[cresta2]
+    return p in SWELL and bool(tm01[p][cresta2] - tm01[p][m] >= SUBIDA_TM01_S - ID.TOL)
 
-    ``tm01``: dict partición → VTM01 de esa partición en la parte; ``dominante``: partición dominante en cada paso.
-    El corte deja [0, m] y [m + 1, fin].
+
+def corte_tp(hs, tp, tm01, dominante, s: int, e: int, izquierda: int | None = None,
+             derecha: int | None = None) -> tuple[int, float] | None:  # fmt: skip
+    """(posición relativa a ``s``, profundidad) del corte válido más hondo de la regla de Tp en la parte [s, e], o None.
+
+    Mismo procedimiento que la bajada (``identificacion.corte``) con otra condición de validez: crestas = máximo de Hs
+    a cada lado (primera aparición), m = el mínimo entre ellas. ``izquierda``/``derecha``: posición absoluta de la
+    cresta de la parte vecina ya cortada (el corte compartido es s − 1 o e). **Comprobación frente a las vecinas:** la
+    subparte junto a una vecina cumple las condiciones frente a ella (su cresta sobre el corte compartido, como en la
+    bajada). El corte deja [s, s + m] y [s + m + 1, e].
     """
-    x = np.asarray(hs, dtype=float)
+    x = np.asarray(hs[s : e + 1], dtype=float)
     if x.size < 3:
         return None
     xm = np.where(np.isnan(x), -np.inf, x)
@@ -87,15 +103,15 @@ def corte_tp(hs, tp, tm01, dominante, sep_pasos: float = SEP_TP_H / PASO_H) -> t
         if np.isnan(x[m]):
             continue
         tl, tr = izq[m], der[m + 1]
-        if tr - tl < sep_pasos - ID.TOL or x[m] > np.nanmin(x[tl : tr + 1]):
+        if x[m] > np.nanmin(x[tl : tr + 1]):
             continue
         prof = min(x[tl], x[tr]) - x[m]
-        if not prof >= BAJADA_TP_M - ID.TOL:
+        if not cumple_tp(hs, tp, tm01, dominante, s + tl, s + m, s + tr, prof):
             continue
-        if not tp[tr] - tp[m] >= SUBIDA_TP_S - ID.TOL:  # NaN: no cumple
+        if izquierda is not None and not cumple_tp(hs, tp, tm01, dominante, izquierda, s - 1, s + tl,
+                                                   x[tl] - hs[s - 1]):  # fmt: skip
             continue
-        p = dominante[tr]
-        if p not in SWELL or not tm01[p][tr] - tm01[p][m] >= SUBIDA_TM01_S - ID.TOL:
+        if derecha is not None and not cumple_tp(hs, tp, tm01, dominante, s + tr, e, derecha, x[tr] - hs[e]):
             continue
         if prof > prof_mejor + ID.TOL:
             mejor, prof_mejor = m, float(prof)
@@ -103,12 +119,16 @@ def corte_tp(hs, tp, tm01, dominante, sep_pasos: float = SEP_TP_H / PASO_H) -> t
 
 
 def dividir_tp(hs, tp, tm01, dominante, a: int, b: int) -> list[tuple[int, int]]:
-    """Partes de [a, b] con la regla de Tp: en cada paso, el corte válido más hondo entre todas las partes."""
+    """Partes de [a, b] con la regla de Tp y el procedimiento de ``identificacion.dividir(orden="mas_honda")``: en cada
+    paso, el corte válido más hondo entre todas las partes (empate: el de más a la izquierda), con la comprobación
+    frente a las vecinas; se repite hasta que ninguno cumpla."""
     partes = [(a, b)]
     while True:
         elegido = None
         for i, (s, e) in enumerate(partes):
-            c = corte_tp(hs[s : e + 1], tp[s : e + 1], {p: v[s : e + 1] for p, v in tm01.items()}, dominante[s : e + 1])
+            izq = ID._pico(hs, *partes[i - 1]) if i > 0 else None
+            der = ID._pico(hs, *partes[i + 1]) if i + 1 < len(partes) else None
+            c = corte_tp(hs, tp, tm01, dominante, s, e, izq, der)
             if c is not None and (elegido is None or c[1] > elegido[2] + ID.TOL):
                 elegido = (i, c[0], c[1])
         if elegido is None:
