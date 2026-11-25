@@ -321,6 +321,8 @@ Cada salida publicada lleva un `MANIFEST.json` sin marcas de tiempo: insumos con
 uv run pytest
 ```
 
+**Auditoría independiente** (`auditoria/`, fuera del paquete y sin importarlo): `uv run python auditoria/recalculo.py --datos <WAVE-DATA>` y `uv run python auditoria/cruces.py --datos <WAVE-DATA>` recalculan desde `raw/` las cifras principales de la F1 a la F7 y las comparan con lo publicado; escriben solo en `<WAVE-DATA>/interim/auditoria/` (o en `--salida`).
+
 Las pruebas usan datos sintéticos en directorios temporales y **no acceden a la red**. Se comprueban con `uv run ruff check src tests` (ruff fijado en las dependencias de desarrollo).
 
 ## Fuentes de datos
