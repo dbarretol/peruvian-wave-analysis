@@ -282,3 +282,13 @@ def test_nulo_de_la_pendiente_por_celda_y_vacias():
     assert n["celdas_poco_informativas"] == [celda]
     lo, hi = n["intervalo"]
     assert lo < 0 < hi  # el ruido común es simétrico
+
+
+def test_simulacion_igual_con_0_y_2_procesos(tmp_path, monkeypatch):
+    """G9: la simulación previa da el mismo resultado en el proceso y con 2 procesos hijos (semillas por réplica)."""
+    monkeypatch.setattr(SP, "TROZO", 2)
+    cs = [x for x in _celdas() if x.caso in ("A", "B-") and x.N0 == 334][:2]
+    a = SP._correr(cs, 4, ("R1b", "R3"), tmp_path / "cero", 0, "cero")
+    b = SP._correr(cs, 4, ("R1b", "R3"), tmp_path / "dos", 2, "dos")
+    assert len(a) > 0 and set(a["celda"]) == {SP.nombre_celda(c) for c in cs}
+    pd.testing.assert_frame_equal(a, b)

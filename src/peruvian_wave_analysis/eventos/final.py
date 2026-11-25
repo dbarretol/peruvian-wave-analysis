@@ -63,12 +63,13 @@ NOTA_XI = (
     "ξ se deja libre y su incertidumbre pasa tal cual (IC de perfil). Fijar ξ = 0 puede ir solo como sensibilidad de "
     "la F9 (decisión del usuario, 2026-11-24)."
 )
-PENDIENTES_F8 = [
-    "Con qué datos se ajusta Tp condicionado a Hs (solo los picos sobre u* o todos los estados de mar).",
-    "Cómo pasa la incertidumbre de ξ a los contornos (no solo el valor central).",
-    "Según la hoja de ruta, Tp | Hs es de la F10 (ADR-0021) y los contornos de la F11: el contrato de la F8 dice si "
-    "los resuelve o los pasa.",
-]
+# pendientes de contrato, anotados donde se resuelven (pedido del usuario, 2026-11-24; no resueltos)
+PENDIENTE_F9 = "La F9 produce el IC de ξ y lo entrega a la F11 para que lo propague a los contornos."
+PENDIENTE_F10 = (
+    "Con qué datos se ajusta Tp condicionado a Hs: solo los picos sobre u* o todos los estados de mar. Si se usan "
+    "todos, el factor de Hs no se aplica bajo el P99."
+)
+PENDIENTE_F11 = "Cómo pasa a los contornos la incertidumbre de ξ que entrega la F9 (no solo el valor central)."
 ROTULOS = [
     "ADR-0038 (ramas que pasan a la F8): decidido después de ver u*, los RL100, las sensibilidades y el factor.",
     "Nota de Garwood en E1: escrita después de ver los diagnósticos de §3.5.",
@@ -327,7 +328,6 @@ def ejecutar(raiz_datos=None) -> Path:
                         "factor de Hs con su intervalo (solo Hs)",
                     ],
                     "condicion_e2": "Un escalón en la GPD va también en λ (E-07).",
-                    "pendientes_del_contrato_de_la_f8": PENDIENTES_F8,
                 },
                 "F9": {
                     "recibe": [
@@ -341,12 +341,18 @@ def ejecutar(raiz_datos=None) -> Path:
                         "intervalo del factor de Hs",
                     ],
                     "xi": NOTA_XI,
+                    "pendiente_del_contrato_de_la_f9": PENDIENTE_F9,
                 },
                 "F10": {
                     "recibe": [
                         "eventos.csv y picos con Tp, dirección y partición dominante",
                         "factor de Hs con su intervalo: solo la coordenada Hs; Tp | Hs en la Hs sin corregir",
-                    ]
+                    ],
+                    "pendiente_del_contrato_de_la_f10": PENDIENTE_F10,
+                },
+                "F11": {
+                    "recibe": ["factor de Hs con su intervalo: solo la coordenada Hs del contorno"],
+                    "pendiente_del_contrato_de_la_f11": PENDIENTE_F11,
                 },
                 "F12": {
                     "recibe": [
