@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -92,3 +94,17 @@ def test_barrido_y_regla_en_una_serie_sintetica():
     m = RI.cambios(rl)
     iet, sensible = RI.regla_iet(m, (42.0, 48.0, 54.0), 0.01)
     assert iet in (48.0, 54.0)
+
+
+def test_limite_privado_de_extremos_firma_y_resultado():
+    """`iet.perfil_sigma_mod` usa `perfil._limite`, privada de `extremos/` (F07-R, revisión de código): si cambia su
+    firma o su resultado, falla aquí y no al correr el barrido."""
+    assert list(inspect.signature(PF._limite).parameters) == ["deficit", "punto", "q", "tope", "n_pasos"]
+    q = 3.841458820694124  # χ²₁ del 95 %
+    hi, c_hi = PF._limite(lambda t: (t - 2.0) ** 2, 2.0, q, 10.0)  # raíz en 2 + √q, barriendo hacia arriba
+    lo, c_lo = PF._limite(lambda t: (t - 2.0) ** 2, 2.0, q, -10.0)  # hacia abajo
+    assert c_hi is None and c_lo is None
+    assert hi == pytest.approx(2.0 + np.sqrt(q), abs=1e-8) and lo == pytest.approx(2.0 - np.sqrt(q), abs=1e-8)
+    assert PF._limite(lambda t: (t - 2.0) ** 2, 2.0, q, 3.0) == (pytest.approx(np.nan, nan_ok=True), PF.TOPE)
+    v, c = PF._limite(lambda t: (t - 2.0) ** 2 if t < 3.0 else np.nan, 2.0, q, 10.0)
+    assert np.isnan(v) and c == PF.BORDE

@@ -70,9 +70,9 @@ def test_tablas_y_tareas(corrida):
 def test_determinismo_con_uno_y_dos_procesos(tmp_path, corrida):
     """G9: mismo resultado con 0 (en el proceso) y con 2 procesos hijos; semillas por nombre de tarea."""
     tabla2, seps2, tam2, sd2, _, _ = _correr(tmp_path, 2, "dos")
-    pd.testing.assert_frame_equal(corrida[0], tabla2)
-    pd.testing.assert_frame_equal(corrida[2], tam2)
-    pd.testing.assert_frame_equal(corrida[3], sd2)
+    pd.testing.assert_frame_equal(corrida[0], tabla2, check_exact=True)
+    pd.testing.assert_frame_equal(corrida[2], tam2, check_exact=True)
+    pd.testing.assert_frame_equal(corrida[3], sd2, check_exact=True)
 
 
 def test_reanuda_sin_recalcular(tmp_path):

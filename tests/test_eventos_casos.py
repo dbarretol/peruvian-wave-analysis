@@ -10,6 +10,7 @@ from peruvian_wave_analysis.comun import etapa, json_estricto
 from peruvian_wave_analysis.eventos import casos as CS
 from peruvian_wave_analysis.eventos import piloto_r3 as PR
 from peruvian_wave_analysis.eventos import salidas as SA
+from peruvian_wave_analysis.validacion import reanudable
 
 from . import test_clima_etapa1 as T1
 
@@ -94,3 +95,26 @@ def test_piloto_r3_de_extremo_a_extremo(tmp_path, monkeypatch):
     r = json_estricto.leer(salida / "piloto_r3.json")
     assert r["replicas"] == 2 and "atajo_aceptado" in r and r["celdas"] == ["A_0_N60"]
     etapa.exigir_publicada(SA.ruta_conteo_previo(raiz))  # el piloto no borra el conteo
+
+
+def _iguales_exacto(a: list, b: list) -> None:
+    """Mismas réplicas, mismas claves y los mismos valores bit a bit (NaN igual a NaN)."""
+    a = [r for parte in a for r in parte]
+    b = [r for parte in b for r in parte]
+    assert len(a) == len(b) > 0
+    for x, y in zip(a, b, strict=True):
+        assert x.keys() == y.keys()
+        for k in x:
+            np.testing.assert_array_equal(np.asarray(x[k]), np.asarray(y[k]), err_msg=k)
+
+
+def test_piloto_r3_igual_con_0_y_2_procesos(tmp_path, monkeypatch):
+    """G9 (F07-R-03): el piloto de R3 da lo mismo en el proceso y con 2 procesos hijos (semilla por réplica)."""
+    monkeypatch.setattr(PR, "TROZO", 1)
+    conteo = {"u_id_m": U_ID, "n0_simulacion": {"n0": [60, 80], "anios_simulados": [33, 46]}}
+    cs = PR.celdas_piloto(conteo)[:1]
+    t = PR.tareas(cs, 2)
+    assert len(t) == 2
+    a = reanudable.ejecutar(PR._trabajo, t, tmp_path / "cero", 0)
+    b = reanudable.ejecutar(PR._trabajo, t, tmp_path / "dos", 2)
+    _iguales_exacto(a, b)

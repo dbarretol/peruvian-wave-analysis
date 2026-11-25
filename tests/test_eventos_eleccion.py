@@ -291,4 +291,4 @@ def test_simulacion_igual_con_0_y_2_procesos(tmp_path, monkeypatch):
     a = SP._correr(cs, 4, ("R1b", "R3"), tmp_path / "cero", 0, "cero")
     b = SP._correr(cs, 4, ("R1b", "R3"), tmp_path / "dos", 2, "dos")
     assert len(a) > 0 and set(a["celda"]) == {SP.nombre_celda(c) for c in cs}
-    pd.testing.assert_frame_equal(a, b)
+    pd.testing.assert_frame_equal(a, b, check_exact=True)

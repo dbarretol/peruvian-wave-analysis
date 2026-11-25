@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from peruvian_wave_analysis import manifiesto
+from peruvian_wave_analysis.comun import etapa, json_estricto
 from peruvian_wave_analysis.eventos import final as F
 from peruvian_wave_analysis.eventos import identificacion as ID
 
@@ -83,3 +85,119 @@ def test_tabla_de_eventos_asigna_eras_y_marca_picos_y_duracion():
 def test_anidados():
     b = pd.DataFrame({"rama": ["a"] * 3 + ["b"] * 3, "u_m": [3.0, 3.2, 3.4] * 2, "n": [50, 40, 30, 50, 41, 42]})
     assert F.anidados(b) == {"a": True, "b": False}
+
+
+def test_comprobar_factor_sin_picos_sobre_u_da_none():
+    p = pd.DataFrame({"rama": [f"{e}_{v}" for e in ("E0", "E1") for v in ("sin_corregir", "cuantiles")],
+                      "id_evento": 1, "hs": 3.0})  # fmt: skip
+    d = F.comprobar_factor(p, 1.0551, {"E0_sin_corregir": 3.6, "E1_sin_corregir": 3.6})
+    assert d["E0"] == {"picos": 0, "desviacion_relativa_maxima": None}
+
+
+def test_alerta_marca_si_una_era_pasa_del_5_por_ciento():
+    """F07-R-06: E1 con 1 largo de 10 marca aunque toda la serie no pase del 5 %."""
+    n = 40
+    ev = pd.DataFrame({"en_E0": True, "en_E1": np.arange(n) < 10, "duracion_larga": np.arange(n) == 0})
+    a = F.alerta_rachas_largas(ev)
+    assert a["toda_la_serie"]["fraccion"] == pytest.approx(1 / 40) and a["E1"]["fraccion"] == pytest.approx(0.1)
+    assert a["marca"] is True
+    assert F.alerta_rachas_largas(ev.assign(duracion_larga=False))["marca"] is False
+
+
+def test_cola_del_factor_repite_la_seleccion_y_los_pesos_de_la_f5():
+    t = pd.date_range("1990-01-01", "1995-12-31 21:00", freq="3h")
+    hs = np.random.default_rng(3).gamma(4.0, 0.4, t.size)
+    b_q = {"P50": -0.01, "P90": -0.03, "P99": -0.05, "P99.9": None}
+    u = {"E0_sin_corregir": 3.5, "E0_cuantiles": 3.5 * 1.05, "E1_sin_corregir": 3.5, "E1_cuantiles": 3.0}
+    c = F.cola_del_factor(t, hs, b_q, u, 1.05)
+    assert c["q_max"] == 0.99
+    e1 = t >= pd.Timestamp("1993-01-01")
+    for e, m in (("E0", np.ones(t.size, bool)), ("E1", e1)):
+        h = np.quantile(hs[m], 0.99)  # pesos mensuales casi iguales en años completos
+        assert c[f"{e}_sin_corregir"]["umbral_cola_m"] == pytest.approx(h, rel=0.02)
+        assert c[f"{e}_cuantiles"]["umbral_cola_m"] == pytest.approx(c[f"{e}_sin_corregir"]["umbral_cola_m"] * 1.05)
+    u_e1 = c["E1_sin_corregir"]["umbral_cola_m"]
+    assert c["E1_sin_corregir"]["cumple"] is (3.5 >= u_e1) and c["E1_cuantiles"]["cumple"] is (3.0 >= u_e1 * 1.05)
+    bajo = F.cola_del_factor(t, hs, b_q, {k: 0.5 for k in u}, 1.05)
+    assert not any(bajo[k]["cumple"] for k in u)
+
+
+def test_comprobar_eventos_g2():
+    s = _serie()
+    ev = ID.identificar(s["VHM0"], 2.7, 48.0)
+    g = F.comprobar_eventos(ev, s["VHM0"], 2.7, 48.0)
+    assert g["cumple"] and g["eventos"] == 3 and g["separacion_minima_entre_picos_h"] >= 48.0
+    assert F.comprobar_eventos(ev, s["VHM0"], 2.7, 1e4)["picos_a_iet_o_mas"] is False
+    assert F.comprobar_eventos(ev, s["VHM0"], 3.6, 48.0)["picos_sobre_u_id"] is False
+    solape = ev.copy()
+    solape.loc[1, "t_inicio"] = solape.loc[0, "t_fin"]
+    assert F.comprobar_eventos(solape, s["VHM0"], 2.7, 48.0)["cumple"] is False
+
+
+def _gates(**cambios):
+    ramas = ("E0_sin_corregir", "E0_cuantiles", "E1_sin_corregir", "E1_cuantiles")
+    base = {
+        "g1": {"cumple": True},
+        "g2": {"cumple": True},
+        "g3": dict.fromkeys(ramas, True),
+        "largas": {k: {"fraccion": 0.0} for k in ("toda_la_serie", "E0", "E1")} | {"marca": False},
+        "umb": {"ramas": {r: {"g4": True, "R1b": {"estado": "con_resultado", "n": 41}} for r in ramas},
+                "g8": {"picos_bajo_p95_f3": []}},
+        "n_picos": dict.fromkeys(ramas, 41),
+        "j_iet": {"iet_sensible": False},
+        "bajo": [],
+        "cola": {"q_max": 0.99, **{r: {"cumple": True} for r in ramas}},
+    }  # fmt: skip
+    return F.evaluar_gates(**(base | cambios))
+
+
+def test_gates_calculados_y_g9_g10_pendientes():
+    g, m = _gates()
+    assert m == [] and g["G9"]["cumple"] == "pendiente" and g["G10"]["cumple"] == "pendiente"
+    assert all(v["cumple"] is True for k, v in g.items() if k not in ("G9", "G10"))
+
+
+def test_iet_sensible_es_marca_con_aviso_y_no_falla_g7():
+    """F07-R-01: el contrato acepta el IET* con la marca «IET sensible» y el aviso."""
+    g, m = _gates(j_iet={"iet_sensible": True})
+    assert m == [] and g["G7"]["cumple"] is True and g["G7"]["aviso"]
+
+
+@pytest.mark.parametrize(
+    ("cambio", "gate"),
+    [
+        ({"g1": {"cumple": False}}, "G1"),
+        ({"g2": {"cumple": False}}, "G2"),
+        ({"g3": {"E0_sin_corregir": False}}, "G3"),
+        ({"n_picos": {"E0_sin_corregir": 29}}, "G5"),
+        ({"n_picos": {"E0_sin_corregir": 40}}, "G5"),  # no coincide con umbral.json
+        ({"bajo": [{"rama": "E0_cuantiles"}]}, "G8"),
+        ({"cola": {"E1_sin_corregir": {"cumple": False}}}, "premisa_factor_hs"),
+        ({"cola": {"q_max": 0.99}}, "premisa_factor_hs"),  # sin ramas comprobadas
+    ],
+)
+def test_gate_forzado_a_fallar_da_su_motivo(cambio, gate):
+    """F07-R-08: cada gate que falla deja su motivo, y con motivos la etapa no publica (etapa.Gate)."""
+    _, m = _gates(**cambio)
+    assert m == [f"{gate} no se cumple"]
+
+
+def test_verificar_insumos_contra_el_manifiesto(tmp_path):
+    d = tmp_path / "processed" / "x"
+    d.mkdir(parents=True)
+    (d / "a.csv").write_text("1\n", encoding="utf-8")
+    (d / "b.csv").write_text("2\n", encoding="utf-8")
+    json_estricto.escribir(d / etapa.MANIFIESTO, {"salidas": {"a.csv": manifiesto.sha256(d / "a.csv"),
+                                                              "b.csv": "otro"}})  # fmt: skip
+    (tmp_path / "suelto.csv").write_text("3\n", encoding="utf-8")
+    ins = {"a": d / "a.csv", "b": d / "b.csv", "c": tmp_path / "suelto.csv"}
+    g = F.verificar_insumos(ins, etapa.exigir_insumos(ins), tmp_path)
+    assert g["cumple"] is False and g["verificados_contra_manifiesto"] == 1
+    assert g["hash_distinto"] == ["b"] and g["sin_manifiesto"] == ["c"]
+    ok = {"a": d / "a.csv"}
+    assert F.verificar_insumos(ok, etapa.exigir_insumos(ok), tmp_path)["cumple"] is True
+
+
+def test_iet_siguiente_none_si_no_hay_vecino():
+    """F07-R-04: con IET* = 120 h, iet.json deja el siguiente en None."""
+    assert F._o_none(None) is None and F._o_none(54) == 54.0

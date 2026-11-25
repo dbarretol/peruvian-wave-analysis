@@ -8,6 +8,7 @@ import pytest
 
 from peruvian_wave_analysis.comun import etapa, json_estricto
 from peruvian_wave_analysis.eventos import ruido_iet as RI
+from peruvian_wave_analysis.validacion import reanudable
 
 IETS = RI.IETS_H  # 42, 48, …, 120
 N_CORTA = 20_000
@@ -135,3 +136,20 @@ def test_ruido_iet_de_extremo_a_extremo(tmp_path, monkeypatch):
     assert set(r["tolerancia"]["por_proceso"]) == {"ar1_central", "fs_central"}
     assert r["comprobacion_duracion"]["sitio_dentro_del_rango"] and r["valores_de_picos_leidos"] is False
     assert len(pd.read_csv(salida / "replicas.csv")) == 2 * 2 * len(IETS)
+
+
+def test_ruido_iet_igual_con_0_y_2_procesos(tmp_path, monkeypatch):
+    """G9 (F07-R-03): el ruido del IET da lo mismo en el proceso y con 2 procesos hijos (semilla por réplica).
+    Réplicas de largo completo: los hijos importan ``replica`` sin el parche de largo corto."""
+    monkeypatch.setattr(RI, "TROZO", 1)
+    t = RI.tareas([RI.Proceso("ar1", 120.0, "ar1_central")], 2, 2.70, 3.15)
+    assert len(t) == 2
+    a = reanudable.ejecutar(RI._trabajo, t, tmp_path / "cero", 0)
+    b = reanudable.ejecutar(RI._trabajo, t, tmp_path / "dos", 2)
+    a = [r for parte in a for r in parte]
+    b = [r for parte in b for r in parte]
+    assert len(a) == len(b) == 2
+    for x, y in zip(a, b, strict=True):
+        assert x.keys() == y.keys()
+        for k in x:
+            np.testing.assert_array_equal(np.asarray(x[k]), np.asarray(y[k]), err_msg=k)
