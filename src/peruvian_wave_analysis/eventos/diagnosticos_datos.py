@@ -359,8 +359,9 @@ def marcas(tabla: pd.DataFrame, iets) -> dict:
     out = {}
     for rama in ERAS:
         g = tabla[(tabla["rama"] == rama) & tabla["iet_h"].isin(iets)]
-        pois = bool(g["poisson_armonico_rechaza"].all())
-        tau = bool(g["tau_todos_rechaza"].fillna(False).astype(bool).all())
+        hay = len(g) > 0  # una rejilla vacía no marca nada (F07-R-07)
+        pois = hay and bool(g["poisson_armonico_rechaza"].all())
+        tau = hay and bool(g["tau_todos_rechaza"].fillna(False).astype(bool).all())
         out[rama] = {
             "poisson_rechaza_en_toda_la_rejilla": pois,
             "tau_rechaza_en_toda_la_rejilla": tau,

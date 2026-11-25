@@ -31,12 +31,16 @@ from .. import rutas
 from ..clima import insumos as CI
 from ..comun import etapa, json_estricto, orquestador
 from ..comun.errores import GateFallido
+from ..homogeneidad import cuantiles as Q
+from ..validacion_obs import config as C5
+from ..validacion_obs import decision as D5
 from . import diagnosticos_datos as DD
 from . import identificacion as ID
 from . import iet as IE
 from . import ramas as R
 from . import ramas_picos as RP
 from . import sensibilidades as S
+from . import umbral as U
 from . import umbral_datos as UD
 
 ETAPA = orquestador.Etapa("eventos-final", Path(__file__).resolve(), Path("."))
@@ -77,6 +81,37 @@ ROTULOS = [
 ]
 
 
+NOTA_REGRESION = (
+    "Prueba de regresión: sobre el P99 la corrección de la F5 es exactamente el factor, así que la desviación es 0 "
+    "por construcción. No es una verificación independiente del factor (nota del usuario, 2026-11-24)."
+)
+
+
+def _o_none(x):
+    return None if x is None else float(x)
+
+
+def verificar_insumos(ins: dict[str, Path], hashes: dict[str, str], raiz: Path) -> dict:
+    """G1: cada insumo, contra el manifiesto de la salida publicada que lo contiene (el más cercano hacia arriba)."""
+    raiz = Path(raiz).resolve()
+    ok, sin, distintos = [], [], []
+    for k, p in ins.items():
+        p = Path(p).resolve()
+        d = next((a for a in p.parents if (a / etapa.MANIFIESTO).is_file() and raiz in a.parents), None)
+        if d is None:
+            sin.append(k)
+            continue
+        h = json_estricto.leer(d / etapa.MANIFIESTO)["salidas"].get(p.relative_to(d).as_posix())
+        (ok if h == hashes[k] else distintos).append(k)
+    return {
+        "cumple": not sin and not distintos,
+        "insumos": len(ins),
+        "verificados_contra_manifiesto": len(ok),
+        "sin_manifiesto": sin,
+        "hash_distinto": distintos,
+    }
+
+
 def ruta_salida(raiz: Path) -> Path:
     return Path(raiz) / "processed" / FASE / NOMBRE
 
@@ -111,10 +146,32 @@ def comprobar_factor(picos: pd.DataFrame, f: float, u: dict[str, float]) -> dict
         b = picos[picos["rama"] == f"{e}_cuantiles"].set_index("id_evento")["hs"]
         a, b = a.align(b, join="inner")
         sobre = a > u[f"{e}_sin_corregir"]
-        out[e] = {
-            "picos": int(sobre.sum()),
-            "desviacion_relativa_maxima": float(np.max(np.abs(b[sobre] / a[sobre] / f - 1.0))),
-        }
+        d = np.abs(b[sobre] / a[sobre] / f - 1.0)
+        out[e] = {"picos": int(sobre.sum()), "desviacion_relativa_maxima": float(d.max()) if len(d) else None}
+    return out
+
+
+def cola_del_factor(t, hs: np.ndarray, b_q: dict, u: dict[str, float], f: float) -> dict:
+    """Premisa del factor de Hs (ADR-0038, punto 3): u\\* está en la cola, donde la corrección de la F5 es constante.
+
+    Repite la selección y los pesos de la F5 (``validacion_obs.etapa``, paso 6, y ``decision.corregir``): E0 corrige
+    toda la serie válida; E1, el tramo asimilado (desde ``INICIO_ASIMILADO``). Con peso mensual, B queda constante
+    desde el cuantil estimable más alto (``q_max``, el P99), así que el umbral de la cola es el menor Hs sin corregir
+    con F_w ≥ q_max. En la rama por cuantiles ese umbral se multiplica por el factor. Se exige u\\* ≥ umbral.
+    """
+    t = pd.DatetimeIndex(t)
+    hs = np.asarray(hs, float)
+    q, _ = D5.funcion_cuantiles(b_q)
+    q_max = float(np.max(q))
+    validos = np.isfinite(hs)
+    sel = {"E0": validos, "E1": validos & (t >= pd.Timestamp(C5.INICIO_ASIMILADO))}
+    out = {"q_max": q_max, "seleccion": {"E0": "toda la serie válida", "E1": f"desde {C5.INICIO_ASIMILADO}"}}
+    for e, m in sel.items():
+        x = hs[m]
+        h = float(Q.cuantil_ponderado(x, Q.pesos_mensuales(t[m], np.isfinite(x)), q_max)[0])
+        for v, escala in (("sin_corregir", 1.0), ("cuantiles", f)):
+            rama = f"{e}_{v}"
+            out[rama] = {"umbral_cola_m": h * escala, "u_m": float(u[rama]), "cumple": bool(u[rama] >= h * escala)}
     return out
 
 
@@ -144,13 +201,82 @@ def alerta_rachas_largas(ev: pd.DataFrame) -> dict:
     for nombre, sub in (("toda_la_serie", ev), ("E0", ev[ev["en_E0"]]), ("E1", ev[ev["en_E1"]])):
         n = int(sub["duracion_larga"].sum())
         out[nombre] = {"eventos": int(len(sub)), "largos": n, "fraccion": n / len(sub) if len(sub) else None}
-    out["marca"] = bool(out["toda_la_serie"]["fraccion"] > FRACCION_LARGAS)
+    out["marca"] = any(
+        out[k]["fraccion"] is not None and out[k]["fraccion"] > FRACCION_LARGAS for k in ("toda_la_serie", "E0", "E1")
+    )
     return out
 
 
 def anidados(barrido: pd.DataFrame) -> dict[str, bool]:
     """G3: en cada rama, el número de picos no crece con u."""
     return {r: bool(np.all(np.diff(g.sort_values("u_m")["n"].to_numpy()) <= 0)) for r, g in barrido.groupby("rama")}
+
+
+def comprobar_eventos(ev: pd.DataFrame, hs: pd.Series, u_id: float, iet: float) -> dict:
+    """G2 sobre la salida: eventos sin solaparse, pico dentro de su evento y sobre u_id, picos consecutivos a ≥ IET\\*.
+    ``identificar`` ya exige la rejilla completa (``comprobar_rejilla``): si no la hay, no se llega aquí."""
+    ini, fin, pico = (pd.DatetimeIndex(ev[c]) for c in ("t_inicio", "t_fin", "t_pico"))
+    sep = (pico[1:] - pico[:-1]).total_seconds().to_numpy() / 3600.0 if len(ev) > 1 else np.array([np.inf])
+    hs_pico = hs.reindex(pico).to_numpy(float)
+    out = {
+        "rejilla_completa": True,
+        "eventos": int(len(ev)),
+        "sin_solape": bool(len(ev) < 2 or (ini[1:] > fin[:-1]).all()),
+        "pico_dentro_del_evento": bool(((pico >= ini) & (pico <= fin)).all()),
+        "picos_sobre_u_id": bool(np.all(hs_pico > u_id)),
+        "separacion_minima_entre_picos_h": float(sep.min()),
+        "picos_a_iet_o_mas": bool(sep.min() >= iet),
+    }
+    out["cumple"] = bool(len(ev) > 0) and all(v for v in out.values() if isinstance(v, bool))
+    return out
+
+
+def evaluar_gates(g1: dict, g2: dict, g3: dict, largas: dict, umb: dict, n_picos: dict[str, int], j_iet: dict,
+                  bajo: list, cola: dict) -> tuple[dict, list[str]]:  # fmt: skip
+    """Gates G1–G10 (contrato §7), la premisa del factor de Hs y los motivos de fallo. G9 y G10 se comprueban fuera
+    de la etapa: quedan «pendiente», con su referencia."""
+    sens = bool(j_iet["iet_sensible"])
+    eras_largas = ("toda_la_serie", "E0", "E1")
+    premisa = [v["cumple"] for v in cola.values() if isinstance(v, dict) and "cumple" in v]
+    gates = {
+        "G1": g1,
+        "G2": g2 | {"pruebas": "tests/test_eventos_identificacion.py (huecos, rachas y bajada; metodologia.md §3.4)"},
+        "G3": {
+            "cumple": all(g3.values()) and all(largas[k]["fraccion"] is not None for k in eras_largas),
+            "anidados_por_rama": g3,
+            "alerta_rachas_largas_calculada_en": list(eras_largas),
+            "marca_rachas_largas": bool(largas["marca"]),
+        },
+        "G4": {"cumple": all(bool(umb["ramas"][r]["g4"]) for r in R.RAMAS), "como": "de umbral.json (eventos-umbral)"},
+        "G5": {
+            "cumple": all(n >= U.N_MIN_ARRIBA for n in n_picos.values())
+            and all(n == int(umb["ramas"][r][UD.REGLA]["n"]) for r, n in n_picos.items()),
+            "picos_en_u": n_picos,
+            "minimo": U.N_MIN_ARRIBA,
+            "como": "picos rehechos sobre u*, contados aquí y comparados con el n de umbral.json",
+        },
+        "G6": {"cumple": all(umb["ramas"][r][UD.REGLA]["estado"] == "con_resultado" for r in R.RAMAS)},
+        # contrato §7: «IET* cumple §3.3, o lleva la marca "IET sensible" con el aviso al usuario» (F07-R-01)
+        "G7": {"cumple": True, "iet_sensible": sens, "aviso": "IET sensible: se avisa al usuario" if sens else None},
+        "G8": {"cumple": not bajo and not umb["g8"]["picos_bajo_p95_f3"], "picos_bajo_p95_f3": bajo},
+        "G9": {
+            "cumple": "pendiente",
+            "como": "pruebas de 0 frente a 2 procesos con comparación exacta "
+            "(test_determinismo_con_uno_y_dos_procesos, "
+            "test_simulacion_igual_con_0_y_2_procesos, test_piloto_r3_igual_con_0_y_2_procesos, "
+            "test_ruido_iet_igual_con_0_y_2_procesos); resultado en metodologia.md §4",
+        },
+        "G10": {
+            "cumple": "pendiente",
+            "como": "revisión de código de cierre (revision.md §8) y aceptación del usuario",
+        },
+        "premisa_factor_hs": {
+            "cumple": bool(premisa) and all(premisa),
+            "como": "u* ≥ umbral de la cola de la F5 en cada rama (ADR-0038, punto 3; decisiones.factor_hs_cuantiles)",
+        },
+    }
+    motivos = [f"{g} no se cumple" for g, v in gates.items() if v["cumple"] is False]
+    return gates, motivos
 
 
 def resumen_rama(rama: str, umb: dict, conteo: pd.Series, diag: pd.Series, sens: pd.DataFrame, n_dud: int,
@@ -197,8 +323,7 @@ def ejecutar(raiz_datos=None) -> Path:
     ins = RP.rutas_insumos(raiz)
     dirs = {"iet": IE.ruta_salida(raiz), "umbral": UD.ruta_salida(raiz), "diagnosticos": DD.ruta_salida(raiz),
             "sensibilidades": S.ruta_salida(raiz), "ramas_picos": RP.ruta_salida(raiz)}  # fmt: skip
-    for d in dirs.values():
-        etapa.exigir_publicada(d)
+    manifiestos = {k: etapa.exigir_publicada(d) for k, d in dirs.items()}
     ins |= {"iet": dirs["iet"] / "iet.json", "umbral": dirs["umbral"] / "umbral.json",
             "barrido_umbral": dirs["umbral"] / "barrido_umbral.csv",
             "diagnosticos": dirs["diagnosticos"] / "diagnosticos.csv",
@@ -207,7 +332,8 @@ def ejecutar(raiz_datos=None) -> Path:
             "sensibilidades_json": dirs["sensibilidades"] / "sensibilidades.json",
             "conteos": dirs["ramas_picos"] / "conteos.csv"}  # fmt: skip
     ins |= {f"picos_{r}": dirs["umbral"] / f"picos_{r}.csv" for r in R.RAMAS}
-    etapa.exigir_insumos(ins)
+    hashes = etapa.exigir_insumos(ins)
+    g1 = verificar_insumos(ins, hashes, raiz) | {"salidas_previas_verificadas": sorted(manifiestos)}
     datos = CI.cargar(raiz, ins, NOMBRE)
     p95 = float(json_estricto.leer(ins["resumen_candidatos"])["p95_hs_m"])
     j_iet = json_estricto.leer(ins["iet"])
@@ -243,10 +369,16 @@ def ejecutar(raiz_datos=None) -> Path:
         fac = factor_hs(r5)
         u_estrella = {r: float(umb["ramas"][r][UD.REGLA]["u_m"]) for r in R.RAMAS}
         comp = comprobar_factor(picos, fac["valor"], u_estrella)
-        fac["comprobacion_en_los_picos_sobre_u"] = comp | {"tolerancia": TOL_FACTOR}
-        desv = max(v["desviacion_relativa_maxima"] for v in comp.values())
-        if desv > TOL_FACTOR:
-            motivos.append(f"Los picos por cuantiles no son los sin corregir × {fac['valor']:.4f} (desv. {desv:.2e})")
+        fac["comprobacion_en_los_picos_sobre_u"] = comp | {"tolerancia": TOL_FACTOR, "tipo": NOTA_REGRESION}
+        desv = [v["desviacion_relativa_maxima"] for v in comp.values()]
+        if None in desv:
+            motivos.append("No hay picos sobre u* para comprobar el factor")
+        elif max(desv) > TOL_FACTOR:
+            motivos.append(f"Los picos por cuantiles no son los sin corregir × {fac['valor']:.4f} ({max(desv):.2e})")
+        sn = pd.read_parquet(ins["serie_nodo"], columns=["VHM0", "valido"])
+        b_q = next(x for x in r5["correccion"]["variantes"] if x["nombre"] == "cuantiles")["B_q"]
+        cola = cola_del_factor(sn.index, sn["VHM0"].where(sn["valido"]).to_numpy(float), b_q, u_estrella, fac["valor"])
+        fac["premisa_u_en_la_cola"] = cola
         barrido = pd.read_csv(ins["barrido_umbral"])
         diag = pd.read_csv(ins["diagnosticos"])
         diag = diag[diag["iet_h"] == iet].set_index("rama")
@@ -260,31 +392,17 @@ def ejecutar(raiz_datos=None) -> Path:
             c["inicio"] = R.inicio_rama(r, inicio_serie, datos.inicio_e1)
             ramas[r] = resumen_rama(r, umb, c, diag.loc[r], sens, int(sj["dudosos_f3"][r]),
                                     int(dj["picos_de_verano"]["picos_nov_abr_sobre_u"][r]), nota_g)  # fmt: skip
-        g3 = anidados(barrido)
-        gates = {
-            "G1": {"cumple": True, "como": "insumos con hash y salidas previas verificadas contra su manifiesto"},
-            "G2": {"cumple": True, "como": "identificación sobre la rejilla completa (comprobar_rejilla); las "
-                   "pruebas de huecos, rachas y bajada se dan en metodologia.md"},
-            "G3": {"cumple": all(g3.values()), "anidados_por_rama": g3, "alerta_rachas_largas_publicada": True},
-            "G4": {"cumple": all(umb["ramas"][r]["g4"] for r in R.RAMAS)},
-            "G5": {"cumple": all(umb["ramas"][r]["g5"] for r in R.RAMAS),
-                   "picos_en_u": {r: ramas[r]["n_sobre_u"] for r in R.RAMAS}},
-            "G6": {"cumple": all(umb["ramas"][r][UD.REGLA]["estado"] == "con_resultado" for r in R.RAMAS)},
-            "G7": {"cumple": not bool(j_iet["iet_sensible"]), "iet_sensible": bool(j_iet["iet_sensible"])},
-            "G8": {"cumple": not bajo and not umb["g8"]["picos_bajo_p95_f3"], "picos_bajo_p95_f3": bajo},
-            "G9": {"cumple": None, "como": "se comprueba fuera de esta etapa (metodologia.md)"},
-            "G10": {"cumple": None, "como": "revisión de código y aceptación del usuario"},
-        }  # fmt: skip
-        for g, v in gates.items():
-            if v["cumple"] is False:
-                motivos.append(f"{g} no se cumple")
+        g2 = comprobar_eventos(ev, datos.serie["VHM0"].astype(float), p95, iet)
+        n_picos = {r: int((picos[picos["rama"] == r]["hs"] > u_estrella[r]).sum()) for r in R.RAMAS}
+        gates, m = evaluar_gates(g1, g2, anidados(barrido), largas, umb, n_picos, j_iet, bajo, cola)
+        motivos += m
         resumen = {
             "fase": "F7",
             "nodo": NOMBRE,
             "decisiones": {
                 "u_id_m": p95,
                 "iet_estrella_h": iet,
-                "iet_siguiente_h": float(j_iet["par"]["siguiente_h"]),
+                "iet_siguiente_h": _o_none(j_iet["par"].get("siguiente_h")),
                 "regla_umbral": f"{UD.REGLA} (ADR-0037)",
                 "ramas_a_la_f8": {
                     "adr": ADR_RAMAS,
@@ -366,6 +484,8 @@ def ejecutar(raiz_datos=None) -> Path:
         json_estricto.escribir(st / "resumen_f07.json", resumen)
         if largas["marca"]:
             print("AVISO: rachas largas (§3.2, punto 4)", flush=True)
+        if gates["G7"]["iet_sensible"]:
+            print("AVISO: IET sensible (§3.3; G7)", flush=True)
         gate = etapa.Gate(not motivos, {"iet_estrella_h": iet, "ramas_f8": list(RAMAS_F8)}, motivos)
         return etapa.publicar(st, salida, gate, raices, ins, raiz, None)
 
