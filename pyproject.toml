@@ -48,6 +48,17 @@ clima-etapa0 = "peruvian_wave_analysis.clima.etapa0:main"
 clima-simulacion-previa = "peruvian_wave_analysis.clima.simulacion_previa:main"
 clima-etapa1 = "peruvian_wave_analysis.clima.etapa1:main"
 clima = "peruvian_wave_analysis.clima.run:main"
+eventos-conteo-previo = "peruvian_wave_analysis.eventos.conteo_previo:main"
+eventos-piloto-r3 = "peruvian_wave_analysis.eventos.piloto_r3:main"
+eventos-simulacion-previa = "peruvian_wave_analysis.eventos.simulacion_previa:main"
+eventos-ruido-iet = "peruvian_wave_analysis.eventos.ruido_iet:main"
+eventos-sesgo-regla = "peruvian_wave_analysis.eventos.sesgo_regla:main"
+eventos-ramas-picos = "peruvian_wave_analysis.eventos.ramas_picos:main"
+eventos-iet = "peruvian_wave_analysis.eventos.iet:main"
+eventos-umbral = "peruvian_wave_analysis.eventos.umbral_datos:main"
+eventos-diagnosticos = "peruvian_wave_analysis.eventos.diagnosticos_datos:main"
+eventos-sensibilidades = "peruvian_wave_analysis.eventos.sensibilidades:main"
+eventos-final = "peruvian_wave_analysis.eventos.final:main"
 
 [build-system]
 requires = ["hatchling"]

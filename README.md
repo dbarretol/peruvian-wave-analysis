@@ -35,6 +35,21 @@ Fase 6 (clima de oleaje) cerrada, en `clima/` y `extremos/`:
 - `clima-etapa1`: estratificación sin leer excesos: τ_e y separación provisional, picos provisionales (fechas y direcciones), bimodalidad de `VPED`, conteos por estrato en las cuatro ramas, fronteras para la fracción real, potencia de Anderson–Darling, α de familia y G7b.
 - `clima` (`clima/run.py`, con `escalas.py`, `estratos_sitio.py`, `gev_ramas.py`, `tablas.py` y `figuras.py`): etapa principal. Antes de leer excesos verifica que la etapa 1 esté publicada, sin cambios y con la misma huella de código e insumos (G7). Después: prueba de Anderson–Darling con el α congelado y escenarios, dependencia con IC por bloques (B = 999), descriptivos, GEV por rama, figuras y gate. **No se puede cambiar ningún archivo que use la etapa 1** (su huella cubre `picos.py`, `insumos.py`, `descriptivos.py`, `estratificacion.py`, `extremos/dependencia.py`, `estilo.py`, `uv.lock` y otros) sin repetirla.
 
+Fase 7 (eventos: umbral e independencia) cerrada, en `eventos/`:
+- Simulación previa, sin datos del sitio más allá del conteo y de cuantiles ya publicados:
+  - `eventos-conteo-previo`: cuenta los eventos (no su tamaño) en E0 y E1 con IET de 48 h y 120 h, y aplica la regla de revisión de u_id;
+  - `eventos-simulacion-previa`: las reglas de umbral R1a, R1b, R2 y R3 sobre procesos sintéticos, y la elección de la regla;
+  - `eventos-piloto-r3`: piloto de ADR-0034 (R3 con el ajuste rápido y con `ajustar_gpd` sobre las mismas réplicas);
+  - `eventos-ruido-iet`: ruido del RL100 entre IET vecinos bajo el nulo, que calibra la tolerancia de la regla del IET;
+  - `eventos-sesgo-regla`: sesgo de R1b y referencia de la sensibilidad (ADR-0037); lee la simulación publicada, no simula.
+- Etapa con datos:
+  - `eventos-ramas-picos`: eventos sobre u_id y picos de cada rama (E0 y E1, sin corregir y por cuantiles) en cada IET;
+  - `eventos-iet`: barrido del IET en E0 sin corregir y regla del IET\*;
+  - `eventos-umbral`: rejilla, barrido de umbral y regla R1b por rama, con R2 y R3 como sensibilidad;
+  - `eventos-diagnosticos`: Poisson con intensidad armónica, dispersión anual, τ de Kendall, separaciones, A² en u\*, Süveges y Davison y picos de verano. Descriptivos;
+  - `eventos-sensibilidades`: las seis sensibilidades del contrato, con u\* e IET\* fijos. Descriptivas;
+  - `eventos-final`: no elige nada. Reúne lo publicado y escribe `eventos.csv`, los picos de las ramas que pasan a la F8 (ADR-0038), `resumen_f07.json` con los gates y la figura de RL100 y picos frente a u. Verifica los hashes de los insumos contra sus manifiestos (G1) y que los picos rehechos coinciden con los de `eventos-umbral`.
+
 Primera herramienta: **mapa de selección de sitio**, en dos pasos.
 
 1. **Mapa exploratorio** (`mapa-sitio`): dada una coordenada de referencia, descarga la batimetría (GMRT), la malla de nodos de WAVERYS y las zonas protegidas y de hidrocarburos, y dibuja las isóbatas elegidas (por defecto 200, 100 y 50 m), la malla con el recuadro de cada celda, las zonas de exclusión y de colisión de usos, y hasta 3 nodos candidatos.
@@ -165,6 +180,27 @@ uv run clima --procesos 6                    # etapa principal; se reanuda si se
 
 `clima-etapa0` y `clima-simulacion-previa` no leen datos del sitio. El avance va a `interim/F06-clima-de-oleaje/` y se borra al publicar.
 
+### 11. Eventos: umbral e independencia
+
+```bash
+# simulación previa (sintética)
+uv run eventos-conteo-previo
+uv run eventos-simulacion-previa --previo      # cronometra, no publica
+uv run eventos-simulacion-previa --procesos 4  # larga; se reanuda si se corta
+uv run eventos-piloto-r3 --procesos 4          # ≈ 56 min con 4 procesos; se reanuda si se corta
+uv run eventos-ruido-iet --procesos 4          # se reanuda si se corta
+uv run eventos-sesgo-regla
+# etapa con datos, en este orden
+uv run eventos-ramas-picos
+uv run eventos-iet
+uv run eventos-umbral                          # unos 6 min
+uv run eventos-diagnosticos --procesos 4       # unos 7 min
+uv run eventos-sensibilidades
+uv run eventos-final
+```
+
+Todas aceptan `--datos <raíz de WAVE-DATA>`. Cada etapa con datos exige que las anteriores estén publicadas y con los hashes de su manifiesto. Las etapas con `--procesos` dan los mismos números con 0 y con 2 procesos: las semillas van por tarea (pruebas de G9 en `test_eventos_eleccion.py`, `test_eventos_casos.py`, `test_eventos_ruido_iet.py` y `test_eventos_diagnosticos_datos.py`).
+
 ### Cuaderno
 
 `notebooks/01_mapa_seleccion_sitio.ipynb`: cambiar la celda de parámetros y ejecutar todo. Incluye el paso al mapa definitivo.
@@ -243,6 +279,19 @@ En `WAVE_DATA_DIR`:
 - `processed/F06-clima-de-oleaje/etapa1/<nombre>/`: `estratos_etapa1.json` (conteos por estrato y rama, bimodalidad, fronteras, potencia, α de familia, G7b; `excesos_leidos: false`) y `MANIFEST.json`.
 - `processed/F06-clima-de-oleaje/<nombre>/`: salidas de §2 del contrato (`resumen_f06.json`, `estratos.json`, `dependencia.json`, `clima_mensual.csv`, `clase_fisica.parquet`, `dominancia.csv`, `picos_provisionales.csv`, `origen_mayores.csv`, `rachas.csv`, `declustering_dudoso.csv`, `tp_condicional.csv`, `peralte.csv`, `gev_bloques.csv`, `figuras/`) y `MANIFEST.json`.
 - `processed/F06-clima-de-oleaje/simulacion-previa/`: `simulacion_previa.json` (fronteras con sus rejillas, potencia, sesgo y ancho de los modelos, barrido de umbral y mínimo del modelo con ξ común) y `MANIFEST.json`.
+- `processed/F07-eventos/simulacion-previa/`:
+  - `conteo-previo/`: `conteo_previo.json`;
+  - `simulacion/`: `replicas.csv`, `resumen_celdas.csv` y `eleccion.json`;
+  - `piloto-r3/`: `piloto_r3.csv` y `piloto_r3.json`;
+  - `ruido-iet/`: `replicas.csv` y `ruido_iet.json`;
+  - `sesgo-regla/`: `sesgo_por_celda.csv`, `seleccion.csv`, `diferencias.csv` y `referencia_sensibilidad.json`;
+  - cada una con su `MANIFEST.json`.
+- `processed/F07-eventos/ramas-picos/<nombre>/`: `ramas_picos.json`, `conteos.csv`, `picos_por_iet.csv` y `MANIFEST.json`.
+- `processed/F07-eventos/iet/<nombre>/`: `iet.json`, `barrido_iet.csv`, `figuras/` y `MANIFEST.json`.
+- `processed/F07-eventos/umbral/<nombre>/`: `umbral.json`, `barrido_umbral.csv`, `picos_<rama>.csv` de las cuatro ramas, `figuras/` (estabilidad por rama) y `MANIFEST.json`.
+- `processed/F07-eventos/diagnosticos/<nombre>/`: `diagnosticos.json`, `diagnosticos.csv`, `separaciones.csv`, `suveges_davison.csv`, `tamano_poisson.csv`, `figuras/` y `MANIFEST.json`.
+- `processed/F07-eventos/sensibilidades/<nombre>/`: `sensibilidades.json`, `sensibilidades.csv`, `dudosos_f3.csv` y `MANIFEST.json`.
+- `processed/F07-eventos/<nombre>/`: `eventos.csv`, `picos_E1_sin_corregir.csv` (principal), `picos_E0_sin_corregir.csv` (sensibilidad), `resumen_f07.json` (decisiones, gates, premisa del factor de Hs y entregas), `figuras/rl100_y_picos_frente_a_u.png` y `MANIFEST.json`.
 
 Cada salida publicada lleva un `MANIFEST.json` sin marcas de tiempo: insumos con su ruta relativa a `WAVE_DATA_DIR` y su hash, salidas con su hash, huella del código, semilla y criterios del gate. Un gate fallido borra la salida anterior y deja solo `GATE_FAILED.json`.
 
@@ -271,6 +320,8 @@ Cada salida publicada lleva un `MANIFEST.json` sin marcas de tiempo: insumos con
 ```bash
 uv run pytest
 ```
+
+**Auditoría independiente** (`auditoria/`, fuera del paquete y sin importarlo): `uv run python auditoria/recalculo.py --datos <WAVE-DATA>` y `uv run python auditoria/cruces.py --datos <WAVE-DATA>` recalculan desde `raw/` las cifras principales de la F1 a la F7 y las comparan con lo publicado; escriben solo en `<WAVE-DATA>/interim/auditoria/` (o en `--salida`).
 
 Las pruebas usan datos sintéticos en directorios temporales y **no acceden a la red**. Se comprueban con `uv run ruff check src tests` (ruff fijado en las dependencias de desarrollo).
 

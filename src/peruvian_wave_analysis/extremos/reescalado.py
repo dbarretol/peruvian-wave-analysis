@@ -19,6 +19,16 @@ re-estimación en cada réplica.
 - una réplica con menos de 5 intervalos es inválida; se generan réplicas hasta tener B válidas, y si hacen falta
   más de 1.05·B generaciones es un error;
 - p = (1 + k)/(B + 1); rechazo ⇔ p ≤ 0.05 (con B = 99, k ≤ 4: tamaño 5 % para una nula simple).
+
+**Extensión de la F7** (contrato de la F7, §3.5, punto 1; sin cambiar el resultado de las llamadas anteriores):
+
+- ``llegadas``: las llegadas pueden ser un subconjunto de las tormentas (por ejemplo, las rachas con algún pico
+  sobre u*), mientras el tiempo muerto sigue saliendo de **todas** las tormentas: una tormenta grande no puede
+  empezar dentro del tiempo muerto de una chica, porque se habrían fusionado. Por omisión, todas son llegadas;
+- ``intensidad``: una intensidad por celda de la rejilla, en eventos por hora (por ejemplo, de una regresión
+  armónica ajustada sobre el tiempo en riesgo), en lugar de la constante por estrato. Con ella, ``estratos`` no se
+  usa y ``intensidad_por_hora_en_riesgo`` queda vacío;
+- ``en_riesgo``: las celdas en riesgo, para ajustar esa intensidad sobre el mismo tiempo que usa la prueba.
 """
 
 from __future__ import annotations
@@ -39,6 +49,7 @@ ALFA = 0.05
 class Reescalado:
     z: np.ndarray
     intensidad_por_hora_en_riesgo: dict[str, float]
+    en_riesgo: np.ndarray | None = None
 
 
 def _posiciones(rejilla: pd.DatetimeIndex, tiempos) -> np.ndarray:
@@ -55,39 +66,70 @@ def _codigos(estratos) -> tuple[np.ndarray, tuple[str, ...]]:
     return np.array([idx[e] for e in etiquetas], dtype=int), nombres
 
 
+def celdas_en_riesgo(validos: np.ndarray, ini: np.ndarray, fin: np.ndarray, celdas_muertas: int) -> np.ndarray:
+    """Celdas válidas fuera de (inicio, fin + IET] de todas las tormentas (posiciones en la rejilla)."""
+    n = len(validos)
+    delta = np.zeros(n + 1, dtype=np.int64)
+    np.add.at(delta, np.minimum(ini + 1, n), 1)
+    np.add.at(delta, np.minimum(fin + 1 + celdas_muertas, n), -1)
+    return validos & (np.cumsum(delta[:-1]) == 0)
+
+
 def _reescalar(
     validos: np.ndarray,
-    codigo: np.ndarray,
+    codigo: np.ndarray | None,
     nombres,
     ini: np.ndarray,
     fin: np.ndarray,
     celdas_muertas: int,
     paso_horas: float,
+    llegadas: np.ndarray | None = None,
+    intensidad: np.ndarray | None = None,
 ) -> Reescalado:
-    n = len(validos)
-    delta = np.zeros(n + 1, dtype=np.int64)
-    np.add.at(delta, np.minimum(ini + 1, n), 1)
-    np.add.at(delta, np.minimum(fin + 1 + celdas_muertas, n), -1)
-    en_riesgo = validos & (np.cumsum(delta[:-1]) == 0)
-    k = len(nombres)
-    horas = paso_horas * np.bincount(codigo[en_riesgo], minlength=k)
-    cuentas = np.bincount(codigo[ini], minlength=k)
-    inten = np.divide(cuentas, horas, out=np.full(k, np.nan), where=horas > 0)
-    lam = np.nan_to_num(inten)[codigo]
+    en_riesgo = celdas_en_riesgo(validos, ini, fin, celdas_muertas)
+    lleg = ini if llegadas is None else llegadas
+    if intensidad is None:
+        k = len(nombres)
+        horas = paso_horas * np.bincount(codigo[en_riesgo], minlength=k)
+        cuentas = np.bincount(codigo[lleg], minlength=k)
+        inten = np.divide(cuentas, horas, out=np.full(k, np.nan), where=horas > 0)
+        lam = np.nan_to_num(inten)[codigo]
+        por_estrato = {s: float(inten[i]) for i, s in enumerate(nombres)}
+    else:
+        lam, por_estrato = intensidad, {}
     acum = np.cumsum(np.where(en_riesgo, lam * paso_horas, 0.0))
-    return Reescalado(np.diff(acum[ini]), {s: float(inten[i]) for i, s in enumerate(nombres)})
+    return Reescalado(np.diff(acum[lleg]), por_estrato, en_riesgo)
 
 
 def intervalos_reescalados(
-    rejilla, validos, inicios, fines, estratos, iet_horas: float, paso_horas: float = 3.0
+    rejilla,
+    validos,
+    inicios,
+    fines,
+    estratos,
+    iet_horas: float,
+    paso_horas: float = 3.0,
+    llegadas=None,
+    intensidad=None,
 ) -> Reescalado:
-    """Intervalos reescalados entre inicios. ``inicios``/``fines`` = ``t_inicio``/``t_fin`` del declustering;
-    ``estratos`` = etiqueta de cada celda de la rejilla."""
+    """Intervalos reescalados entre llegadas. ``inicios``/``fines`` = ``t_inicio``/``t_fin`` de **todas** las
+    tormentas (dan el tiempo muerto); ``llegadas`` = los inicios que cuentan como eventos (por omisión, todos);
+    ``estratos`` = etiqueta de cada celda de la rejilla, o ``intensidad`` = eventos por hora en cada celda."""
     rejilla = pd.DatetimeIndex(rejilla)
     validos = np.asarray(validos, dtype=bool)
-    codigo, nombres = _codigos(estratos)
-    if codigo.size != len(rejilla) or validos.size != len(rejilla):
-        raise ValueError("validos y estratos deben tener una entrada por celda de la rejilla")
+    if intensidad is None:
+        codigo, nombres = _codigos(estratos)
+        if codigo.size != len(rejilla):
+            raise ValueError("estratos debe tener una entrada por celda de la rejilla")
+    else:
+        codigo, nombres = None, ()
+        intensidad = np.asarray(intensidad, dtype=float)
+        if intensidad.size != len(rejilla):
+            raise ValueError("intensidad debe tener una entrada por celda de la rejilla")
+        if np.any(~np.isfinite(intensidad[validos])) or np.any(intensidad[validos] < 0):
+            raise ValueError("La intensidad debe ser finita y no negativa en las celdas válidas")
+    if validos.size != len(rejilla):
+        raise ValueError("validos debe tener una entrada por celda de la rejilla")
     ini, fin = _posiciones(rejilla, inicios), _posiciones(rejilla, fines)
     if ini.size != fin.size or np.any(fin < ini):
         raise ValueError("Cada tormenta necesita inicio ≤ fin")
@@ -100,7 +142,14 @@ def intervalos_reescalados(
         raise ValueError(
             "Una tormenta empieza dentro de fin + IET de la anterior: el declustering no es coherente con el IET"
         )
-    return _reescalar(validos, codigo, nombres, ini, fin, muertas, paso_horas)
+    lleg = None
+    if llegadas is not None:
+        lleg = _posiciones(rejilla, llegadas)
+        if np.any(np.diff(lleg) <= 0):
+            raise ValueError("Las llegadas deben estar ordenadas y sin repetir")
+        if not np.isin(lleg, ini).all():
+            raise ValueError("Cada llegada debe ser el inicio de una de las tormentas")
+    return _reescalar(validos, codigo, nombres, ini, fin, muertas, paso_horas, lleg, intensidad)
 
 
 def estadistico_ks(z) -> float:

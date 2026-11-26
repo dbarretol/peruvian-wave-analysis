@@ -132,6 +132,59 @@ def test_reescalado_proceso_puntual_exacto():
     np.testing.assert_allclose(r.z, [12 * inten, 15 * inten])
 
 
+def test_reescalado_llegadas_iguales_a_las_tormentas_reproduce_lo_anterior():
+    rng = np.random.default_rng(4)
+    rejilla = pd.date_range("2000-01-01", periods=8 * 365 * 3, freq="3h")
+    validos = rng.random(rejilla.size) > 0.01
+    estr = np.where(rejilla.month <= 6, "s1", "s2")
+    ini, fin = reescalado.simular_nula(
+        validos, (estr == "s2").astype(int), np.array([0.01, 0.004]), [np.array([0, 2, 4])] * 2, 4, 3.0, rng
+    )
+    a = reescalado.intervalos_reescalados(rejilla, validos, rejilla[ini], rejilla[fin], estr, 12.0)
+    b = reescalado.intervalos_reescalados(rejilla, validos, rejilla[ini], rejilla[fin], estr, 12.0,
+                                          llegadas=rejilla[ini])  # fmt: skip
+    np.testing.assert_array_equal(a.z, b.z)
+    assert a.intensidad_por_hora_en_riesgo == b.intensidad_por_hora_en_riesgo
+    # intensidad por celda igual a la constante por estrato → mismos intervalos
+    celda = np.array([a.intensidad_por_hora_en_riesgo[e] for e in estr])
+    c = reescalado.intervalos_reescalados(rejilla, validos, rejilla[ini], rejilla[fin], None, 12.0, intensidad=celda)
+    np.testing.assert_allclose(c.z, a.z, rtol=1e-12)
+    assert c.intensidad_por_hora_en_riesgo == {}
+    np.testing.assert_array_equal(c.en_riesgo, a.en_riesgo)
+
+
+def test_reescalado_llegadas_subconjunto_con_tiempo_muerto_de_todas():
+    rejilla = pd.date_range("2000-01-01", periods=30, freq="3h")
+    validos = np.ones(30, bool)
+    ini, fin = rejilla[[2, 9, 20]], rejilla[[3, 10, 21]]  # tres tormentas de 2 celdas; IET 6 h = 2 celdas muertas
+    r = reescalado.intervalos_reescalados(rejilla, validos, ini, fin, ["x"] * 30, 6.0, llegadas=rejilla[[2, 20]])
+    # en riesgo: 30 celdas menos 3 tormentas × (1 + 2) celdas muertas = 21; 2 llegadas → λ = 2 / (21·3 h)
+    lam = 2 / 63
+    assert r.intensidad_por_hora_en_riesgo["x"] == pytest.approx(lam)
+    assert int(r.en_riesgo.sum()) == 21
+    # entre las celdas 2 y 20 hay 18 celdas; fuera de riesgo: 3 (tras la 1.ª), 3 (la 2.ª, que no es llegada)
+    np.testing.assert_allclose(r.z, [(18 - 6) * 3 * lam])
+
+
+def test_reescalado_llegada_que_no_es_tormenta_es_error():
+    rejilla = pd.date_range("2000-01-01", periods=30, freq="3h")
+    with pytest.raises(ValueError, match="llegada"):
+        reescalado.intervalos_reescalados(rejilla, np.ones(30, bool), rejilla[[2, 20]], rejilla[[3, 21]], ["x"] * 30,
+                                          6.0, llegadas=rejilla[[5]])  # fmt: skip
+
+
+def test_reescalado_intensidad_por_celda_armonica():
+    rejilla = pd.date_range("2000-01-01", periods=40, freq="3h")
+    inten = 0.01 * (1.5 + np.sin(np.arange(40) / 5))
+    ini = rejilla[[3, 15, 30]]
+    r = reescalado.intervalos_reescalados(rejilla, np.ones(40, bool), ini, ini, None, 6.0, intensidad=inten)
+    riesgo = r.en_riesgo
+    esperado = [3.0 * inten[4:16][riesgo[4:16]].sum(), 3.0 * inten[16:31][riesgo[16:31]].sum()]
+    np.testing.assert_allclose(r.z, esperado)
+    with pytest.raises(ValueError, match="finita"):
+        reescalado.intervalos_reescalados(rejilla, np.ones(40, bool), ini, ini, None, 6.0, intensidad=-inten)
+
+
 def test_reescalado_tiempo_muerto_incoherente():
     rejilla = pd.date_range("2000-01-01", periods=20, freq="3h")
     with pytest.raises(ValueError, match="IET"):
